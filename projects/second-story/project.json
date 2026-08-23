@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "id": "second-story",
+  "name": "第二个故事",
+  "gameKey": "generative-mygo.second-story",
+  "titleImage": "角色生活地点/mygo/爱音家门口（白天有车）.jpg",
+  "titleBgm": "s_Title.mp3",
+  "gameLogo": "WebGAL_MyGO_Enter.webp",
+  "defaultLanguage": "zh_CN",
+  "textSpeed": 80,
+  "migrateTextSpeedAtOrBelow": 50,
+  "playerSettingsVersion": 1
+}

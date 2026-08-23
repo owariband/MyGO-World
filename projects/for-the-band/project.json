@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "id": "for-the-band",
+  "name": "【爱素】为了乐队就让让直女吧～长崎大小姐防线崩溃中～",
+  "gameKey": "generative-mygo.for-the-band",
+  "titleImage": "角色生活地点/mygo/爱音家门口（白天有车）.jpg",
+  "titleBgm": "s_Title.mp3",
+  "gameLogo": "WebGAL_MyGO_Enter.webp",
+  "defaultLanguage": "zh_CN",
+  "textSpeed": 58,
+  "migrateTextSpeedAtOrBelow": 100,
+  "playerSettingsVersion": 2
+}

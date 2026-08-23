@@ -1,0 +1,13 @@
+Game_name:雨声之后;
+Game_key:generative-mygo.rain-after;
+Title_img:角色生活地点/mygo/爱音家门口（白天有车）.jpg;
+Title_bgm:s_Title.mp3;
+Game_Logo:WebGAL_MyGO_Enter.webp;
+Default_Language:zh_CN;
+Show_panic:true;
+Enable_Appreciation:true;
+Legacy_Expression_Blend_Mode:true;
+Positioning_Type:M_3_1_0;
+Stage_Width:2560;
+Stage_Height:1440;
+Auto_Rotate:true;

@@ -1,0 +1,127 @@
+@font-face {
+  font-family: "JiangChengYuanTi";
+  src: url("/assets/JiangChengYuanTi_500W-8e7cc128.ttf") format("truetype");
+  font-display: swap;
+}
+
+#dynamic-render-host {
+  --paper: #f4edf6;
+  --muted: #b8aebe;
+  --blush: #e7a8c2;
+  --ready: #8dbad3;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  color: var(--paper);
+  font-family: "JiangChengYuanTi", sans-serif;
+}
+
+#dynamic-render-host .dynamic-blackout {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 220ms ease;
+}
+
+#dynamic-render-host[data-mode="playing"] .dynamic-blackout {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#dynamic-render-host .dynamic-timeline {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  width: min(1120px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 14px 16px 12px;
+  border: 1px solid rgba(244, 237, 246, 0.14);
+  background: linear-gradient(100deg, rgba(20, 16, 25, 0.92), rgba(34, 25, 39, 0.86));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.36);
+  pointer-events: auto;
+  backdrop-filter: blur(16px);
+}
+
+#dynamic-render-host .dynamic-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+#dynamic-render-host .dynamic-kicker {
+  color: var(--blush);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+#dynamic-render-host .dynamic-status,
+#dynamic-render-host .dynamic-location {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#dynamic-render-host .dynamic-events {
+  display: grid;
+  gap: 7px;
+}
+
+#dynamic-render-host .dynamic-event {
+  display: grid;
+  grid-template-columns: minmax(165px, 0.9fr) minmax(0, 2.6fr);
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+#dynamic-render-host .dynamic-event:hover { background: rgba(244, 237, 246, 0.055); }
+#dynamic-render-host .dynamic-event:focus-visible { outline: 2px solid var(--ready); outline-offset: 2px; }
+#dynamic-render-host .dynamic-event[aria-pressed="true"] { border-left-color: var(--blush); background: rgba(231, 168, 194, 0.075); }
+#dynamic-render-host .dynamic-event-name { display: block; font-size: 15px; line-height: 1.15; }
+#dynamic-render-host .dynamic-location { display: block; margin-top: 3px; }
+
+#dynamic-render-host .dynamic-segments {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+#dynamic-render-host .dynamic-segment {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 14px;
+  height: 9px;
+  background: rgba(244, 237, 246, 0.12);
+  overflow: hidden;
+}
+
+#dynamic-render-host .dynamic-segment::after { content: ""; position: absolute; inset: 0; transform-origin: left; }
+#dynamic-render-host .dynamic-segment[data-status="ready"]::after { background: var(--ready); opacity: 0.58; }
+#dynamic-render-host .dynamic-segment[data-status="loading"]::after { background: #8d73a4; animation: dynamic-pulse 1s ease-in-out infinite; }
+#dynamic-render-host .dynamic-segment[data-status="playing"]::after { background: var(--blush); }
+#dynamic-render-host .dynamic-segment[data-status="played"]::after { background: rgba(244, 237, 246, 0.46); }
+
+@keyframes dynamic-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+@media (max-width: 720px) {
+  #dynamic-render-host .dynamic-timeline { top: 8px; width: calc(100vw - 16px); padding: 11px 10px; }
+  #dynamic-render-host .dynamic-event { grid-template-columns: 118px minmax(0, 1fr); gap: 8px; }
+  #dynamic-render-host .dynamic-event-name { font-size: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dynamic-render-host .dynamic-blackout { transition: none; }
+  #dynamic-render-host .dynamic-segment::after { animation: none !important; }
+}
