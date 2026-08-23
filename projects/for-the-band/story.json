@@ -1,0 +1,1675 @@
+{
+  "formatVersion": 1,
+  "title": "【爱素】为了乐队就让让直女吧～长崎大小姐防线崩溃中～",
+  "subtitle": "被亲两下就亲两下吧，为了乐队让让直女又怎么了。· 全四章",
+  "entryScene": "chapter_one_rehearsal",
+  "characters": [
+    {
+      "id": "anon",
+      "name": "爱音",
+      "figure": "anon/casual-2023/model.json"
+    },
+    {
+      "id": "soyo",
+      "name": "素世",
+      "figure": "soyo/casual-2023/model.json"
+    },
+    {
+      "id": "taki",
+      "name": "立希",
+      "figure": "taki/casual-2023/model.json"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "chapter_one_rehearsal",
+      "title": "不会放弃微笑",
+      "beats": [
+        {
+          "id": "chapter_one",
+          "type": "chapter",
+          "title": "第一章",
+          "subtitle": "长崎素世最近假笑的次数变多了"
+        },
+        {
+          "id": "chapter_one_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/rehearsal.mp3",
+          "volume": 28,
+          "fadeMs": 1400
+        },
+        {
+          "id": "rehearsal_background",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG排练室.png"
+        },
+        {
+          "id": "opening_narration",
+          "type": "narration",
+          "text": "最近长崎素世假笑的次数变多了。"
+        },
+        {
+          "id": "author_note_one",
+          "type": "narration",
+          "text": "这是一篇没什么意义的、迫害长崎女士的缺德文。"
+        },
+        {
+          "id": "author_note_two",
+          "type": "narration",
+          "text": "文中有浅浅提到素祥前女友关系。"
+        },
+        {
+          "id": "smile_social_function",
+          "type": "narration",
+          "text": "在大小姐们的社交生活里，笑容具有不可替代的作用。微笑可以传递友善的信号，降低人的戒备心；在不得不发生冲突的情况下，让对话朝着对自己有利的方向发展。"
+        },
+        {
+          "id": "smile_armor",
+          "type": "narration",
+          "text": "它也是长崎素世最好的保护色，即便在受挫的时候，也没有人可以看出她的狼狈和崩溃。"
+        },
+        {
+          "id": "smile_medal",
+          "type": "narration",
+          "text": "微笑是她大小姐的骄傲，也是她在团队内绝对权力中心的勋章。"
+        },
+        {
+          "id": "soyo_enters",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/idle01",
+          "expression": "soyo/smile01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "soyo_mask",
+          "type": "narration",
+          "text": "在长崎家被抚养成人，又在月之森这样的环境里接受教育，长崎女士知道不论发生什么事情，都用温和而坚定的方式表达自己的立场。哪怕面对冲突，也要以微笑掩饰锋芒，巧妙地化解尴尬局面，而非直接对抗。"
+        },
+        {
+          "id": "never_abandon_smile",
+          "type": "narration",
+          "text": "不论什么时候，都不可以放弃微笑哦！"
+        },
+        {
+          "id": "saki_aftermath",
+          "type": "narration",
+          "text": "自从在和丰川祥子的纯爱追逐战中惨败之后，长崎素世痛定思痛，决定变得更加勇敢和坚强。从今往后，再也没有什么可以击穿她的假面。"
+        },
+        {
+          "id": "mygo_challenges",
+          "type": "narration",
+          "text": "当然，长崎素世的阅历尚浅，她高尚品行的修行仍然面临诸多挑战。和同乐队的成员相处，就是对于长崎素世的一次试炼。"
+        },
+        {
+          "id": "minor_band_problem",
+          "type": "narration",
+          "text": "显然，MyGO 并不属于一个成年人的世界。因此和她们谈论乐队应有的仪态是很难的。不管说几次都不懂得守时的猫就不提了。"
+        },
+        {
+          "id": "tomori_cant_speak",
+          "type": "narration",
+          "text": "不论多少次私下和高松灯喝茶，和颜悦色地询问“宝宝你有什么心理障碍告诉姐姐好不好”，高松灯都是红着眼睛抠手指，一句话都说不出来。"
+        },
+        {
+          "id": "tomori_stage_ok",
+          "type": "narration",
+          "text": "好在这孩子上了舞台的表现还没有差到让人崩溃的地步，不然长崎素世会控制不住产生在高松家门口贴关于阿斯伯格症传单的冲动。"
+        },
+        {
+          "id": "taki_control",
+          "type": "narration",
+          "text": "而椎名立希则对她的行为表现出明显的厌恶。如果和高松灯单独约会的情况被她抓到，她就会没有眼色地冲过来：“你是不是控制狂？”"
+        },
+        {
+          "id": "soyo_dismisses_taki",
+          "type": "narration",
+          "text": "长崎素世觉得立希这种粗鄙之人不值得她的假笑，只需要用智商碾压让她无话可说就好了。"
+        },
+        {
+          "id": "taki_enters",
+          "type": "show",
+          "character": "taki",
+          "position": "center",
+          "motion": "taki/idle01",
+          "expression": "taki/serious01",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "soyo_defends",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "乐队的组成不仅仅需要练习，有时候心理方面的疏导也很重要。"
+        },
+        {
+          "id": "soyo_analyzes_taki",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "此刻灯所经历的一切你能理解吗？她显然因为过去不好的经历，产生了一些类似强迫性人格障碍的反应，所以每次上台的时候，她都会被激活类似的……"
+        },
+        {
+          "id": "taki_pushes",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "我觉得你的贝斯最需要练习。"
+        },
+        {
+          "id": "anon_enters",
+          "type": "show",
+          "character": "anon",
+          "position": "left",
+          "motion": "anon/idle01",
+          "expression": "anon/smile02",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "anon_first_analysis",
+          "type": "narration",
+          "text": "这些都还是小事。最让长崎素世崩溃的，还是那个叫千早爱音的小女孩。善于点兵用人的素世，早在第一天就分析过邀请千早爱音的利与弊。"
+        },
+        {
+          "id": "anon_value",
+          "type": "narration",
+          "text": "固然千早爱音的吉他技术不及预期，但这也恰到好处地保证她的存在不会过于喧宾夺主。此外，她的行为动机极为简单，只需要掌握住这个孩子爱出风头的心理，就可以简单地为自己所用。这也是保证 CRYCHIC 重组的重要一环。"
+        },
+        {
+          "id": "anon_wont_hurt",
+          "type": "narration",
+          "text": "另外，这孩子看起来没那么认真。即使发现自己被骗了，大概也不会伤心很久。"
+        },
+        {
+          "id": "plan_collapsed",
+          "type": "narration",
+          "text": "这个计划初期的确如同预期，但重组计划在丰川祥子处受挫之后，问题突然成指数级增长。"
+        },
+        {
+          "id": "forced_band",
+          "type": "narration",
+          "text": "首先，她没有以 MyGO 乐队能长期运作为前提考虑过成员的组成。说到底，现在她会在这里弹贝斯，也是自己阴差阳错被爱音一把拉到台上的结果。"
+        },
+        {
+          "id": "public_image_calculation",
+          "type": "narration",
+          "text": "根据素女士的精打细算，虽然玩这个过家家乐队不会对她的公众形象有什么提升，也不像祥子可以给她一辈子的承诺，但她暂时还没有特别想离开这个乐队的理由。"
+        },
+        {
+          "id": "anon_guitar_problem",
+          "type": "narration",
+          "text": "更重要的是。最重要的是！"
+        },
+        {
+          "id": "guitar_too_bad",
+          "type": "narration",
+          "text": "千早爱音的吉他……也弹得太差了吧！"
+        },
+        {
+          "id": "valentine_live_coming",
+          "type": "narration",
+          "text": "情人节的 Live 马上就要来了。作为职业幼教，长崎素世甚至产生了“这孩子是不是能哄不能骂”的错觉。"
+        },
+        {
+          "id": "discipline_endurance",
+          "type": "narration",
+          "text": "动心忍性必能成大业。长崎素世听完爱音演奏的 G 和弦分解，看着她一脸期待等待表扬的大眼睛，整理了一下差点没绷住的嘴角。"
+        },
+        {
+          "id": "anon_intervenes",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "这样吧，我去你家陪你练。两个人一起比较开心吧？"
+        },
+        {
+          "id": "soyo_agrees",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "真的吗～素世你真的是个大好人诶！",
+          "motion": "anon/smile03",
+          "expression": "anon/smile03"
+        },
+        {
+          "id": "chapter_one_close",
+          "type": "narration",
+          "text": "爱音露出单纯的笑容。素世却忽然觉得，自己的假笑快要维持不住了。"
+        },
+        {
+          "id": "to_sleepover",
+          "type": "jump",
+          "target": "chapter_two_sleepover"
+        }
+      ]
+    },
+    {
+      "id": "chapter_two_sleepover",
+      "title": "爱音家的夜晚",
+      "beats": [
+        {
+          "id": "chapter_two",
+          "type": "chapter",
+          "title": "第二章",
+          "subtitle": "普通家庭、化妆练习与情人节"
+        },
+        {
+          "id": "chapter_two_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/home.mp3",
+          "volume": 26,
+          "fadeMs": 1600
+        },
+        {
+          "id": "anon_room_evening",
+          "type": "background",
+          "asset": "角色生活地点/mygo/爱音的房间（晚上）.png"
+        },
+        {
+          "id": "hide_taki",
+          "type": "hide",
+          "position": "center"
+        },
+        {
+          "id": "soyo_right_home",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/idle01",
+          "expression": "soyo/default",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "anon_left_home",
+          "type": "show",
+          "character": "anon",
+          "position": "left",
+          "motion": "anon/idle01",
+          "expression": "anon/smile01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "family_welcome",
+          "type": "narration",
+          "text": "千早家和素世想象中一样，是个普通的小中产民宅。父母也是很和善的社会人。"
+        },
+        {
+          "id": "family_interview",
+          "type": "narration",
+          "text": "叔叔阿姨第一次见月之森的学生，反应简直和当年的爱音一模一样，拉着素世就是一顿采访。"
+        },
+        {
+          "id": "family_questions",
+          "type": "narration",
+          "text": "“你是大小姐吗？你们平时说贵安吗？还穿这种大小姐的制服？”"
+        },
+        {
+          "id": "soyo_answers_family",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "嗯，平时会和同学们去喝下午茶什么的。"
+        },
+        {
+          "id": "family_invites_stay",
+          "type": "narration",
+          "text": "第一次有人这样捧素世的场，她忍不住多回两句。父母意识到练习需要时间，邀请素世在家里留宿。"
+        },
+        {
+          "id": "idle_chat",
+          "type": "narration",
+          "text": "她也意识到无意义的闲聊耽误了很长时间，于是爱音的父母同意让素世在家里留宿。"
+        },
+        {
+          "id": "soyo_housework",
+          "type": "narration",
+          "text": "平时爱音一定就是因为总是这样在和气融融的安乐乡里待得太久，才会变得一事无成。不像自己，每天做完家务就开始练习。总是这样，认真的只有自己。"
+        },
+        {
+          "id": "makeup_items",
+          "type": "narration",
+          "text": "爱音洗完澡，一边整理从妈妈那里拿到的小企鹅睡衣，一边皱着眉看着刷油管的爱音。"
+        },
+        {
+          "id": "soyo_realizes",
+          "type": "narration",
+          "text": "素世忽然意识到，这里没有人要求她一直得体。认真维持形象的人，好像只剩她自己。"
+        },
+        {
+          "id": "anon_makeup",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "看再多美妆博主你的妆面也不会变好的！我们演出的时候可以画这种妆吗？"
+        },
+        {
+          "id": "soyo_refuses",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "诶～Soyorin，但是她们画得很酷啊！我们可以出门的时候画这种啊！",
+          "motion": "anon/smile02",
+          "expression": "anon/smile02"
+        },
+        {
+          "id": "anon_refuses_makeup",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "哈？我才不要和你一起化妆！！",
+          "motion": "soyo/angry02",
+          "expression": "soyo/angry02"
+        },
+        {
+          "id": "soyo_dior",
+          "type": "narration",
+          "text": "月之森的大小姐怎么可能用这种开架化妆品化妆！别脏了我用 Dior 打过底的脸。"
+        },
+        {
+          "id": "soyo_refuses_zombie",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "最近 Ave Mujica 的僵尸妆在网上爆红诶！我们两个也来拍肯定会火的。",
+          "motion": "anon/kandou01",
+          "expression": "anon/smile01"
+        },
+        {
+          "id": "anon_teases",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "我们又不是偶像。"
+        },
+        {
+          "id": "soyo_flat",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "所以说，我们为什么不开通油管频道嘛。"
+        },
+        {
+          "id": "anon_channel",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "要做你做。"
+        },
+        {
+          "id": "soyo_condition",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "好吧，那约好了，到时候要和我一起出万圣节 Cos 哦。"
+        },
+        {
+          "id": "soyo_halloween_far",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "万圣节还有八个月啊？！"
+        },
+        {
+          "id": "anon_monthly_plans",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "一二三四五六七月的企划我都想好了啊！一月是新年祈愿，二月是情人节互赠巧克力，三月……"
+        },
+        {
+          "id": "soyo_practice_guitar",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "你平时回家就想这些事情？有这时间还不如练吉他去。"
+        },
+        {
+          "id": "soyo_interrupts",
+          "type": "narration",
+          "text": "素世从来没想过自己还有打断别人说话的一天。但她要是这样忍下去，爱音不知道还要一个人说多久。"
+        },
+        {
+          "id": "toothbrush_interrupts",
+          "type": "narration",
+          "text": "爱音哀嚎了一声说“我累了嘛”，呜呜地翻到床对面去了。素世突然想起爱音睡前还没刷牙，问她：情人节呢？"
+        },
+        {
+          "id": "anon_what",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "怎么了？"
+        },
+        {
+          "id": "valentine_prompt",
+          "type": "narration",
+          "text": "素世沉默片刻。爱音突然想起了一个近得多的日子。"
+        },
+        {
+          "id": "anon_valentine",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "你以前都会过情人节的吗？"
+        },
+        {
+          "id": "soyo_obligation",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "对啊，会做巧克力给大家。那你想怎样？先说好，我们只是普通的乐队队友关系。"
+        },
+        {
+          "id": "anon_specific",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "诶——但是我想吃 Soyorin 做的巧克力嘛。"
+        },
+        {
+          "id": "soyo_shocked",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "我怎么可能会做这种东西？！",
+          "motion": "soyo/surprised01",
+          "expression": "soyo/surprised01"
+        },
+        {
+          "id": "anon_yuri",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "可是 Soyorin 明明超会做饭的啊。Soyorin 给我做，我也会给 Soyorin 做的。怎么样？"
+        },
+        {
+          "id": "anon_hhw_video",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "你看这个啊！去年 HHW 的情人节特别视频！你看这个薰超级帅的啊！"
+        },
+        {
+          "id": "soyo_type_question",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "……你喜欢那种的啊。"
+        },
+        {
+          "id": "anon_cool_girls",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyo 不喜欢帅气的女生吗？"
+        },
+        {
+          "id": "soyo_not_interested",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "我对女生和女生谈恋爱的这种东西不感兴趣。"
+        },
+        {
+          "id": "soyo_sigh",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "你只是喜欢女生、帅气的男朋友而已啊。",
+          "motion": "soyo/thinking01",
+          "expression": "soyo/thinking02"
+        },
+        {
+          "id": "anon_yuri_real",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "我喜欢百合啊！我还会看《安达与岛村》啊！"
+        },
+        {
+          "id": "anime_version",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "动画版？"
+        },
+        {
+          "id": "anime_version_answer",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "动画版。"
+        },
+        {
+          "id": "anon_special",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "我想成为素世的特别。"
+        },
+        {
+          "id": "soyo_boundary",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "臭小孩，你是不是玩那种乙女游戏玩多了？"
+        },
+        {
+          "id": "same_age",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "我们明明同岁啊，Soyorin！"
+        },
+        {
+          "id": "soyo_not_childish",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "我就没有你那么幼稚，每天爱来爱去的。"
+        },
+        {
+          "id": "anon_asks_hug",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "那我不玩笑。可以抱你一下吗？"
+        },
+        {
+          "id": "soyo_allows",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "……一下。",
+          "motion": "soyo/shame01",
+          "expression": "soyo/shame01"
+        },
+        {
+          "id": "consensual_hug",
+          "type": "narration",
+          "text": "爱音认真地等到素世点头，才轻轻抱住她。素世一开始全身僵硬，最后却没有推开。"
+        },
+        {
+          "id": "anon_cute",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyo，原来你紧张的时候也这么可爱。"
+        },
+        {
+          "id": "soyo_no_more",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "这句话以后不许说。还有，今天完全没有练琴吧。",
+          "motion": "soyo/angry02",
+          "expression": "soyo/angry02"
+        },
+        {
+          "id": "to_nightmare",
+          "type": "jump",
+          "target": "chapter_three_nightmare"
+        }
+      ]
+    },
+    {
+      "id": "chapter_three_nightmare",
+      "title": "巧克力长着爱音的脸",
+      "beats": [
+        {
+          "id": "chapter_three",
+          "type": "chapter",
+          "title": "第三章",
+          "subtitle": "梦、烦躁与跟踪爱音的一天"
+        },
+        {
+          "id": "chapter_three_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/night.mp3",
+          "volume": 24,
+          "fadeMs": 1800
+        },
+        {
+          "id": "soyo_room_night",
+          "type": "background",
+          "asset": "角色生活地点/mygo/素世的房间（晚上开灯）.jpg"
+        },
+        {
+          "id": "hide_anon_night",
+          "type": "hide",
+          "position": "left"
+        },
+        {
+          "id": "soyo_center_night",
+          "type": "show",
+          "character": "soyo",
+          "position": "center",
+          "motion": "soyo/sad01",
+          "expression": "soyo/sad01",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "nightmare",
+          "type": "narration",
+          "text": "在爱音家的那一晚睡得很好。回家之后，素世又开始失眠。这一次不但梦到爱音在舞台上放礼炮、灯在舞台上爆哭，还开始梦到巧克力都长着爱音的脸。"
+        },
+        {
+          "id": "soyo_annoyed",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "一切都是因为上学之前，爱音在床上起不来，嘟嘟囔囔说了一句：情人节想要素世的巧克力。"
+        },
+        {
+          "id": "sleepy_anon_cute",
+          "type": "narration",
+          "text": "固然爱音没睡醒时又蹭又抱的样子很可爱，但这番轻佻的言语实在让素世不爽。"
+        },
+        {
+          "id": "dream_humiliation",
+          "type": "narration",
+          "text": "更让她感到屈辱的是，自己竟然会因为这迷迷糊糊的梦话扰乱心神。"
+        },
+        {
+          "id": "anon_popular",
+          "type": "narration",
+          "text": "爱音这种受欢迎的女孩，每年当然都会收到很多巧克力。她的行为和思考仿佛就是为了在这种时刻收到一些无意义的吹捧而存在。"
+        },
+        {
+          "id": "soyo_jealous",
+          "type": "narration",
+          "text": "素世叹了一口气，又觉得有点嫉妒。"
+        },
+        {
+          "id": "soyo_denial",
+          "type": "narration",
+          "text": "素世觉得有点无聊。越告诉自己那只是爱音无意义的碎碎念，就越无法忽略。"
+        },
+        {
+          "id": "to_rehearsal_again",
+          "type": "jump",
+          "target": "chapter_three_rehearsal"
+        }
+      ]
+    },
+    {
+      "id": "chapter_three_rehearsal",
+      "title": "缺席的爱音",
+      "beats": [
+        {
+          "id": "rehearsal_again_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG排练室.png"
+        },
+        {
+          "id": "soyo_right_again",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/idle01",
+          "expression": "soyo/thinking01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "taki_left_again",
+          "type": "show",
+          "character": "taki",
+          "position": "left",
+          "motion": "taki/idle01",
+          "expression": "taki/serious01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "anon_missing",
+          "type": "narration",
+          "text": "排练的一天，就是见到千早爱音的一天。素世心烦意乱。偏偏除了爱音之外的成员都不知道去了哪里。"
+        },
+        {
+          "id": "anon_phone_close",
+          "type": "narration",
+          "text": "爱音在旁边收拾好吉他就玩起手机，看到好玩的就凑在素世肩膀上套近乎。"
+        },
+        {
+          "id": "soyo_distance",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "你靠太近我会很热。"
+        },
+        {
+          "id": "anon_air_conditioner",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "那台上有空调是不是就可以？"
+        },
+        {
+          "id": "soyo_no",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "不可以。"
+        },
+        {
+          "id": "anon_offscreen",
+          "type": "narration",
+          "text": "爱音鼓起腮帮抗议，然后乖乖坐到旁边。素世手上玩着手机，侧过一只耳朵偷听爱音和妈妈打视频电话。"
+        },
+        {
+          "id": "mother_calls",
+          "type": "narration",
+          "text": "妈妈问她，有什么事情不能回家说。又说情人节还有一个月，今天在超市看到好多巧克力已经摆上货架。"
+        },
+        {
+          "id": "mother_asks_person",
+          "type": "narration",
+          "text": "“你今年有没有想送的人？”"
+        },
+        {
+          "id": "anon_special_person",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "妈妈，今年我有特别想送的人。"
+        },
+        {
+          "id": "mother_guesses",
+          "type": "narration",
+          "text": "“是谁啊？是你上次告诉我的那个人吗？”"
+        },
+        {
+          "id": "anon_wont_tell",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "不告诉你！"
+        },
+        {
+          "id": "special_person",
+          "type": "narration",
+          "text": "长崎素世紧紧地握住了自己的手机。"
+        },
+        {
+          "id": "next_day_missing",
+          "type": "narration",
+          "text": "没有排练的一天，就是见不到千早爱音的一天。长崎素世心烦意乱。最后她选择遵从内心，潜伏在羽丘女子学园门口等爱音出校门。"
+        },
+        {
+          "id": "to_school_gate",
+          "type": "jump",
+          "target": "chapter_three_school_gate"
+        }
+      ]
+    },
+    {
+      "id": "chapter_three_school_gate",
+      "title": "来自综艺部的委托",
+      "beats": [
+        {
+          "id": "school_gate_bg",
+          "type": "background",
+          "asset": "学校、工作/羽丘/羽丘校门（白天1）.png"
+        },
+        {
+          "id": "hide_taki_gate",
+          "type": "hide",
+          "position": "left"
+        },
+        {
+          "id": "soyo_center_gate",
+          "type": "show",
+          "character": "soyo",
+          "position": "center",
+          "motion": "soyo/idle01",
+          "expression": "soyo/serious01",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "fan_approaches",
+          "type": "narration",
+          "text": "等爱音和三两个班上的朋友走出去之后，素世披上黑色外套跟在人群身后。她把握住其中一人与爱音分别的时机，跟着对方上了地铁。"
+        },
+        {
+          "id": "fan_recognizes",
+          "type": "narration",
+          "text": "“你是爱音的队友？”对方抢先开口，把素世吓了一跳。"
+        },
+        {
+          "id": "fan_explains_disguise",
+          "type": "narration",
+          "text": "对方解释说，素世戴着墨镜、穿着黑色大衣，在学校附近实在显眼；没有被家长目击后报警已经属于万幸。"
+        },
+        {
+          "id": "fan_quotes_anon",
+          "type": "narration",
+          "text": "而且爱音确实说过，队里有一个总喜欢假笑、又不知道在想什么的有点怪的人。"
+        },
+        {
+          "id": "soyo_suspicious",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "所以你打扮成这样，是想做什么？你们乐队又要解散了吗？"
+        },
+        {
+          "id": "fan_denies",
+          "type": "narration",
+          "text": "素世连忙否认，解释说乐队要做情人节企划，所以自己代表 MyGO 成员打听爱音以前怎样过情人节。"
+        },
+        {
+          "id": "fan_says_far",
+          "type": "narration",
+          "text": "对方反问：但是情人节不是还很久以后吗？"
+        },
+        {
+          "id": "soyo_counts_weeks",
+          "type": "narration",
+          "text": "素世掰着手指数：离情人节还有一、二、三、四、五、六周。而且惊喜环节当然不能直接问爱音本人。"
+        },
+        {
+          "id": "voice_processing",
+          "type": "narration",
+          "text": "“我们会给你的声音做处理的。”"
+        },
+        {
+          "id": "fan_transfer",
+          "type": "narration",
+          "text": "对方仍然拒绝：她今年才转学过来，自己其实也不太知道。"
+        },
+        {
+          "id": "soyo_wont_give_up",
+          "type": "narration",
+          "text": "对方表现出很明显的拒绝，长崎素世女士当然也不会善罢甘休。"
+        },
+        {
+          "id": "soyo_asks_targets",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "那在你看来，她身边有没有可能会送巧克力的对象呢？"
+        },
+        {
+          "id": "soyo_refuses_info",
+          "type": "narration",
+          "text": "“这倒是有不少吧。毕竟爱音平时在班上还挺多朋友的，她平时也会送给她们小礼物。”"
+        },
+        {
+          "id": "fan_mentions_friends",
+          "type": "narration",
+          "text": "素世右手摇墨镜，左手掐右手，努力维持假笑。爱音都没有送过她！用过一次色号不对的粉底液不算。"
+        },
+        {
+          "id": "other_gifts_suspicion",
+          "type": "narration",
+          "text": "谁能知道爱音送别人的不是这种东西呢？现在说什么才能阻止对方转头把这件事告诉爱音？"
+        },
+        {
+          "id": "classmate_jealousy",
+          "type": "narration",
+          "text": "爱音平时都和朋友说自己什么？同班同学的关系肯定也比自己更亲密吧？素世甚至产生了往对方鞋底装窃听器的冲动。"
+        },
+        {
+          "id": "soyo_distance_gifts",
+          "type": "narration",
+          "text": "素世不是爱音，不会随便把礼物塞到别人手里。她甚至有意与大家保持距离，极少释放主动的善意。"
+        },
+        {
+          "id": "saki_chocolate_year",
+          "type": "narration",
+          "text": "所以，只有和祥子交往的那一年，她给祥子送过巧克力。"
+        },
+        {
+          "id": "saki_desk",
+          "type": "narration",
+          "text": "祥子的桌上理所当然也留着很多巧克力，但只有素世知道，祥子把它们都扔进了垃圾桶，然后在素世的怀里哭过。"
+        },
+        {
+          "id": "saki_quote",
+          "type": "narration",
+          "text": "祥子对素世说：你我之间有比巧克力更贵重的东西，不需要那种廉价的爱。"
+        },
+        {
+          "id": "soyo_love_accounting",
+          "type": "narration",
+          "text": "素世明白，她的每一份爱对于祥子来说都是珍贵的，直到祥子不需要的那一天为止。"
+        },
+        {
+          "id": "could_not_keep_saki",
+          "type": "narration",
+          "text": "她以为爱可以留住祥子、留住 CRYCHIC。她早该知道不可以。"
+        },
+        {
+          "id": "counting_love",
+          "type": "narration",
+          "text": "素世对自己送出的每一份爱都心中有数。送出多少，得到多少，她都算得很清楚。"
+        },
+        {
+          "id": "exchange_love",
+          "type": "narration",
+          "text": "所以她知道别人需要什么样的爱，也知道要如何换来自己需要的爱。"
+        },
+        {
+          "id": "anon_has_many_loves",
+          "type": "narration",
+          "text": "所以她知道，喜欢爱音是没有意义的。爱音已经拥有很多的爱：廉价的、珍贵的、肤浅的。"
+        },
+        {
+          "id": "anon_never_unloved",
+          "type": "narration",
+          "text": "她是个骄傲又天真的小孩子，根本没有尝过不被人爱的滋味，怎么会理解爱的珍贵。"
+        },
+        {
+          "id": "no_future_belief",
+          "type": "narration",
+          "text": "素世不相信虚无缥缈的未来。她宁可先假定，爱音不会有理解自己心情的那一天。"
+        },
+        {
+          "id": "same_as_sleepover",
+          "type": "narration",
+          "text": "即使在爱音身边，爱音也只会像那天抵足而眠时一样，自说自话、惹自己生气，不以为然地叫自己小猫。"
+        },
+        {
+          "id": "band_romance_bad",
+          "type": "narration",
+          "text": "团内恋爱对搞乐队百害而无一利！姬恋直尤其。"
+        },
+        {
+          "id": "why_like_anon",
+          "type": "narration",
+          "text": "不对，她长崎素世到底喜欢千早爱音哪里？"
+        },
+        {
+          "id": "soyo_conclusion",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "总之，素世不会喜欢上爱音。这件事根本不会开始。"
+        },
+        {
+          "id": "follow_anon",
+          "type": "narration",
+          "text": "显然素世的状态已经差到队伍中的其他人都注意到的程度。立希在两首歌的间隙走过来问：你今天是不是吃错药？"
+        },
+        {
+          "id": "taki_gives_candy",
+          "type": "narration",
+          "text": "立希给她递润喉糖。素世吃完了一整盒，仍在排练厅旁边刷手机，完全没注意到自己在偷偷盯着爱音。"
+        },
+        {
+          "id": "dragging_band",
+          "type": "narration",
+          "text": "素世也意识到，自己正在给乐队拖后腿。她耷拉着脑袋趴在桌子上盯着爱音。"
+        },
+        {
+          "id": "pretend_strangers",
+          "type": "narration",
+          "text": "爱音注意到之后吐了吐舌头，给了她一个“今天我们装不认识！”的表情。"
+        },
+        {
+          "id": "follow_anon_after_rehearsal",
+          "type": "narration",
+          "text": "直到两个人排练结束，爱音借口要去车站另一头的书店买漫画，和大家告别，追上一个人离开的素世。"
+        },
+        {
+          "id": "to_bookstore",
+          "type": "jump",
+          "target": "chapter_three_bookstore"
+        }
+      ]
+    },
+    {
+      "id": "chapter_three_bookstore",
+      "title": "不许缠着你了",
+      "beats": [
+        {
+          "id": "bookstore_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/home.mp3",
+          "volume": 24,
+          "fadeMs": 1400
+        },
+        {
+          "id": "bookstore_bg",
+          "type": "background",
+          "asset": "商店/书店.png"
+        },
+        {
+          "id": "soyo_right_bookstore",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/idle01",
+          "expression": "soyo/thinking01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "anon_left_bookstore",
+          "type": "show",
+          "character": "anon",
+          "position": "left",
+          "motion": "anon/idle01",
+          "expression": "anon/smile01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "anon_catches",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "你干嘛老跟着我？"
+        },
+        {
+          "id": "soyo_excuse",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "没有跟着你啊。我就是刚好想去那边的纪伊国屋书店。《终将成为你》出新的一本了，Soyorin 你也看嘛。"
+        },
+        {
+          "id": "anon_reaches",
+          "type": "narration",
+          "text": "爱音勾住素世的小手指，哼着歌往前走。"
+        },
+        {
+          "id": "soyo_why",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "我为什么非得看这种东西？"
+        },
+        {
+          "id": "anon_pretty",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "因为很好看嘛。"
+        },
+        {
+          "id": "soyo_angry",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "别再缠着我了，我也会生气。",
+          "motion": "soyo/angry03",
+          "expression": "soyo/angry03"
+        },
+        {
+          "id": "anon_apology",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "对不起。我最近好像特别容易惹你生气。我以后不缠着你了。",
+          "motion": "anon/sad01",
+          "expression": "anon/sad01"
+        },
+        {
+          "id": "soyo_reframes",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "对不起，不是你的问题。",
+          "motion": "soyo/sad01",
+          "expression": "soyo/sad02"
+        },
+        {
+          "id": "soyo_after",
+          "type": "narration",
+          "text": "素世等爱音买完漫画回家之后，又从车站绕出来，去买了《终将成为你》前三卷。"
+        },
+        {
+          "id": "side_story_logic",
+          "type": "narration",
+          "text": "如果长崎素世购买了爱音所说的最新发售的佐伯外传篇，她就会知道爱音的本意并非让素世回忆起酸楚的单恋。"
+        },
+        {
+          "id": "buy_ingredients",
+          "type": "narration",
+          "text": "但有时候命运就是这样阴差阳错。长崎素世一路没有睡好，第二天回家路上绕道去了商超，买了巧克力和淡奶油。"
+        },
+        {
+          "id": "touko_line",
+          "type": "narration",
+          "text": "——灯子不会成为任何人。"
+        },
+        {
+          "id": "fear_line",
+          "type": "narration",
+          "text": "——我只是……害怕无法在她身边。"
+        },
+        {
+          "id": "stay_line",
+          "type": "narration",
+          "text": "——现在就先……保持这样。"
+        },
+        {
+          "id": "anon_face_floats",
+          "type": "narration",
+          "text": "千早爱音的脸还浮现在素世的眼前。说实话，素世和她根本不熟，也暂时没有从爱音身上感受到一点可以称为人格魅力的东西。"
+        },
+        {
+          "id": "anon_duck_guitar",
+          "type": "narration",
+          "text": "爱音弹吉他的样子笨得像第一次下水的小鸭子。素世认真看过很多次，还是弄不清这个人究竟哪里讨人喜欢。"
+        },
+        {
+          "id": "anon_personality_dislike",
+          "type": "narration",
+          "text": "最糟糕的是，爱音的性格是素世最讨厌的那种：轻浮、不考虑别人感受，总是莫名其妙地把自己的想法强加到别人身上。"
+        },
+        {
+          "id": "chest_itch",
+          "type": "narration",
+          "text": "素世深知自己是一个敏感细腻的人。和爱音相处时，总有一些细小的不快从心底钻出来，让她的胸口刺刺痒痒。"
+        },
+        {
+          "id": "yield_for_band",
+          "type": "narration",
+          "text": "为了乐队，就让让直女吧。"
+        },
+        {
+          "id": "return_gift_logic",
+          "type": "narration",
+          "text": "虽然看不惯爱音本人，但既然爱音每年都做巧克力，想必作为回礼的口味还是有保证的。"
+        },
+        {
+          "id": "love_means_pain",
+          "type": "narration",
+          "text": "对于素世来说，喜欢一个人就意味着无穷的痛苦。她决定暂时不要喜欢任何人，但只是回应别人随口的期待、交换小礼物，她还是可以做到。"
+        },
+        {
+          "id": "no_refusal_excuse",
+          "type": "narration",
+          "text": "一时没有找到拒绝的借口，反应过来好像也错过了拒绝的时机。长崎素世把巧克力放进冰箱，决定暂时不去想这些。"
+        },
+        {
+          "id": "three_sentences",
+          "type": "narration",
+          "text": "那之后爱音果然没有主动找过素世。素世总算是心烦意乱的症状得到了缓解，也总算安稳地将情人节 Live 的曲目练到了勉强过去。"
+        },
+        {
+          "id": "to_chapter_four",
+          "type": "jump",
+          "target": "chapter_four_rehearsal"
+        }
+      ]
+    },
+    {
+      "id": "chapter_four_rehearsal",
+      "title": "情人节企划",
+      "beats": [
+        {
+          "id": "chapter_four",
+          "type": "chapter",
+          "title": "第四章",
+          "subtitle": "两盒巧克力和没有说出口的答案"
+        },
+        {
+          "id": "chapter_four_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/rehearsal.mp3",
+          "volume": 27,
+          "fadeMs": 1400
+        },
+        {
+          "id": "rehearsal_four_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG排练室.png"
+        },
+        {
+          "id": "anon_left_four",
+          "type": "show",
+          "character": "anon",
+          "position": "left",
+          "motion": "anon/idle01",
+          "expression": "anon/smile01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "soyo_right_four",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/idle01",
+          "expression": "soyo/thinking01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "relationship_cools",
+          "type": "narration",
+          "text": "虽然那样发无名火有些对不起爱音，但她已经为了乐队忍了那么久，爱音偶尔忍忍就忍忍吧。"
+        },
+        {
+          "id": "anon_more_pleasant",
+          "type": "narration",
+          "text": "大概因为素世不再那么烦恼，连爱音看起来也顺眼了不少。"
+        },
+        {
+          "id": "stage_anon_shines",
+          "type": "narration",
+          "text": "在舞台上的爱音，大概是她最耀眼的样子。或许万众瞩目一直以来都是她的梦想，她表现得十分擅长。"
+        },
+        {
+          "id": "wave_audience",
+          "type": "narration",
+          "text": "爱音唱起场子，和台下的观众挥手互动，素世跟着犯得很自然。"
+        },
+        {
+          "id": "harder_to_refuse",
+          "type": "narration",
+          "text": "在台上的时候，素世常常感到拒绝爱音是一件比平时更难的事。"
+        },
+        {
+          "id": "valentine_plan",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "大家情人节快乐哦！希望你们都过得开心！"
+        },
+        {
+          "id": "rana_happy",
+          "type": "narration",
+          "text": "乐奈在台上蹦蹦跳跳：“乐奈也很开心。”"
+        },
+        {
+          "id": "valentine_question",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，你的情人节打算怎么过？"
+        },
+        {
+          "id": "soyo_plan",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "表演完就回家睡觉。"
+        },
+        {
+          "id": "anon_everyone",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "不是说好要送我巧克力吗？"
+        },
+        {
+          "id": "soyo_glance",
+          "type": "narration",
+          "text": "台下一片喧哗，大家都想知道爱音和素世发展到哪一步了。爱音眨着眼睛说，她也会送素世巧克力，情人节要单独过。"
+        },
+        {
+          "id": "soyo_relents",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "还好贝斯和鼓都不需要开口说话。",
+          "motion": "soyo/shame01",
+          "expression": "soyo/shame02"
+        },
+        {
+          "id": "to_live",
+          "type": "jump",
+          "target": "valentine_live"
+        }
+      ]
+    },
+    {
+      "id": "valentine_live",
+      "title": "情人节 Live",
+      "beats": [
+        {
+          "id": "live_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/live.mp3",
+          "volume": 32,
+          "fadeMs": 900
+        },
+        {
+          "id": "live_stage_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG舞台（演出）.png"
+        },
+        {
+          "id": "anon_center_stage",
+          "type": "show",
+          "character": "anon",
+          "position": "center",
+          "motion": "anon/kandou01",
+          "expression": "anon/smile03",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "hide_soyo_stage",
+          "type": "hide",
+          "position": "right"
+        },
+        {
+          "id": "live_narration",
+          "type": "narration",
+          "text": "舞台上的爱音蹦蹦跳跳，向所有人喊情人节快乐。素世在贝斯后面看着她，觉得这孩子很不靠谱，也很耀眼。"
+        },
+        {
+          "id": "live_finish",
+          "type": "narration",
+          "text": "下了舞台之后，爱音给大家在 Uber Eats 点了五人份的草莓芭菲，以一贯贵但不请自来的女士心情热烈地排庆功宴。"
+        },
+        {
+          "id": "four_chocolates",
+          "type": "narration",
+          "text": "然后拿出她包成小袋的巧克力，分别递给四个人。"
+        },
+        {
+          "id": "rana_eats",
+          "type": "narration",
+          "text": "乐奈没说什么就拆开吃了。"
+        },
+        {
+          "id": "taki_return_gift",
+          "type": "narration",
+          "text": "立希一边大惊小怪说你这家伙别期待我回礼，一边双手伸出去接。"
+        },
+        {
+          "id": "tomori_thanks",
+          "type": "narration",
+          "text": "灯腼腆地说谢谢，然后放进包里。看来灯没有准备巧克力。"
+        },
+        {
+          "id": "soyo_doesnt_take",
+          "type": "narration",
+          "text": "素世没有接。"
+        },
+        {
+          "id": "soyo_sweats",
+          "type": "narration",
+          "text": "素世觉得被爱音发现手心有汗也太丢脸了，说自己不太舒服，收拾好东西就走出了休息室。"
+        },
+        {
+          "id": "anon_follows_backstage",
+          "type": "narration",
+          "text": "爱音在她身后说“Soyo”。素世埋着头小步迈得更快了。爱音放下手里的巧克力，拜托队友们帮忙收拾，然后一路跑去追她。"
+        },
+        {
+          "id": "to_backstage",
+          "type": "jump",
+          "target": "backstage_confession"
+        }
+      ]
+    },
+    {
+      "id": "backstage_confession",
+      "title": "只给你一个人",
+      "beats": [
+        {
+          "id": "confession_bgm",
+          "type": "bgm",
+          "asset": "for-the-band/confession.mp3",
+          "volume": 24,
+          "fadeMs": 1800
+        },
+        {
+          "id": "backstage_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG后台.png"
+        },
+        {
+          "id": "anon_left_backstage",
+          "type": "show",
+          "character": "anon",
+          "position": "left",
+          "motion": "anon/idle01",
+          "expression": "anon/thinking01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "soyo_right_backstage",
+          "type": "show",
+          "character": "soyo",
+          "position": "right",
+          "motion": "soyo/sad01",
+          "expression": "soyo/sad01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "anon_chases",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "素世，你怎么了？"
+        },
+        {
+          "id": "soyo_after_show",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "台上已经让你抱了够久了，演出结束就别管我了。"
+        },
+        {
+          "id": "anon_blocks_view",
+          "type": "narration",
+          "text": "爱音拉着她跑到墙角。后台本来去去还有其他乐队的前辈，爱音拉上帘子挡住其他人的视线，但素世还是感觉羞耻得快要死了。"
+        },
+        {
+          "id": "anon_gift",
+          "type": "narration",
+          "text": "爱音放下手里的巧克力。素世没有直接逃开，只是把自己做好的巧克力塞给她。"
+        },
+        {
+          "id": "anon_gift_line",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "素世，我想吃你做的巧克力。"
+        },
+        {
+          "id": "soyo_here",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "不是在这吗？"
+        },
+        {
+          "id": "anon_sets_chocolate",
+          "type": "narration",
+          "text": "爱音像对待一场击剑的钻研一样，轻轻把素世手里的小纸袋捧到手里，然后放到身后的架子上。"
+        },
+        {
+          "id": "anon_cries_cute",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "素世，你哭的样子很可爱。"
+        },
+        {
+          "id": "soyo_cries",
+          "type": "narration",
+          "text": "素世才发现自己哭了，咬紧嘴唇。"
+        },
+        {
+          "id": "soyo_holiday",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "够了吧。"
+        },
+        {
+          "id": "soyo_chocolate",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "情人节快乐。"
+        },
+        {
+          "id": "soyo_release",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "情人节快乐。放开我。",
+          "motion": "soyo/shame02",
+          "expression": "soyo/shame02"
+        },
+        {
+          "id": "touch_hand",
+          "type": "narration",
+          "text": "爱音乖乖把碰着素世手背的手放下来，却被素世拽进自己的手心里。"
+        },
+        {
+          "id": "anon_says_love",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "我喜欢你。"
+        },
+        {
+          "id": "quiet_confession",
+          "type": "narration",
+          "text": "爱音轻轻地、用不被身后其他人看到的音量说道。"
+        },
+        {
+          "id": "practice_guitar_reply",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "那就多练吉他。"
+        },
+        {
+          "id": "anon_will_practice",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "我会的啦。"
+        },
+        {
+          "id": "soyo_distrusts",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "你以为撒娇我就会相信你吗？我还不知道你。"
+        },
+        {
+          "id": "anon_reminds_invitation",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "明明是素世先邀请我的，还说不会可以慢慢学。"
+        },
+        {
+          "id": "soyo_slow_learning",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "谁知道你学那么慢。"
+        },
+        {
+          "id": "anon_responsibility",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "你要负责啊。"
+        },
+        {
+          "id": "anon_confesses",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "虽然不知道你想要的喜欢是什么样的，但是我会很喜欢、很喜欢你。"
+        },
+        {
+          "id": "soyo_fears",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "喜欢我不是一件很开心的事。"
+        },
+        {
+          "id": "anon_now",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "不会啊。我现在就很开心。"
+        },
+        {
+          "id": "hug_again",
+          "type": "narration",
+          "text": "爱音停在一步之外，等素世重新伸出手，才再次抱住她。"
+        },
+        {
+          "id": "soyo_forgive",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "别以为撒娇就可以被我原谅。"
+        },
+        {
+          "id": "anon_scared",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyo 生气的时候还是挺恐怖的。"
+        },
+        {
+          "id": "soyo_final",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "别喜欢我了。"
+        },
+        {
+          "id": "anon_final",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "但你还是挺可爱的。",
+          "motion": "anon/smile03",
+          "expression": "anon/smile03"
+        },
+        {
+          "id": "soyo_only_one",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "不许送别人巧克力。"
+        },
+        {
+          "id": "already_gave",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "那已经给她们的怎么办？"
+        },
+        {
+          "id": "from_next_year",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "从明年开始不许送别人巧克力。"
+        },
+        {
+          "id": "dating_next_year",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "素世打算和我交往到明年？"
+        },
+        {
+          "id": "soyo_not",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "不是！"
+        },
+        {
+          "id": "soyo_flustered",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin 好麻烦。"
+        },
+        {
+          "id": "soyo_knows_trouble",
+          "type": "narration",
+          "text": "素世也知道自己很麻烦。"
+        },
+        {
+          "id": "soyo_answer",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "总之，你只能送我一个人巧克力。"
+        },
+        {
+          "id": "anon_why",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "为什么？"
+        },
+        {
+          "id": "only_you_answer",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "因为我只送你一个人啊！"
+        },
+        {
+          "id": "anon_relationship",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，我们是这样的关系吗？",
+          "motion": "anon/surprised01",
+          "expression": "anon/surprised01"
+        },
+        {
+          "id": "soyo_purses_lips",
+          "type": "narration",
+          "text": "素世咬着嘴唇不肯说话。爱音抬头盯着素世吃吃地笑。"
+        },
+        {
+          "id": "anon_cute_again",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，你好可爱。"
+        },
+        {
+          "id": "soyo_no_more_cute",
+          "type": "dialogue",
+          "character": "soyo",
+          "text": "这句话以后不许说了。"
+        },
+        {
+          "id": "anon_agrees",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "好吧。"
+        },
+        {
+          "id": "anon_keeps_talking",
+          "type": "narration",
+          "text": "爱音鼓着腮帮帮了素世一阵子。素世想问她能不能不要再这么盯了，却意识到她今天要求实在有点太多，于是把她抱进怀里，纵容爱音用只有她们能听到的语气喋喋不休。"
+        },
+        {
+          "id": "smells_good",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，你好香。不是想知道你身体乳的那种。"
+        },
+        {
+          "id": "close_eyes",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，你能不能稍微闭一下眼睛？"
+        },
+        {
+          "id": "ask_kiss",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "Soyorin，我现在要亲你咯。"
+        },
+        {
+          "id": "consent_kiss",
+          "type": "narration",
+          "text": "素世看了爱音很久，终于红着脸点了一下头，闭上眼睛。爱音只轻轻吻了她两下。"
+        },
+        {
+          "id": "ending_bgm_fade",
+          "type": "stop_bgm",
+          "fadeMs": 2200
+        },
+        {
+          "id": "ending",
+          "type": "ending",
+          "title": "END · 长崎大小姐防线崩溃中",
+          "text": "被亲两下就亲两下吧。为了乐队，就让让直女又怎么了。"
+        }
+      ]
+    }
+  ]
+}

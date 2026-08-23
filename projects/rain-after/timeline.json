@@ -1,0 +1,84 @@
+{
+  "formatVersion": 1,
+  "revision": 1,
+  "activeEventId": "anon-soyo",
+  "events": [
+    {
+      "id": "anon-soyo",
+      "title": "Anon / Soyo",
+      "location": "RiNG rehearsal room",
+      "characters": [
+        { "id": "anon", "name": "爱音", "figure": "anon/casual-2023/model.json" },
+        { "id": "soyo", "name": "素世", "figure": "soyo/casual-2023/model.json" }
+      ],
+      "renders": [
+        {
+          "id": "anon_soyo_001",
+          "title": "排练后的空拍",
+          "beats": [
+            { "id": "as1_bg", "type": "background", "asset": "演出、排练/RiNG/RiNG排练室.png" },
+            { "id": "as1_anon", "type": "show", "character": "anon", "position": "left" },
+            { "id": "as1_soyo", "type": "show", "character": "soyo", "position": "right" },
+            { "id": "as1_line_1", "type": "dialogue", "character": "anon", "text": "Soyorin，今天留下来不是为了继续加练吧？" },
+            { "id": "as1_line_2", "type": "dialogue", "character": "soyo", "text": "只是有些话，在大家都在的时候不方便说。" }
+          ]
+        },
+        {
+          "id": "anon_soyo_002",
+          "title": "没有说完的话",
+          "beats": [
+            { "id": "as2_bg", "type": "background", "asset": "演出、排练/RiNG/RiNG排练室.png" },
+            { "id": "as2_anon", "type": "show", "character": "anon", "position": "left" },
+            { "id": "as2_soyo", "type": "show", "character": "soyo", "position": "right" },
+            { "id": "as2_line_1", "type": "narration", "text": "排练室的灯没有关，门外却已经听不见其他人的脚步。" },
+            { "id": "as2_line_2", "type": "dialogue", "character": "anon", "text": "那就慢慢说。我今天不赶时间。" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tomorin-alone",
+      "title": "Tomorin",
+      "location": "Astronomy club",
+      "characters": [
+        { "id": "tomori", "name": "灯", "figure": "tomori/casual-2023/model.json" }
+      ],
+      "renders": [
+        {
+          "id": "tomorin_001",
+          "title": "一个人的记录",
+          "beats": [
+            { "id": "t1_bg", "type": "background", "asset": "学校、工作/羽丘/羽丘天文部（白天）.png" },
+            { "id": "t1_tomori", "type": "show", "character": "tomori", "position": "center" },
+            { "id": "t1_line_1", "type": "narration", "text": "灯把今天捡到的石头一颗颗排在窗边。" },
+            { "id": "t1_line_2", "type": "dialogue", "character": "tomori", "text": "如果每一颗都有名字，就不会被忘记了。" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "saki-mutsumi-uika",
+      "title": "Saki / Mutsumi / Uika",
+      "location": "Tsukinomori garden",
+      "characters": [
+        { "id": "sakiko", "name": "祥子", "figure": "sakiko/casual-2023/model.json" },
+        { "id": "mutsumi", "name": "睦", "figure": "mutsumi/casual-2023/model.json" },
+        { "id": "uika", "name": "初华", "figure": "uika/casual-2023/model.json" }
+      ],
+      "renders": [
+        {
+          "id": "smu_001",
+          "title": "凉亭里的三个人",
+          "beats": [
+            { "id": "smu1_bg", "type": "background", "asset": "学校、工作/月之森/月之森花园凉亭（白天）.png" },
+            { "id": "smu1_saki", "type": "show", "character": "sakiko", "position": "left" },
+            { "id": "smu1_mutsumi", "type": "show", "character": "mutsumi", "position": "center" },
+            { "id": "smu1_uika", "type": "show", "character": "uika", "position": "right" },
+            { "id": "smu1_line_1", "type": "dialogue", "character": "uika", "text": "难得三个人都在，却没有人先开口呢。" },
+            { "id": "smu1_line_2", "type": "dialogue", "character": "sakiko", "text": "沉默有时也比解释更诚实。" }
+          ]
+        }
+      ]
+    }
+  ]
+}

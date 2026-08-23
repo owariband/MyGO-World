@@ -1,0 +1,16 @@
+; Generated from projects/second-story/story.json by tools/mygo-author.mjs.
+; Edit the project story and recompile; do not hand-edit this file.
+
+intro:第二个故事|一部由结构化剧本生成的 MyGO 可玩样片;
+jumpLabel:opening;
+
+; Scene: 另一个世界
+label:opening;
+changeBg:学校、工作/花咲川/花咲川天台（黄昏）.png -next;
+changeFigure:anon/casual-2023/model.json -enter=enter-from-bottom -expression=anon/smile01 -motion=anon/idle01 -next;
+爱音:这是与《雨声之后》完全独立的第二部作品。;
+changeFigure:none -left -next;
+changeFigure:none -next;
+changeFigure:none -right -next;
+intro:SECOND STORY END|它拥有自己的配置、构建结果和存档空间。;
+end;

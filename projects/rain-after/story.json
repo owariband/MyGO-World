@@ -1,0 +1,276 @@
+{
+  "formatVersion": 1,
+  "title": "雨声之后",
+  "entryScene": "rainy_entrance",
+  "characters": [
+    {
+      "id": "anon",
+      "name": "爱音",
+      "figure": "anon/casual-2023/model.json"
+    },
+    {
+      "id": "taki",
+      "name": "立希",
+      "figure": "taki/casual-2023/model.json"
+    },
+    {
+      "id": "tomori",
+      "name": "灯",
+      "figure": "tomori/casual-2023/model.json"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "rainy_entrance",
+      "title": "雨中的 RiNG",
+      "beats": [
+        {
+          "id": "entrance_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RING门口视角2（雨）.png"
+        },
+        {
+          "id": "rain_opening",
+          "type": "narration",
+          "text": "排练结束后，雨突然大了起来。灯一个人先走出了 RiNG。"
+        },
+        {
+          "id": "anon_arrives",
+          "type": "show",
+          "character": "anon",
+          "position": "right",
+          "motion": "anon/idle01",
+          "expression": "anon/thinking01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "anon_notices",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "灯灯连伞都没拿……刚才那句话，果然还是太重了吧。"
+        },
+        {
+          "id": "taki_arrives",
+          "type": "show",
+          "character": "taki",
+          "position": "left",
+          "motion": "taki/idle01",
+          "expression": "taki/serious01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "taki_denies",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "我只是说今天的演奏不对。她自己应该知道。"
+        },
+        {
+          "id": "anon_pushes",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "知道和听见，是两回事哦。"
+        },
+        {
+          "id": "to_rehearsal",
+          "type": "jump",
+          "target": "empty_rehearsal"
+        }
+      ]
+    },
+    {
+      "id": "empty_rehearsal",
+      "title": "没有结束的排练",
+      "beats": [
+        {
+          "id": "room_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG排练室.png"
+        },
+        {
+          "id": "clear_left",
+          "type": "hide",
+          "position": "left"
+        },
+        {
+          "id": "clear_right",
+          "type": "hide",
+          "position": "right"
+        },
+        {
+          "id": "taki_center",
+          "type": "show",
+          "character": "taki",
+          "position": "center",
+          "motion": "taki/thinking01",
+          "expression": "taki/sigh01",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "room_silence",
+          "type": "narration",
+          "text": "爱音去追灯了。空下来的排练室里，只剩节拍器还在机械地摆动。"
+        },
+        {
+          "id": "taki_memory",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "……不是她不对。是我不知道该怎么让她听懂。"
+        },
+        {
+          "id": "tomori_returns",
+          "type": "show",
+          "character": "tomori",
+          "position": "right",
+          "motion": "tomori/idle01",
+          "expression": "tomori/sad01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "tomori_heard",
+          "type": "dialogue",
+          "character": "tomori",
+          "text": "立希……我回来了。因为还有一句话，没有听见。"
+        },
+        {
+          "id": "decisive_choice",
+          "type": "choice",
+          "options": [
+            {
+              "text": "承认自己害怕失去这支乐队",
+              "target": "honest_rooftop"
+            },
+            {
+              "text": "继续只谈演奏的问题",
+              "target": "technical_distance"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "honest_rooftop",
+      "title": "说出口的话",
+      "beats": [
+        {
+          "id": "rooftop_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG天台（晚上）.png"
+        },
+        {
+          "id": "hide_center_honest",
+          "type": "hide",
+          "position": "center"
+        },
+        {
+          "id": "taki_left_honest",
+          "type": "show",
+          "character": "taki",
+          "position": "left",
+          "motion": "taki/sad01",
+          "expression": "taki/shame01",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "tomori_right_honest",
+          "type": "show",
+          "character": "tomori",
+          "position": "right",
+          "motion": "tomori/idle01",
+          "expression": "tomori/thinking01",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "taki_confesses",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "我不是怕你弹错。我是怕有一天，你觉得这里不再需要你，然后又一个人走掉。"
+        },
+        {
+          "id": "tomori_answers",
+          "type": "dialogue",
+          "character": "tomori",
+          "text": "那就再说一次。每次我听不懂的时候，都再说一次。"
+        },
+        {
+          "id": "taki_softens",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "……一辈子都说？",
+          "motion": "taki/smile01",
+          "expression": "taki/smile01"
+        },
+        {
+          "id": "tomori_promise",
+          "type": "dialogue",
+          "character": "tomori",
+          "text": "嗯。一辈子。",
+          "motion": "tomori/smile01",
+          "expression": "tomori/smile02"
+        },
+        {
+          "id": "honest_ending",
+          "type": "ending",
+          "title": "GOOD END · 同一个节拍",
+          "text": "雨停之前，她们重新回到了排练室。"
+        }
+      ]
+    },
+    {
+      "id": "technical_distance",
+      "title": "正确但没有抵达",
+      "beats": [
+        {
+          "id": "stage_bg",
+          "type": "background",
+          "asset": "演出、排练/RiNG/RiNG舞台（通常）.png"
+        },
+        {
+          "id": "hide_center_distant",
+          "type": "hide",
+          "position": "center"
+        },
+        {
+          "id": "taki_left_distant",
+          "type": "show",
+          "character": "taki",
+          "position": "left",
+          "motion": "taki/idle01",
+          "expression": "taki/serious02",
+          "enter": "enter-from-left"
+        },
+        {
+          "id": "tomori_right_distant",
+          "type": "show",
+          "character": "tomori",
+          "position": "right",
+          "motion": "tomori/idle01",
+          "expression": "tomori/sad03",
+          "enter": "enter-from-right"
+        },
+        {
+          "id": "taki_explains",
+          "type": "dialogue",
+          "character": "taki",
+          "text": "第二段进副歌前慢了半拍。明天把那里单独再练十遍。"
+        },
+        {
+          "id": "tomori_accepts",
+          "type": "dialogue",
+          "character": "tomori",
+          "text": "我知道了。明天会弹对的。"
+        },
+        {
+          "id": "distance_narration",
+          "type": "narration",
+          "text": "所有关于演奏的问题都得到了答案。只有她折返回来的理由，没有。"
+        },
+        {
+          "id": "distant_ending",
+          "type": "ending",
+          "title": "NORMAL END · 正确的距离",
+          "text": "节拍器继续摆动，精确得没有一丝误差。"
+        }
+      ]
+    }
+  ]
+}

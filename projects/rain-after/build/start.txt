@@ -1,0 +1,61 @@
+; Generated from projects/rain-after/story.json by tools/mygo-author.mjs.
+; Edit the project story and recompile; do not hand-edit this file.
+
+intro:雨声之后|一部由结构化剧本生成的 MyGO 可玩样片;
+jumpLabel:rainy_entrance;
+
+; Scene: 雨中的 RiNG
+label:rainy_entrance;
+changeBg:演出、排练/RiNG/RING门口视角2（雨）.png -next;
+:排练结束后，雨突然大了起来。灯一个人先走出了 RiNG。;
+changeFigure:anon/casual-2023/model.json -enter=enter-from-right -expression=anon/thinking01 -motion=anon/idle01 -right -next;
+爱音:灯灯连伞都没拿……刚才那句话，果然还是太重了吧。;
+changeFigure:taki/casual-2023/model.json -enter=enter-from-left -expression=taki/serious01 -motion=taki/idle01 -left -next;
+立希:我只是说今天的演奏不对。她自己应该知道。;
+爱音:知道和听见，是两回事哦。;
+jumpLabel:empty_rehearsal;
+
+; Scene: 没有结束的排练
+label:empty_rehearsal;
+changeBg:演出、排练/RiNG/RiNG排练室.png -next;
+changeFigure:none -left -next;
+changeFigure:none -right -next;
+changeFigure:taki/casual-2023/model.json -enter=enter-from-bottom -expression=taki/sigh01 -motion=taki/thinking01 -next;
+:爱音去追灯了。空下来的排练室里，只剩节拍器还在机械地摆动。;
+立希:……不是她不对。是我不知道该怎么让她听懂。;
+changeFigure:tomori/casual-2023/model.json -enter=enter-from-right -expression=tomori/sad01 -motion=tomori/idle01 -right -next;
+灯:立希……我回来了。因为还有一句话，没有听见。;
+choose:承认自己害怕失去这支乐队:honest_rooftop|继续只谈演奏的问题:technical_distance;
+
+; Scene: 说出口的话
+label:honest_rooftop;
+changeBg:演出、排练/RiNG/RiNG天台（晚上）.png -next;
+changeFigure:none -next;
+changeFigure:taki/casual-2023/model.json -enter=enter-from-left -expression=taki/shame01 -motion=taki/sad01 -left -next;
+changeFigure:tomori/casual-2023/model.json -enter=enter-from-right -expression=tomori/thinking01 -motion=tomori/idle01 -right -next;
+立希:我不是怕你弹错。我是怕有一天，你觉得这里不再需要你，然后又一个人走掉。;
+灯:那就再说一次。每次我听不懂的时候，都再说一次。;
+changeFigure:taki/casual-2023/model.json -expression=taki/smile01 -motion=taki/smile01 -left -next;
+立希:……一辈子都说？;
+changeFigure:tomori/casual-2023/model.json -expression=tomori/smile02 -motion=tomori/smile01 -right -next;
+灯:嗯。一辈子。;
+changeFigure:none -left -next;
+changeFigure:none -next;
+changeFigure:none -right -next;
+intro:GOOD END · 同一个节拍|雨停之前，她们重新回到了排练室。;
+end;
+
+; Scene: 正确但没有抵达
+label:technical_distance;
+changeBg:演出、排练/RiNG/RiNG舞台（通常）.png -next;
+changeFigure:none -next;
+changeFigure:taki/casual-2023/model.json -enter=enter-from-left -expression=taki/serious02 -motion=taki/idle01 -left -next;
+changeFigure:tomori/casual-2023/model.json -enter=enter-from-right -expression=tomori/sad03 -motion=tomori/idle01 -right -next;
+立希:第二段进副歌前慢了半拍。明天把那里单独再练十遍。;
+灯:我知道了。明天会弹对的。;
+:所有关于演奏的问题都得到了答案。只有她折返回来的理由，没有。;
+changeFigure:none -left -next;
+changeFigure:none -next;
+changeFigure:none -right -next;
+intro:NORMAL END · 正确的距离|节拍器继续摆动，精确得没有一丝误差。;
+end;

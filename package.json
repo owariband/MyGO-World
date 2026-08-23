@@ -1,0 +1,18 @@
+{
+  "name": "generative-mygo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "projects": "node tools/mygo-author.mjs list",
+    "create": "node tools/mygo-author.mjs create",
+    "check": "node tools/mygo-author.mjs check",
+    "compile": "node tools/mygo-author.mjs compile",
+    "dev": "node tools/mygo-author.mjs dev",
+    "dynamic": "node tools/mygo-author.mjs dynamic",
+    "serve": "node tools/mygo-author.mjs serve",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "formatVersion": 1,
+  "title": "第二个故事",
+  "entryScene": "opening",
+  "characters": [
+    {
+      "id": "anon",
+      "name": "爱音",
+      "figure": "anon/casual-2023/model.json"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "opening",
+      "title": "另一个世界",
+      "beats": [
+        {
+          "id": "opening_background",
+          "type": "background",
+          "asset": "学校、工作/花咲川/花咲川天台（黄昏）.png"
+        },
+        {
+          "id": "anon_enters",
+          "type": "show",
+          "character": "anon",
+          "position": "center",
+          "motion": "anon/idle01",
+          "expression": "anon/smile01",
+          "enter": "enter-from-bottom"
+        },
+        {
+          "id": "first_line",
+          "type": "dialogue",
+          "character": "anon",
+          "text": "这是与《雨声之后》完全独立的第二部作品。"
+        },
+        {
+          "id": "starter_ending",
+          "type": "ending",
+          "title": "SECOND STORY END",
+          "text": "它拥有自己的配置、构建结果和存档空间。"
+        }
+      ]
+    }
+  ]
+}
