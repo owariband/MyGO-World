@@ -73,3 +73,9 @@
 - 根据用户确认，将一期 Agent Runtime 从“纯 Python + 自研通用 AgentLoop”修正为 Go + Eino ADK：Character 使用自定义 `PersonActAgent` 包装内部 Compose Graph，Decision Run 在 Proposal 后结束、World Commit 后另走 Feedback Run；Eino 接管 Agent/Runner、Graph/Chain、模型/Tool、Prompt、retry/failover、Callback 与可选 Agent checkpoint，MyGO 保留感知权限、Memory 语义、World/Event 调度、时间补全、Validator/Committer、Ledger 和确定性 Render，并记录 option 映射、`CustomizedOutput` 浅复制、checkpoint 分层、Graph 副作用幂等等适配风险。同步验证当前 `npm test` 为 14/14 通过。
 - 将 Wiki、结构化作品、开发工具、测试与 Dynamic Render Adapter 从固定版 WebGAL/MyGO 目录迁入同级 `generative_go_world`；底层播放器和大体积素材继续留在 `MyGO_v3.1.1_ForScript`，开发服务器以 `devRoot -> webgalRoot` 双根方式联调，后者默认使用兄弟目录并支持 `WEBGAL_ROOT` 覆盖。
 - 新增 Location World Model：地点以稳定 ID、版本化 Fact/Info 和 WorldEvent 引用构成可回放 LocationView；地点事实不能被自然语言覆盖，周期 Info 不等于实际 Event；角色前往地点前由 Runtime 触发 Director 查询并提出 DiscoveryPlan，角色只能依据已提交的 Fact/Info 或传播 Event 经感知投影后获知。
+
+## 2026-08-30
+
+- 新增[世界、互动、时间与实体建模调研](world-interaction-time-entity-modeling-research.md)：精读 EvolvingWorld 论文与官方实现，并与 BookWorld、CharacterBox、IBSEN、StoryVerse、Generative Agents 对照。
+- 核准 EvolvingWorld 的时间仅为场景步与场内轮次，“实体级”状态嵌入地点状态，官方实现由 LLM 完整覆盖内存状态；记录其单一客观世界、无角色主观世界的论文限制。
+- 提出“强类型内核 + 版本化开放语义 facet”、Proposal/Attempt/Outcome/Commit、实体提升判据、语义时间区间和 trait evidence/Skill overlay 等建模建议；这些仍是建议，尚未写入冻结决策。

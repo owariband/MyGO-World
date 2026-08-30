@@ -86,7 +86,7 @@
 - **BEYOND DIALOGUE**（2408.10903，[BeyondDialogue](https://github.com/yuyouyu32/BeyondDialogue)）：指出用预定义 profile 去 prompt 特定场景的对话训练，会产生 profile 与对话互相冲突的训练偏差；提出场景级 profile↔dialogue 句级对齐。对我们的启示是 Skill 版本与实际提交行为之间需要一致性检查，而不是假定 Skill 一写就对。
 - **CharacterBox**（2412.05631）：character agent + **narrator agent** 的沙盒，产出情境化细粒度行为轨迹而不是对话快照。narrator 协调角色间互动与环境变化 —— 职责边界和我们的 Director 很接近。同一作者线的结论：**行为准则（behavioral guidelines）优于描述性速写（descriptive sketches）**，这条直接支持把 Character Skill 写成规则而非散文。
 - **BookWorld**（2504.14538）：从小说构建交互式 agent 社会做创意故事生成，是"番剧/小说 → 多智能体世界"这条路上最完整的开源系统形态参考。
-- **EvolvingWorld**（2607.17250）：**整体形态上最接近 MyGO-World。** open-schema（不用固定 schema）的人物 + 世界共演化框架：Character Agent 负责多角色扮演与 profile 持续演化，LLM World Model 负责全局与地点/实体级状态维护和场景推进；定义 7 个可训练任务（场景初始化、互动生成、状态更新），57 本书 / 138,596 训练样本 / 222 测试快照，轨迹级 LLM-as-Judge 覆盖 10 维 20 指标。注意它把世界状态交给 LLM World Model —— 和我们「World Runtime 是唯一权威、Agent 只出 Proposal」是相反选择，正好可以当作反面对照来论证我们的边界。
+- **EvolvingWorld**（2607.17250，[官方代码](https://github.com/HKUST-KnowComp/EvolvingWorld)）：**整体形态上最接近 MyGO-World。** 它用开放 schema 的 Character Agent + LLM World Model 维护全局状态、地点/重要实体状态和人物档案，定义 7 个可训练任务，数据规模为 57 本书 / 138,596 训练样本 / 222 测试快照，轨迹评测覆盖 10 维 20 指标。需要准确区分：论文时间仅是场景步 `t` 与场内轮次 `k`，没有持续时间、并发 Event、事务或重放；“实体级”是嵌入地点状态的重要非人物实体，不是稳定 ID + revision 的实体总账；官方代码由 LLM 返回完整状态后直接覆盖内存状态。论文还明确把“单一客观状态、没有角色各自主观世界”列为限制。因此最值得借的是七任务分解、全局/地点更新敏感度评测和 hidden tracker，不应照搬其状态所有权。完整核对见[世界、互动、时间与实体建模调研](world-interaction-time-entity-modeling-research.md)。
 
 ### 评测（可直接落成 Pydantic Evals 数据集）
 CoSER 的**罚分式** LLM 评委（已核对缺陷类型表，比打分更适合做 Validator 诊断）：
@@ -181,4 +181,4 @@ Actor 侧记忆显式拆成 **Actor Profile / Memory Database / Character Databa
 7. **BroadcastPlan 的镜头字段用 ShotBench 8 维枚举。** 并且因为模型在镜头术语上准确率很低，Validator 必须校验枚举合法性与使用规范（FilmAgent 的"Tracking Shot 要求主体在移动"就是一条可执行规范）。
 8. **Validator 与 Pydantic Evals 用罚分制而不是打分制。** CoSER 的缺陷类型表可以几乎原样落成我们的诊断枚举，特别是「表现得像有帮助的 AI 助手」和「使用了角色当前阶段不该知道的未来信息」这两条 —— 后者正是我们权限边界的可观测指标。
 9. **写反派或道德复杂角色时预留额外预算。** Disposition 是唯一被证实的大幅退化轴，且集中在 `Motivations.Goal / Morality`。对齐更强的模型这个差距更大。
-10. **EvolvingWorld 当反面对照。** 它把世界状态交给 LLM World Model 维护；我们坚持 World Runtime 唯一权威。它的 10 维 20 指标轨迹级评测协议仍可借，但状态所有权的分歧要在 `decisions.md` 里说清楚。
+10. **把 EvolvingWorld 拆成正反两部分参考。** 正向吸收七任务分解、开放语义 facet、hidden tracker 和轨迹级评测；反向对照其 LLM 完整状态覆盖、单一主观视图、无稳定实体 revision 与无事务时间模型。我们继续坚持 World Runtime 唯一权威，模型只产出待验证候选。

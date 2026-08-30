@@ -35,6 +35,7 @@
 - [决策记录](decisions.md)：已确认决策、当前建议和产品目标。
 - [未决问题](open-questions.md)：需要实现或实验回答的问题。
 - [Skill 外部参考](skill-references.md)：人物提炼、Character/Director/Broadcast Skill 字段与评测的外部调研输入。
+- [世界、互动、时间与实体建模调研](world-interaction-time-entity-modeling-research.md)：精读 EvolvingWorld，并与 BookWorld、CharacterBox、IBSEN、StoryVerse、Generative Agents 及本项目模型边界做对照。
 - [维护日志](log.md)：Wiki 维护历史。
 
 ## 当前源码锚点
