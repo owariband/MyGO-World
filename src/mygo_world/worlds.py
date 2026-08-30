@@ -28,7 +28,7 @@ from mygo_world.db.engine import (
     require_current_schema,
     upgrade_to_head,
 )
-from mygo_world.db.models import SnapshotRow, WorldEventRow, WorldRow
+from mygo_world.db.models import AgentMemoryRow, SnapshotRow, WorldEventRow, WorldRow
 from mygo_world.errors import (
     SeedInvalidError,
     WorldAlreadyExistsError,
@@ -180,6 +180,18 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
             event_count = session.scalar(
                 select(func.count()).select_from(WorldEventRow)
             )
+            events = list(
+                session.scalars(
+                    select(WorldEventRow).order_by(WorldEventRow.event_order)
+                )
+            )
+            observations = list(
+                session.scalars(
+                    select(AgentMemoryRow)
+                    .where(AgentMemoryRow.memory_type == "observation")
+                    .order_by(AgentMemoryRow.memory_id)
+                )
+            )
             snapshot = json.loads(snapshot_row.snapshot_json)
             return {
                 "command": "show",
@@ -191,6 +203,29 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                 "snapshot": snapshot,
                 "snapshot_checksum": snapshot_row.checksum,
                 "world_event_count": event_count,
+                "world_events": [
+                    {
+                        "event_id": item.event_id,
+                        "event_order": item.event_order,
+                        "world_version": item.world_version,
+                        "session_id": item.session_id,
+                        "start_time_ms": item.start_time_ms,
+                        "end_time_ms": item.end_time_ms,
+                        "event_type": item.event_type,
+                        "payload": json.loads(item.payload_json),
+                    }
+                    for item in events
+                ],
+                "observations": [
+                    {
+                        "memory_id": item.memory_id,
+                        "agent_id": item.agent_id,
+                        "world_version": item.world_version,
+                        "relative_time_ms": item.relative_time_ms,
+                        "payload": json.loads(item.payload_json),
+                    }
+                    for item in observations
+                ],
                 "seed": {
                     "seed_id": world.seed_id,
                     "version": world.seed_version,

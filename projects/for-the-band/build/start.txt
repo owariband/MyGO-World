@@ -7,7 +7,6 @@ jumpLabel:chapter_one_rehearsal;
 ; Scene: 不会放弃微笑
 label:chapter_one_rehearsal;
 intro:第一章|长崎素世最近假笑的次数变多了;
-bgm:for-the-band/rehearsal.mp3 -volume=28 -enter=1400;
 changeBg:演出、排练/RiNG/RiNG排练室.png -next;
 :最近长崎素世假笑的次数变多了。;
 :这是一篇没什么意义的、迫害长崎女士的缺德文。;
@@ -49,7 +48,6 @@ jumpLabel:chapter_two_sleepover;
 ; Scene: 爱音家的夜晚
 label:chapter_two_sleepover;
 intro:第二章|普通家庭、化妆练习与情人节;
-bgm:for-the-band/home.mp3 -volume=26 -enter=1600;
 changeBg:角色生活地点/mygo/爱音的房间（晚上）.png -next;
 changeFigure:none -next;
 changeFigure:soyo/casual-2023/model.json -enter=enter-from-right -expression=soyo/default -motion=soyo/idle01 -right -next;
@@ -113,7 +111,6 @@ jumpLabel:chapter_three_nightmare;
 ; Scene: 巧克力长着爱音的脸
 label:chapter_three_nightmare;
 intro:第三章|梦、烦躁与跟踪爱音的一天;
-bgm:for-the-band/night.mp3 -volume=24 -enter=1800;
 changeBg:角色生活地点/mygo/素世的房间（晚上开灯）.jpg -next;
 changeFigure:none -left -next;
 changeFigure:soyo/casual-2023/model.json -enter=enter-from-bottom -expression=soyo/sad01 -motion=soyo/sad01 -next;
@@ -191,7 +188,6 @@ jumpLabel:chapter_three_bookstore;
 
 ; Scene: 不许缠着你了
 label:chapter_three_bookstore;
-bgm:for-the-band/home.mp3 -volume=24 -enter=1400;
 changeBg:商店/书店.png -next;
 changeFigure:soyo/casual-2023/model.json -enter=enter-from-right -expression=soyo/thinking01 -motion=soyo/idle01 -right -next;
 changeFigure:anon/casual-2023/model.json -enter=enter-from-left -expression=anon/smile01 -motion=anon/idle01 -left -next;
@@ -226,7 +222,6 @@ jumpLabel:chapter_four_rehearsal;
 ; Scene: 情人节企划
 label:chapter_four_rehearsal;
 intro:第四章|两盒巧克力和没有说出口的答案;
-bgm:for-the-band/rehearsal.mp3 -volume=27 -enter=1400;
 changeBg:演出、排练/RiNG/RiNG排练室.png -next;
 changeFigure:anon/casual-2023/model.json -enter=enter-from-left -expression=anon/smile01 -motion=anon/idle01 -left -next;
 changeFigure:soyo/casual-2023/model.json -enter=enter-from-right -expression=soyo/thinking01 -motion=soyo/idle01 -right -next;
@@ -247,7 +242,6 @@ jumpLabel:valentine_live;
 
 ; Scene: 情人节 Live
 label:valentine_live;
-bgm:for-the-band/live.mp3 -volume=32 -enter=900;
 changeBg:演出、排练/RiNG/RiNG舞台（演出）.png -next;
 changeFigure:anon/casual-2023/model.json -enter=enter-from-bottom -expression=anon/smile03 -motion=anon/kandou01 -next;
 changeFigure:none -right -next;
@@ -264,7 +258,6 @@ jumpLabel:backstage_confession;
 
 ; Scene: 只给你一个人
 label:backstage_confession;
-bgm:for-the-band/confession.mp3 -volume=24 -enter=1800;
 changeBg:演出、排练/RiNG/RiNG后台.png -next;
 changeFigure:anon/casual-2023/model.json -enter=enter-from-left -expression=anon/thinking01 -motion=anon/idle01 -left -next;
 changeFigure:soyo/casual-2023/model.json -enter=enter-from-right -expression=soyo/sad01 -motion=soyo/sad01 -right -next;

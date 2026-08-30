@@ -108,12 +108,7 @@ test('the long-form adaptation keeps its title and four chapters in source order
   const chapterOffsets = chapterTitles.map((title) => script.indexOf(`intro:${title}|`));
   assert.ok(chapterOffsets.every((offset) => offset >= 0));
   assert.deepEqual([...chapterOffsets].sort((left, right) => left - right), chapterOffsets);
-  assert.match(script, /bgm:for-the-band\/rehearsal\.mp3 -volume=28 -enter=1400;/);
-  assert.match(script, /bgm:for-the-band\/live\.mp3 -volume=32 -enter=900;/);
-  assert.match(script, /bgm:for-the-band\/home\.mp3/);
-  assert.match(script, /bgm:for-the-band\/night\.mp3/);
-  assert.match(script, /bgm:for-the-band\/live\.mp3/);
-  assert.match(script, /bgm:for-the-band\/confession\.mp3/);
+  assert.doesNotMatch(script, /bgm:for-the-band\//);
   assert.match(script, /bgm:none -enter=2200;/);
   assert.match(script, /END · 长崎大小姐防线崩溃中/);
 

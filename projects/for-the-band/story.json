@@ -32,13 +32,6 @@
           "subtitle": "长崎素世最近假笑的次数变多了"
         },
         {
-          "id": "chapter_one_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/rehearsal.mp3",
-          "volume": 28,
-          "fadeMs": 1400
-        },
-        {
           "id": "rehearsal_background",
           "type": "background",
           "asset": "演出、排练/RiNG/RiNG排练室.png"
@@ -248,13 +241,6 @@
           "type": "chapter",
           "title": "第二章",
           "subtitle": "普通家庭、化妆练习与情人节"
-        },
-        {
-          "id": "chapter_two_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/home.mp3",
-          "volume": 26,
-          "fadeMs": 1600
         },
         {
           "id": "anon_room_evening",
@@ -583,13 +569,6 @@
           "type": "chapter",
           "title": "第三章",
           "subtitle": "梦、烦躁与跟踪爱音的一天"
-        },
-        {
-          "id": "chapter_three_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/night.mp3",
-          "volume": 24,
-          "fadeMs": 1800
         },
         {
           "id": "soyo_room_night",
@@ -975,13 +954,6 @@
       "title": "不许缠着你了",
       "beats": [
         {
-          "id": "bookstore_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/home.mp3",
-          "volume": 24,
-          "fadeMs": 1400
-        },
-        {
           "id": "bookstore_bg",
           "type": "background",
           "asset": "商店/书店.png"
@@ -1150,13 +1122,6 @@
           "subtitle": "两盒巧克力和没有说出口的答案"
         },
         {
-          "id": "chapter_four_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/rehearsal.mp3",
-          "volume": 27,
-          "fadeMs": 1400
-        },
-        {
           "id": "rehearsal_four_bg",
           "type": "background",
           "asset": "演出、排练/RiNG/RiNG排练室.png"
@@ -1258,13 +1223,6 @@
       "title": "情人节 Live",
       "beats": [
         {
-          "id": "live_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/live.mp3",
-          "volume": 32,
-          "fadeMs": 900
-        },
-        {
           "id": "live_stage_bg",
           "type": "background",
           "asset": "演出、排练/RiNG/RiNG舞台（演出）.png"
@@ -1339,13 +1297,6 @@
       "id": "backstage_confession",
       "title": "只给你一个人",
       "beats": [
-        {
-          "id": "confession_bgm",
-          "type": "bgm",
-          "asset": "for-the-band/confession.mp3",
-          "volume": 24,
-          "fadeMs": 1800
-        },
         {
           "id": "backstage_bg",
           "type": "background",

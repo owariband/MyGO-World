@@ -156,3 +156,25 @@ class AgentMemoryRow(Base):
     importance: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class GenerationTraceRow(Base):
+    __tablename__ = "generation_traces"
+
+    trace_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    world_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    input_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    call_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    skill_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    skill_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    skill_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    model_config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_response: Mapped[str] = mapped_column(Text, nullable=False)
+    structured_result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    validation_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)

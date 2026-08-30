@@ -226,3 +226,169 @@ def load_seed(path: Path) -> LoadedSeed:
         )
         raise SeedInvalidError(details) from exc
     return LoadedSeed(seed=seed, content_hash=sha256_bytes(content))
+
+
+# Generation Wave contracts deliberately stay independent from any model-provider SDK.
+
+
+class PerceivedEntity(StrictModel):
+    entity_id: str = Field(min_length=1)
+    entity_type: Literal["location", "character", "object"]
+    name: str = Field(min_length=1)
+    location_id: str | None = None
+    scope_key: str | None = None
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+class PerceivedMemory(StrictModel):
+    memory_id: str = Field(min_length=1)
+    agent_id: str = Field(min_length=1)
+    namespace: str = Field(min_length=1)
+    memory_type: Literal["observation", "belief", "commitment", "reflection"]
+    relative_time_ms: int = Field(ge=0)
+    importance: int = Field(ge=1, le=5)
+    payload: dict[str, Any]
+
+
+class PerceptionFrame(StrictModel):
+    schema_version: Literal[1] = 1
+    world_id: str = Field(min_length=1)
+    world_version: int = Field(ge=1)
+    world_time_ms: int = Field(ge=0)
+    session_id: str = Field(min_length=1)
+    character_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+    participant_ids: list[str]
+    visible_entities: list[PerceivedEntity]
+    reachable_destinations: list[ReachableDestination]
+    memories: list[PerceivedMemory]
+
+
+class UtteranceAction(StrictModel):
+    kind: Literal["utterance"]
+    text: str = Field(min_length=1, max_length=2000)
+    addressee_ids: list[str] = Field(default_factory=list)
+
+
+class MoveAction(StrictModel):
+    kind: Literal["move"]
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+
+
+class InteractAction(StrictModel):
+    kind: Literal["interact"]
+    target_id: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class WaitAction(StrictModel):
+    kind: Literal["wait"]
+    duration_ms: int = Field(gt=0, le=300_000)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class NoOpAction(StrictModel):
+    kind: Literal["no_op"]
+    reason: str = Field(min_length=1, max_length=500)
+
+
+Action = Annotated[
+    UtteranceAction | MoveAction | InteractAction | WaitAction | NoOpAction,
+    Field(discriminator="kind"),
+]
+
+
+class MemoryChangeCandidate(StrictModel):
+    agent_id: str = Field(min_length=1)
+    namespace: str = Field(default="default", min_length=1)
+    memory_type: Literal["belief", "commitment"]
+    content: str = Field(min_length=1, max_length=2000)
+    importance: int = Field(default=1, ge=1, le=5)
+    supersedes_memory_id: str | None = None
+
+
+class ActionProposal(StrictModel):
+    schema_version: Literal[1] = 1
+    proposal_id: str = Field(min_length=1)
+    world_version: int = Field(ge=1)
+    session_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    intent_summary: str = Field(min_length=1, max_length=280)
+    action: Action
+    memory_changes: list[MemoryChangeCandidate] = Field(default_factory=list)
+
+
+class EntityStateChange(StrictModel):
+    entity_id: str = Field(min_length=1)
+    state_patch: dict[str, Any] = Field(default_factory=dict)
+    location_id: str | None = None
+    scope_key: str | None = None
+
+    @model_validator(mode="after")
+    def location_and_scope_are_paired(self) -> EntityStateChange:
+        if (self.location_id is None) != (self.scope_key is None):
+            raise ValueError("location_id and scope_key must be provided together")
+        return self
+
+
+class CandidateEvent(StrictModel):
+    event_key: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    actor_id: str | None = None
+    start_time_ms: int = Field(ge=0)
+    end_time_ms: int = Field(ge=0)
+    cause_event_keys: list[str] = Field(default_factory=list)
+    source_kind: str = Field(min_length=1)
+    source_ref: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def has_source_evidence(self) -> CandidateEvent:
+        if self.source_ref is None and not self.evidence_refs:
+            raise ValueError("source_ref or evidence_refs is required")
+        return self
+
+
+class ExternalEventCandidate(CandidateEvent):
+    """A Director-owned candidate which may have no Character actor."""
+
+    source_kind: Literal["director", "environment", "system", "tool", "player_request"]
+
+
+class SegmentDraft(StrictModel):
+    schema_version: Literal[1] = 1
+    world_version: int = Field(ge=1)
+    session_id: str = Field(min_length=1)
+    wave_started_at_ms: int = Field(ge=0)
+    wave_ended_at_ms: int = Field(ge=0)
+    proposal_events: list[CandidateEvent]
+    external_events: list[ExternalEventCandidate] = Field(default_factory=list)
+    entity_changes: list[EntityStateChange] = Field(default_factory=list)
+    session_intent: Literal["keep_open", "resolved"] = "keep_open"
+
+
+class ValidatedCommitPlan(StrictModel):
+    schema_version: Literal[1] = 1
+    world_id: str = Field(min_length=1)
+    base_world_version: int = Field(ge=1)
+    new_world_version: int = Field(ge=2)
+    session_id: str = Field(min_length=1)
+    wave_started_at_ms: int = Field(ge=0)
+    wave_ended_at_ms: int = Field(ge=0)
+    events: list[CandidateEvent | ExternalEventCandidate]
+    entity_changes: list[EntityStateChange] = Field(default_factory=list)
+    accepted_memory_changes: list[MemoryChangeCandidate] = Field(default_factory=list)
+    session_intent: Literal["keep_open", "resolved"] = "keep_open"
+    proposal_ids: list[str]
+    source_trace_id: str = Field(min_length=1)
+
+
+class ValidationDiagnostic(StrictModel):
+    code: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    message: str = Field(min_length=1)
