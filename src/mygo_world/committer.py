@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from mygo_world.canonical import canonical_json, sha256_text
@@ -23,9 +23,12 @@ from mygo_world.db.models import (
     AgentMemoryRow,
     EntityRevisionRow,
     EventSessionMemberRow,
+    EventSessionParentRow,
+    EventSessionPendingResponseRow,
     EventSessionRow,
     GenerationTraceRow,
     RunnableSessionQueueRow,
+    SkillBindingRow,
     SnapshotRow,
     WorldEventRow,
     WorldRow,
@@ -35,6 +38,7 @@ from mygo_world.db.models import (
 from mygo_world.perception import PerceptionProjector
 from mygo_world.recognizer import EventRecognizer
 from mygo_world.repositories import LedgerRepository
+from mygo_world.skills import EffectiveSkill
 
 Clock = Callable[[], datetime]
 IdGenerator = Callable[[], str]
@@ -52,6 +56,7 @@ def uuid4_id() -> str:
 class GenesisCommitPlan:
     world_id: str
     loaded_seed: LoadedSeed
+    skill_bindings: tuple[EffectiveSkill, ...]
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,7 @@ class WaveCommitResult:
     world_event_count: int
     observation_count: int
     entity_revision_count: int
+    continuation_session_id: str | None
 
 
 def _entity_payload(
@@ -123,6 +129,8 @@ def _snapshot(plan: GenesisCommitPlan) -> dict[str, Any]:
             "location_id": item.location_id,
             "scope_key": item.scope_key,
             "participant_ids": sorted(item.participant_ids),
+            "parent_session_ids": [],
+            "pending_response_ids": [],
         }
         for item in sorted(seed.sessions, key=lambda value: value.session_id)
     ]
@@ -252,6 +260,7 @@ class WorldCommitter:
                             agent_id=participant_id,
                         )
                     )
+                session.flush()
                 session.add(
                     RunnableSessionQueueRow(
                         queue_order=queue_order,
@@ -261,7 +270,21 @@ class WorldCommitter:
                     )
                 )
 
-            for memory in seed.memories:
+            remaining_memories = {item.memory_id: item for item in seed.memories}
+            inserted_memory_ids: set[str] = set()
+            while remaining_memories:
+                ready = sorted(
+                    (
+                        item
+                        for item in remaining_memories.values()
+                        if item.supersedes_memory_id is None
+                        or item.supersedes_memory_id in inserted_memory_ids
+                    ),
+                    key=lambda item: item.memory_id,
+                )
+                if not ready:
+                    raise ValueError("Scenario Seed Memory supersedes graph is cyclic")
+                memory = ready[0]
                 session.add(
                     AgentMemoryRow(
                         memory_id=memory.memory_id,
@@ -271,6 +294,11 @@ class WorldCommitter:
                         world_version=1,
                         relative_time_ms=memory.relative_time_ms,
                         importance=memory.importance,
+                        source=memory.source,
+                        status=memory.status,
+                        supersedes_memory_id=memory.supersedes_memory_id,
+                        entity_tags_json=canonical_json(sorted(memory.entity_tags)),
+                        location_tags_json=canonical_json(sorted(memory.location_tags)),
                         schema_version=1,
                         payload_json=canonical_json(
                             {
@@ -280,6 +308,29 @@ class WorldCommitter:
                                 "source": memory.source,
                             }
                         ),
+                    )
+                )
+                session.flush()
+                inserted_memory_ids.add(memory.memory_id)
+                del remaining_memories[memory.memory_id]
+
+            for binding_order, binding in enumerate(plan.skill_bindings, start=1):
+                session.add(
+                    SkillBindingRow(
+                        binding_id=(f"seed:{binding.agent_kind}:{binding.agent_id}"),
+                        binding_order=binding_order,
+                        world_id=plan.world_id,
+                        agent_kind=binding.agent_kind,
+                        agent_id=binding.agent_id,
+                        previous_skill_id=None,
+                        previous_skill_version=None,
+                        previous_skill_content_hash=None,
+                        skill_id=binding.skill_id,
+                        skill_version=binding.version,
+                        skill_content_hash=binding.content_hash,
+                        operator="scenario_seed",
+                        reason="initial binding",
+                        bound_at=created_at,
                     )
                 )
 
@@ -376,6 +427,11 @@ class WorldCommitter:
                     item.model_dump(mode="json") for item in plan.entity_changes
                 ],
                 "session_intent": plan.session_intent,
+                "closed_session_ids": plan.closed_session_ids,
+                "successor_sessions": [
+                    item.model_dump(mode="json") for item in plan.successor_sessions
+                ],
+                "pending_response_ids": plan.pending_response_ids,
             }
             ledger = LedgerRepository(session)
             ledger.append_segment(
@@ -417,29 +473,9 @@ class WorldCommitter:
             session.flush()
             inject("entity_revisions")
 
-            if plan.session_intent in {"resolved", "limit_reached"}:
-                event_session = session.get(EventSessionRow, plan.session_id)
-                if event_session is None:
-                    raise ValueError("Validated Event Session is missing")
-                event_session.status = "closed"
-                event_session.closed_world_version = plan.new_world_version
-                event_session.closure_reason = plan.session_intent
-                queue_entry = session.scalar(
-                    select(RunnableSessionQueueRow).where(
-                        RunnableSessionQueueRow.session_id == plan.session_id
-                    )
-                )
-                if queue_entry is not None:
-                    queue_entry.dequeued_world_version = plan.new_world_version
-                for item in new_snapshot["sessions"]:
-                    if item["session_id"] == plan.session_id:
-                        item["status"] = "closed"
-                        item["closure_reason"] = plan.session_intent
-                new_snapshot["runnable_session_queue"] = [
-                    item
-                    for item in new_snapshot["runnable_session_queue"]
-                    if item["session_id"] != plan.session_id
-                ]
+            continuation_session_id = self._apply_session_transition(
+                session, plan, new_snapshot
+            )
             inject("session")
 
             first_event_order = (
@@ -485,7 +521,7 @@ class WorldCommitter:
             inject("world_events")
 
             observations = PerceptionProjector().project_event_observations(
-                recognized, new_snapshot
+                recognized, new_snapshot, base_snapshot=snapshot
             )
             for observation in observations:
                 session.add(
@@ -497,6 +533,15 @@ class WorldCommitter:
                         world_version=plan.new_world_version,
                         relative_time_ms=observation.relative_time_ms,
                         importance=2,
+                        source=f"world_event:{observation.event_id}",
+                        status=None,
+                        supersedes_memory_id=None,
+                        entity_tags_json="[]",
+                        location_tags_json=canonical_json(
+                            [observation.location_id]
+                            if observation.location_id is not None
+                            else []
+                        ),
                         schema_version=1,
                         payload_json=canonical_json(observation.payload),
                     )
@@ -514,6 +559,11 @@ class WorldCommitter:
                         world_version=plan.new_world_version,
                         relative_time_ms=plan.wave_ended_at_ms,
                         importance=change.importance,
+                        source=change.source,
+                        status=change.status,
+                        supersedes_memory_id=change.supersedes_memory_id,
+                        entity_tags_json=canonical_json(sorted(change.entity_tags)),
+                        location_tags_json=canonical_json(sorted(change.location_tags)),
                         schema_version=1,
                         payload_json=canonical_json(payload),
                     )
@@ -542,7 +592,167 @@ class WorldCommitter:
             world_event_count=len(recognized),
             observation_count=len(observations),
             entity_revision_count=entity_revision_count,
+            continuation_session_id=continuation_session_id,
         )
+
+    def _apply_session_transition(
+        self,
+        session: Session,
+        plan: ValidatedCommitPlan,
+        snapshot: dict[str, Any],
+    ) -> str | None:
+        snapshot_sessions = {item["session_id"]: item for item in snapshot["sessions"]}
+        closure_reason = (
+            "partitioned"
+            if plan.successor_sessions
+            else plan.session_intent
+            if plan.session_intent in {"resolved", "limit_reached"}
+            else None
+        )
+        closed_ids = set(plan.closed_session_ids)
+        if closure_reason is not None and not closed_ids:
+            closed_ids.add(plan.session_id)
+
+        for closed_id in sorted(closed_ids):
+            event_session = session.get(EventSessionRow, closed_id)
+            if event_session is None or event_session.status != "runnable":
+                raise ValueError(f"Runnable Event Session '{closed_id}' is missing")
+            event_session.status = "closed"
+            event_session.closed_world_version = plan.new_world_version
+            event_session.closure_reason = closure_reason
+            queue_entry = session.scalar(
+                select(RunnableSessionQueueRow).where(
+                    RunnableSessionQueueRow.session_id == closed_id,
+                    RunnableSessionQueueRow.dequeued_world_version.is_(None),
+                )
+            )
+            if queue_entry is None:
+                raise ValueError(
+                    f"Runnable Event Session '{closed_id}' has no active queue entry"
+                )
+            queue_entry.dequeued_world_version = plan.new_world_version
+            snapshot_session = snapshot_sessions.get(closed_id)
+            if snapshot_session is None:
+                raise ValueError(
+                    f"Event Session '{closed_id}' is missing from Snapshot"
+                )
+            snapshot_session["status"] = "closed"
+            snapshot_session["closure_reason"] = closure_reason
+            snapshot_session["closed_world_version"] = plan.new_world_version
+            snapshot_session["pending_response_ids"] = []
+
+        snapshot["runnable_session_queue"] = [
+            item
+            for item in snapshot["runnable_session_queue"]
+            if item["session_id"] not in closed_ids
+        ]
+        if closed_ids:
+            session.execute(
+                delete(EventSessionPendingResponseRow).where(
+                    EventSessionPendingResponseRow.session_id.in_(closed_ids)
+                )
+            )
+
+        if plan.successor_sessions:
+            next_queue_order = (
+                int(
+                    session.scalar(
+                        select(func.max(RunnableSessionQueueRow.queue_order))
+                    )
+                    or 0
+                )
+                + 1
+            )
+            for offset, successor in enumerate(plan.successor_sessions):
+                if session.get(EventSessionRow, successor.session_id) is not None:
+                    raise ValueError(
+                        f"Successor Event Session '{successor.session_id}' already exists"
+                    )
+                session.add(
+                    EventSessionRow(
+                        session_id=successor.session_id,
+                        status="runnable",
+                        location_id=successor.location_id,
+                        scope_key=successor.scope_key,
+                        created_world_version=plan.new_world_version,
+                        closed_world_version=None,
+                        closure_reason=None,
+                    )
+                )
+                session.flush()
+                for participant_id in successor.participant_ids:
+                    session.add(
+                        EventSessionMemberRow(
+                            session_id=successor.session_id,
+                            agent_id=participant_id,
+                        )
+                    )
+                for parent_session_id in successor.parent_session_ids:
+                    session.add(
+                        EventSessionParentRow(
+                            session_id=successor.session_id,
+                            parent_session_id=parent_session_id,
+                        )
+                    )
+                session.flush()
+                for responder_id in successor.pending_response_ids:
+                    session.add(
+                        EventSessionPendingResponseRow(
+                            session_id=successor.session_id,
+                            responder_id=responder_id,
+                        )
+                    )
+                queue_order = next_queue_order + offset
+                session.add(
+                    RunnableSessionQueueRow(
+                        queue_order=queue_order,
+                        session_id=successor.session_id,
+                        enqueued_world_version=plan.new_world_version,
+                        dequeued_world_version=None,
+                    )
+                )
+                snapshot_session = {
+                    "session_id": successor.session_id,
+                    "status": "runnable",
+                    "location_id": successor.location_id,
+                    "scope_key": successor.scope_key,
+                    "participant_ids": successor.participant_ids,
+                    "parent_session_ids": successor.parent_session_ids,
+                    "pending_response_ids": successor.pending_response_ids,
+                }
+                snapshot["sessions"].append(snapshot_session)
+                snapshot["runnable_session_queue"].append(
+                    {
+                        "queue_order": queue_order,
+                        "session_id": successor.session_id,
+                    }
+                )
+            snapshot["sessions"].sort(key=lambda item: item["session_id"])
+            snapshot["runnable_session_queue"].sort(
+                key=lambda item: item["queue_order"]
+            )
+            return plan.successor_sessions[0].session_id
+
+        if not closed_ids:
+            event_session = session.get(EventSessionRow, plan.session_id)
+            if event_session is None or event_session.status != "runnable":
+                raise ValueError("Validated Event Session is missing")
+            session.execute(
+                delete(EventSessionPendingResponseRow).where(
+                    EventSessionPendingResponseRow.session_id == plan.session_id
+                )
+            )
+            for responder_id in plan.pending_response_ids:
+                session.add(
+                    EventSessionPendingResponseRow(
+                        session_id=plan.session_id,
+                        responder_id=responder_id,
+                    )
+                )
+            snapshot_sessions[plan.session_id]["pending_response_ids"] = (
+                plan.pending_response_ids
+            )
+        return None
 
     def _apply_entity_changes(
         self,

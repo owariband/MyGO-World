@@ -4,6 +4,20 @@ version: 1.0.0
 name: Minimal MyGO World
 world_time_ms: 0
 calendar_anchor: "2026-08-31T09:00:00+08:00"
+skill_bindings:
+  characters:
+    character-anon:
+      skill_id: mygo.character.anon
+      version: 1.0.0
+    character-soyo:
+      skill_id: mygo.character.soyo
+      version: 1.0.0
+  director:
+    skill_id: mygo.director.default
+    version: 1.0.0
+  broadcast:
+    skill_id: mygo.broadcast.default
+    version: 1.0.0
 entities:
   - entity_type: location
     entity_id: location-live-house

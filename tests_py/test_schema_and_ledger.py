@@ -38,7 +38,7 @@ def test_alembic_cli_creates_latest_schema(tmp_path: Path) -> None:
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0004_generation_batches",)
+        ).fetchone() == ("0006_session_lineages",)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='worlds'"
         ).fetchone() == ("worlds",)

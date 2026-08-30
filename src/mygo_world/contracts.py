@@ -89,6 +89,35 @@ class MemorySeed(StrictModel):
     entity_tags: list[str] = Field(default_factory=list)
     location_tags: list[str] = Field(default_factory=list)
     source: str = Field(default="scenario_seed", min_length=1)
+    status: Literal["active", "completed", "cancelled"] | None = None
+    supersedes_memory_id: str | None = None
+
+    @model_validator(mode="after")
+    def state_matches_memory_type(self) -> MemorySeed:
+        if self.memory_type == "commitment":
+            if self.status is None:
+                self.status = "active"
+        elif self.status is not None:
+            raise ValueError("status is only valid for commitment Memory")
+        if (
+            self.memory_type not in {"belief", "commitment"}
+            and self.supersedes_memory_id
+        ):
+            raise ValueError(
+                "supersedes_memory_id is only valid for belief or commitment Memory"
+            )
+        return self
+
+
+class SkillReference(StrictModel):
+    skill_id: str = Field(pattern=r"^[a-z][a-z0-9._:-]*$")
+    version: str = Field(min_length=1, max_length=100)
+
+
+class ScenarioSkillBindings(StrictModel):
+    characters: dict[str, SkillReference]
+    director: SkillReference
+    broadcast: SkillReference
 
 
 class ScenarioSeed(StrictModel):
@@ -101,6 +130,7 @@ class ScenarioSeed(StrictModel):
     entities: list[EntitySeed] = Field(min_length=1)
     sessions: list[EventSessionSeed] = Field(min_length=1)
     memories: list[MemorySeed] = Field(default_factory=list)
+    skill_bindings: ScenarioSkillBindings
 
     @field_validator("calendar_anchor")
     @classmethod
@@ -196,6 +226,59 @@ class ScenarioSeed(StrictModel):
                     f"memory '{memory.memory_id}' references unknown character "
                     f"'{memory.agent_id}'"
                 )
+        bound_characters = set(self.skill_bindings.characters)
+        character_ids = set(characters)
+        if bound_characters != character_ids:
+            missing = sorted(character_ids - bound_characters)
+            extra = sorted(bound_characters - character_ids)
+            raise ValueError(
+                "skill_bindings.characters must exactly match Scenario Characters "
+                f"(missing={missing}, extra={extra})"
+            )
+
+        memories_by_id = {memory.memory_id: memory for memory in self.memories}
+        superseded_ids = [
+            memory.supersedes_memory_id
+            for memory in self.memories
+            if memory.supersedes_memory_id is not None
+        ]
+        if len(superseded_ids) != len(set(superseded_ids)):
+            raise ValueError("a Memory record may only be superseded once")
+        for memory in self.memories:
+            if memory.supersedes_memory_id is None:
+                if memory.memory_type == "commitment" and memory.status != "active":
+                    raise ValueError(
+                        f"memory '{memory.memory_id}' terminal commitment requires "
+                        "supersedes_memory_id"
+                    )
+                continue
+            previous = memories_by_id.get(memory.supersedes_memory_id)
+            if previous is None:
+                raise ValueError(
+                    f"memory '{memory.memory_id}' supersedes unknown Memory "
+                    f"'{memory.supersedes_memory_id}'"
+                )
+            if (
+                previous.agent_id != memory.agent_id
+                or previous.namespace != memory.namespace
+                or previous.memory_type != memory.memory_type
+            ):
+                raise ValueError(
+                    f"memory '{memory.memory_id}' may only supersede its own namespace "
+                    "and Memory type"
+                )
+            visited = {memory.memory_id}
+            cursor = previous
+            while cursor.supersedes_memory_id is not None:
+                if cursor.supersedes_memory_id in visited:
+                    raise ValueError(
+                        "Memory supersedes references must not form a cycle"
+                    )
+                visited.add(cursor.supersedes_memory_id)
+                next_memory = memories_by_id.get(cursor.supersedes_memory_id)
+                if next_memory is None:
+                    break
+                cursor = next_memory
         return self
 
 
@@ -247,6 +330,11 @@ class PerceivedMemory(StrictModel):
     memory_type: Literal["observation", "belief", "commitment", "reflection"]
     relative_time_ms: int = Field(ge=0)
     importance: int = Field(ge=1, le=5)
+    source: str = Field(min_length=1)
+    status: Literal["active", "completed", "cancelled"] | None = None
+    supersedes_memory_id: str | None = None
+    entity_tags: list[str] = Field(default_factory=list)
+    location_tags: list[str] = Field(default_factory=list)
     payload: dict[str, Any]
 
 
@@ -307,6 +395,26 @@ class MemoryChangeCandidate(StrictModel):
     content: str = Field(min_length=1, max_length=2000)
     importance: int = Field(default=1, ge=1, le=5)
     supersedes_memory_id: str | None = None
+    entity_tags: list[str] = Field(default_factory=list)
+    location_tags: list[str] = Field(default_factory=list)
+    source: str = Field(default="character", min_length=1)
+    status: Literal["active", "completed", "cancelled"] | None = None
+
+    @model_validator(mode="after")
+    def state_matches_memory_type(self) -> MemoryChangeCandidate:
+        if self.memory_type == "commitment":
+            if self.status is None:
+                self.status = "active"
+            if (
+                self.status in {"completed", "cancelled"}
+                and not self.supersedes_memory_id
+            ):
+                raise ValueError(
+                    "completed or cancelled commitment requires supersedes_memory_id"
+                )
+        elif self.status is not None:
+            raise ValueError("status is only valid for commitment Memory")
+        return self
 
 
 class ActionProposal(StrictModel):
@@ -372,6 +480,15 @@ class SegmentDraft(StrictModel):
     session_intent: Literal["keep_open", "resolved"] = "keep_open"
 
 
+class SuccessorSession(StrictModel):
+    session_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+    participant_ids: list[str] = Field(min_length=1)
+    parent_session_ids: list[str] = Field(min_length=1)
+    pending_response_ids: list[str] = Field(default_factory=list)
+
+
 class ValidatedCommitPlan(StrictModel):
     schema_version: Literal[1] = 1
     world_id: str = Field(min_length=1)
@@ -383,7 +500,12 @@ class ValidatedCommitPlan(StrictModel):
     events: list[CandidateEvent | ExternalEventCandidate]
     entity_changes: list[EntityStateChange] = Field(default_factory=list)
     accepted_memory_changes: list[MemoryChangeCandidate] = Field(default_factory=list)
-    session_intent: Literal["keep_open", "resolved", "limit_reached"] = "keep_open"
+    session_intent: Literal["keep_open", "partitioned", "resolved", "limit_reached"] = (
+        "keep_open"
+    )
+    closed_session_ids: list[str] = Field(default_factory=list)
+    successor_sessions: list[SuccessorSession] = Field(default_factory=list)
+    pending_response_ids: list[str] = Field(default_factory=list)
     proposal_ids: list[str]
     source_trace_id: str = Field(min_length=1)
 

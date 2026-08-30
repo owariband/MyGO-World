@@ -35,6 +35,7 @@ from mygo_world.errors import (
     WorldError,
     WorldNotFoundError,
 )
+from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
 
 WORLD_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -74,6 +75,7 @@ def _materialize(
     *,
     clock: Clock,
     id_generator: IdGenerator,
+    skill_bindings: tuple[Any, ...],
 ) -> dict[str, Any]:
     upgrade_to_head(path)
     engine = create_world_engine(path)
@@ -84,7 +86,13 @@ def _materialize(
             engine,
             clock=clock,
             id_generator=id_generator,
-        ).commit_genesis(GenesisCommitPlan(world_id=world_id, loaded_seed=loaded))
+        ).commit_genesis(
+            GenesisCommitPlan(
+                world_id=world_id,
+                loaded_seed=loaded,
+                skill_bindings=skill_bindings,
+            )
+        )
     finally:
         engine.dispose()
 
@@ -100,6 +108,16 @@ def _materialize(
             "content_hash": loaded.content_hash,
         },
         "database_path": str(path.resolve()),
+        "skill_bindings": [
+            {
+                "agent_kind": item.agent_kind,
+                "agent_id": item.agent_id,
+                "skill_id": item.skill_id,
+                "version": item.version,
+                "content_hash": item.content_hash,
+            }
+            for item in skill_bindings
+        ],
     }
 
 
@@ -110,12 +128,23 @@ def initialize_world(
     *,
     clock: Clock = system_clock,
     id_generator: IdGenerator = uuid4_id,
+    skills_dir: Path = DEFAULT_SKILLS_DIR,
 ) -> dict[str, Any]:
     validate_world_id(world_id)
     paths = WorldPaths(worlds_dir, world_id)
     if paths.database.exists():
         raise WorldAlreadyExistsError(world_id)
     loaded = load_seed(seed_path)
+    # Imported lazily to keep the World lifecycle module independent from the
+    # operator-facing binding command, which itself uses WorldPaths and its lock.
+    from mygo_world.skill_bindings import resolve_seed_skills
+
+    try:
+        skill_bindings = resolve_seed_skills(
+            loaded.seed, RuntimeSkillCatalog.load(skills_dir)
+        )
+    except WorldError as exc:
+        raise SeedInvalidError(exc.message) from exc
 
     with mutation_lock(paths.mutation_lock):
         if paths.database.exists():
@@ -134,6 +163,7 @@ def initialize_world(
                 loaded,
                 clock=clock,
                 id_generator=id_generator,
+                skill_bindings=skill_bindings,
             )
             with temporary.open("rb") as database_file:
                 os.fsync(database_file.fileno())
@@ -193,6 +223,15 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                     .order_by(AgentMemoryRow.memory_id)
                 )
             )
+            memories = list(
+                session.scalars(
+                    select(AgentMemoryRow).order_by(
+                        AgentMemoryRow.agent_id,
+                        AgentMemoryRow.namespace,
+                        AgentMemoryRow.memory_id,
+                    )
+                )
+            )
             snapshot = json.loads(snapshot_row.snapshot_json)
             return {
                 "command": "show",
@@ -226,6 +265,24 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                         "payload": json.loads(item.payload_json),
                     }
                     for item in observations
+                ],
+                "memories": [
+                    {
+                        "memory_id": item.memory_id,
+                        "agent_id": item.agent_id,
+                        "namespace": item.namespace,
+                        "memory_type": item.memory_type,
+                        "world_version": item.world_version,
+                        "relative_time_ms": item.relative_time_ms,
+                        "importance": item.importance,
+                        "entity_tags": json.loads(item.entity_tags_json),
+                        "location_tags": json.loads(item.location_tags_json),
+                        "source": item.source,
+                        "status": item.status,
+                        "supersedes_memory_id": item.supersedes_memory_id,
+                        "payload": json.loads(item.payload_json),
+                    }
+                    for item in memories
                 ],
                 "seed": {
                     "seed_id": world.seed_id,

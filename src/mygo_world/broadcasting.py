@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mygo_world.canonical import canonical_json, sha256_text
+from mygo_world.canonical import canonical_json
 from mygo_world.committer import (
     Clock,
     GenerationTraceRecord,
@@ -48,12 +48,9 @@ from mygo_world.rendering import (
     RenderPlanner,
     load_asset_manifest,
 )
+from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
+from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
 from mygo_world.worlds import WorldPaths, mutation_lock, validate_world_id
-
-BROADCAST_SKILL = (
-    "Arrange committed World Events into sourced, self-contained WebGAL performance "
-    "Beats using only candidate Asset Manifest IDs."
-)
 
 
 def _broadcast_event(row: WorldEventRow) -> BroadcastEvent:
@@ -250,6 +247,7 @@ def render_world(
     clock: Clock = system_clock,
     id_generator: IdGenerator = uuid4_id,
     failure_injector: Callable[[str], None] | None = None,
+    skills_dir: Path = DEFAULT_SKILLS_DIR,
 ) -> dict[str, Any]:
     validate_world_id(world_id)
     paths = WorldPaths(worlds_dir, world_id)
@@ -262,6 +260,14 @@ def render_world(
         engine = create_world_engine(paths.database)
         try:
             require_current_schema(paths.database, engine)
+            bindings = load_effective_skills(
+                engine,
+                world_id=world_id,
+                catalog=RuntimeSkillCatalog.load(skills_dir),
+            )
+            broadcast_skill = require_effective_skill(
+                bindings, "broadcast", "global-broadcast"
+            )
             with Session(engine) as session:
                 world = session.get(WorldRow, world_id)
                 if world is None:
@@ -331,9 +337,9 @@ def render_world(
                 agent_id="global-broadcast",
                 call_kind="broadcast_plan",
                 model_id=getattr(gateway, "model_id", "fixture-model-v1"),
-                skill_id="broadcast-skill:global",
-                skill_version="1",
-                skill_content_hash=sha256_text(BROADCAST_SKILL),
+                skill_id=broadcast_skill.skill_id,
+                skill_version=broadcast_skill.version,
+                skill_content_hash=broadcast_skill.content_hash,
                 input_payload={
                     "world_id": world_id,
                     "world_version": target,
@@ -342,6 +348,7 @@ def render_world(
                     "asset_candidates": _asset_candidates(manifest),
                 },
                 model_config={"temperature": 0},
+                skill_body=broadcast_skill.body,
             )
             generation = gateway.generate(request, BroadcastPlan)
             trace_id = id_generator()

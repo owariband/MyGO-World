@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ from mygo_world.db.engine import create_world_engine, require_current_schema
 from mygo_world.db.models import (
     AgentMemoryRow,
     EventSessionMemberRow,
+    EventSessionPendingResponseRow,
     GenerationBatchRow,
     GenerationWaveRow,
     RunnableSessionQueueRow,
@@ -51,12 +52,13 @@ from mygo_world.gateways import (
     ModelTransportError,
     OpenAICompatibleGateway,
 )
+from mygo_world.memory import AgentMemoryRepository
 from mygo_world.perception import PerceptionProjector
+from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
+from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
 from mygo_world.validators import ProposalValidator, SegmentValidator
 from mygo_world.worlds import WorldPaths, mutation_lock, validate_world_id
 
-CHARACTER_SKILL = "Propose one concise action consistent with visible facts."
-DIRECTOR_SKILL = "Complete objective outcomes without inventing Character agency."
 DEFAULT_REQUEST_BUDGET = 40
 DEFAULT_TRANSPORT_RETRIES = 2
 DEFAULT_CHARACTER_CONCURRENCY = 4
@@ -347,6 +349,7 @@ def _repair_request(
         skill_content_hash=request.skill_content_hash,
         input_payload=payload,
         model_config=request.model_config,
+        skill_body=request.skill_body,
     )
 
 
@@ -437,6 +440,9 @@ def _generate_director(
     budget: _RequestBudget,
     cancellation_event: threading.Event,
     retries: int,
+    completed_wave_count: int,
+    pending_response_ids: tuple[str, ...],
+    has_unresolved_key_commitments: bool,
 ) -> tuple[
     ValidatedCommitPlan,
     tuple[tuple[ModelGeneration[SegmentDraft], dict[str, Any]], ...],
@@ -491,6 +497,9 @@ def _generate_director(
             proposals=proposals,
             draft=generation.structured,
             source_trace_id=trace_id,
+            completed_wave_count=completed_wave_count,
+            pending_response_ids=pending_response_ids,
+            has_unresolved_key_commitments=has_unresolved_key_commitments,
         )
         validation = _diagnostics_payload(outcome.diagnostics, attempt=semantic_attempt)
         attempts.append((generation, validation))
@@ -657,7 +666,14 @@ def _current_version(engine: Any, world_id: str) -> int:
 
 def _load_wave_context(
     engine: Any, world_id: str, session_id: str
-) -> tuple[dict[str, Any], list[str], list[AgentMemoryRow]]:
+) -> tuple[
+    dict[str, Any],
+    list[str],
+    dict[str, list[AgentMemoryRow]],
+    int,
+    tuple[str, ...],
+    bool,
+]:
     with Session(engine) as session:
         world = session.get(WorldRow, world_id)
         if world is None:
@@ -678,15 +694,71 @@ def _load_wave_context(
                 .order_by(EventSessionMemberRow.agent_id)
             )
         )
-        memories = list(
-            session.scalars(select(AgentMemoryRow).order_by(AgentMemoryRow.memory_id))
+        memory_repository = AgentMemoryRepository(session)
+        memories_by_agent = {
+            participant_id: [
+                memory
+                for namespace in (
+                    memory_repository.namespaces(agent_id=participant_id) or ["default"]
+                )
+                for memory in memory_repository.retrieve(
+                    agent_id=participant_id,
+                    namespace=namespace,
+                    entity_tags=participants,
+                    location_tags=[_character(snapshot, participant_id)["location_id"]],
+                )
+            ]
+            for participant_id in participants
+        }
+        memories = [
+            memory
+            for participant_id in participants
+            for memory in memories_by_agent[participant_id]
+        ]
+        completed_wave_count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(GenerationWaveRow)
+                .where(
+                    GenerationWaveRow.session_id == session_id,
+                    GenerationWaveRow.status.in_(("committed", "no_op")),
+                )
+            )
+            or 0
+        )
+        pending_response_ids = tuple(
+            session.scalars(
+                select(EventSessionPendingResponseRow.responder_id)
+                .where(EventSessionPendingResponseRow.session_id == session_id)
+                .order_by(EventSessionPendingResponseRow.responder_id)
+            )
         )
     if not participants:
         raise WorldError(
             "SESSION_HAS_NO_PARTICIPANTS",
             f"Event Session '{session_id}' has no participants",
         )
-    return snapshot, participants, memories
+    superseded_memory_ids = {
+        item.supersedes_memory_id
+        for item in memories
+        if item.supersedes_memory_id is not None
+    }
+    has_unresolved_key_commitments = any(
+        item.agent_id in participants
+        and item.memory_type == "commitment"
+        and item.importance >= 4
+        and item.memory_id not in superseded_memory_ids
+        and item.status == "active"
+        for item in memories
+    )
+    return (
+        snapshot,
+        participants,
+        memories_by_agent,
+        completed_wave_count,
+        pending_response_ids,
+        has_unresolved_key_commitments,
+    )
 
 
 def _find_queue_head(engine: Any) -> tuple[str | None, int]:
@@ -786,6 +858,7 @@ def advance_world(
     clock: Clock = system_clock,
     id_generator: IdGenerator = uuid4_id,
     failure_injector: Any | None = None,
+    skills_dir: Path = DEFAULT_SKILLS_DIR,
 ) -> dict[str, Any]:
     validate_world_id(world_id)
     if max_waves < 1:
@@ -822,26 +895,7 @@ def advance_world(
             require_current_schema(paths.database, engine)
             _interrupt_stale_batches(engine, world_id, clock)
             session_id, start_version = _find_queue_head(engine)
-            _create_batch(
-                engine,
-                run_id=batch_run_id,
-                world_id=world_id,
-                session_id=session_id,
-                start_version=start_version,
-                clock=clock,
-            )
             if session_id is None:
-                _finish_batch(
-                    engine,
-                    run_id=batch_run_id,
-                    status="no_work",
-                    end_version=start_version,
-                    wave_count=0,
-                    request_count=0,
-                    warnings=warnings,
-                    error_code=None,
-                    clock=clock,
-                )
                 return _receipt(
                     world_id=world_id,
                     run_id=batch_run_id,
@@ -857,6 +911,20 @@ def advance_world(
                     gateway=selected_gateway,
                     database_path=paths.database,
                 )
+            pinned_skills = load_effective_skills(
+                engine,
+                world_id=world_id,
+                catalog=RuntimeSkillCatalog.load(skills_dir),
+            )
+            initial_session_id = session_id
+            _create_batch(
+                engine,
+                run_id=batch_run_id,
+                world_id=world_id,
+                session_id=session_id,
+                start_version=start_version,
+                clock=clock,
+            )
 
             committer = WorldCommitter(engine, clock=clock, id_generator=id_generator)
             semaphore = (
@@ -872,9 +940,14 @@ def advance_world(
                             "BATCH_CANCELLED", "Generation Batch was cancelled"
                         )
                     wave_count = wave_number
-                    snapshot, participant_ids, memories = _load_wave_context(
-                        engine, world_id, session_id
-                    )
+                    (
+                        snapshot,
+                        participant_ids,
+                        memories_by_agent,
+                        completed_wave_count,
+                        pending_response_ids,
+                        has_unresolved_key_commitments,
+                    ) = _load_wave_context(engine, world_id, session_id)
                     active_wave_id = id_generator()
                     _start_wave(
                         engine,
@@ -915,7 +988,7 @@ def advance_world(
                             snapshot,
                             session_id=session_id,
                             character_id=participant_id,
-                            memories=memories,
+                            memories=memories_by_agent[participant_id],
                         )
                         for participant_id in participant_ids
                     }
@@ -928,6 +1001,9 @@ def advance_world(
                     ) as executor:
                         for participant_id in participant_ids:
                             frame = frames[participant_id]
+                            skill = require_effective_skill(
+                                pinned_skills, "character", participant_id
+                            )
                             request = ModelRequest(
                                 agent_type="character",
                                 agent_id=participant_id,
@@ -935,9 +1011,9 @@ def advance_world(
                                 model_id=getattr(
                                     selected_gateway, "model_id", "fixture-model-v1"
                                 ),
-                                skill_id=f"character-skill:{participant_id}",
-                                skill_version="1",
-                                skill_content_hash=sha256_text(CHARACTER_SKILL),
+                                skill_id=skill.skill_id,
+                                skill_version=skill.version,
+                                skill_content_hash=skill.content_hash,
                                 input_payload={
                                     "world_version": snapshot["world_version"],
                                     "world_time_ms": snapshot["world_time_ms"],
@@ -946,6 +1022,7 @@ def advance_world(
                                     "perception_frame": frame.model_dump(mode="json"),
                                 },
                                 model_config={"temperature": 0},
+                                skill_body=skill.body,
                             )
                             futures[
                                 executor.submit(
@@ -1035,6 +1112,9 @@ def advance_world(
                     proposals = [
                         character_results[item].value for item in participant_ids
                     ]
+                    director_skill = require_effective_skill(
+                        pinned_skills, "director", "global-director"
+                    )
                     director_trace_id = id_generator()
                     director_request = ModelRequest(
                         agent_type="director",
@@ -1043,9 +1123,9 @@ def advance_world(
                         model_id=getattr(
                             selected_gateway, "model_id", "fixture-model-v1"
                         ),
-                        skill_id="director-skill:global",
-                        skill_version="1",
-                        skill_content_hash=sha256_text(DIRECTOR_SKILL),
+                        skill_id=director_skill.skill_id,
+                        skill_version=director_skill.version,
+                        skill_content_hash=director_skill.content_hash,
                         input_payload={
                             "world_version": snapshot["world_version"],
                             "world_time_ms": snapshot["world_time_ms"],
@@ -1057,6 +1137,7 @@ def advance_world(
                             ],
                         },
                         model_config={"temperature": 0},
+                        skill_body=director_skill.body,
                     )
                     try:
                         plan, director_attempts, director_schema_attempts = (
@@ -1070,6 +1151,11 @@ def advance_world(
                                 budget=budget,
                                 cancellation_event=cancel,
                                 retries=transport_retries,
+                                completed_wave_count=completed_wave_count,
+                                pending_response_ids=pending_response_ids,
+                                has_unresolved_key_commitments=(
+                                    has_unresolved_key_commitments
+                                ),
                             )
                         )
                     except WorldError as exc:
@@ -1140,6 +1226,8 @@ def advance_world(
                         plan = plan.model_copy(
                             update={
                                 "session_intent": "limit_reached",
+                                "closed_session_ids": [session_id],
+                                "pending_response_ids": [],
                                 "wave_ended_at_ms": (
                                     snapshot["world_time_ms"]
                                     if all(
@@ -1182,6 +1270,8 @@ def advance_world(
                     active_wave_id = None
                     if plan.session_intent in {"resolved", "limit_reached"}:
                         break
+                    if last_result.continuation_session_id is not None:
+                        session_id = last_result.continuation_session_id
                     if using_builtin_fixture:
                         # The checked-in fixture has one Wave of responses. It still
                         # exercises the full lockstep scheduler without closing the
@@ -1203,7 +1293,7 @@ def advance_world(
                 return _receipt(
                     world_id=world_id,
                     run_id=batch_run_id,
-                    session_id=session_id,
+                    session_id=initial_session_id,
                     status="completed",
                     start_version=start_version,
                     end_version=end_version,
@@ -1249,7 +1339,7 @@ def advance_world(
                 receipt = _receipt(
                     world_id=world_id,
                     run_id=batch_run_id,
-                    session_id=session_id,
+                    session_id=initial_session_id,
                     status=status,
                     start_version=start_version,
                     end_version=end_version,

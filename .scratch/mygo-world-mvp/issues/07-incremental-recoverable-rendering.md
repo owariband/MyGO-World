@@ -6,6 +6,8 @@
 
 Status: ready-for-agent
 
+**Execution goal:** `../goals/07-incremental-recoverable-rendering.md`
+
 - [ ] Broadcast frontier 按目标 World Version 内缺少 Disposition 的 Event 计算，不按 Generation Batch 切分。
 - [ ] 每个 frontier Event 恰好得到一个不可变 `included` 或带原因的 `omitted` Disposition。
 - [ ] 每个 included Event 至少被一个 Beat 引用，遗漏来源或重复处理会被确定性拒绝。

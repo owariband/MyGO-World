@@ -54,7 +54,7 @@ def _director(request: ModelRequest, *, invalid_time: bool = False) -> dict[str,
         "proposal_events": [],
         "external_events": [],
         "entity_changes": [],
-        "session_intent": "resolved",
+        "session_intent": "keep_open",
     }
 
 
@@ -153,7 +153,7 @@ def test_batch_calls_all_characters_concurrently_from_one_boundary(
     initialize_world(MINIMAL_SEED, "lockstep", worlds_dir)
     gateway = ObservingGateway()
 
-    receipt = advance_world("lockstep", worlds_dir, gateway=gateway)
+    receipt = advance_world("lockstep", worlds_dir, gateway=gateway, max_waves=1)
 
     assert gateway.max_active == 2
     assert gateway.character_contexts == [(1, 0), (1, 0)]
@@ -162,7 +162,7 @@ def test_batch_calls_all_characters_concurrently_from_one_boundary(
     assert receipt["status"] == "completed"
     assert receipt["wave_count"] == 1
     assert receipt["model_call_count"] == 3
-    assert receipt["warnings"] == []
+    assert receipt["warnings"] == ["MAX_WAVES_REACHED"]
     assert receipt["error_code"] is None
 
     database = worlds_dir / "lockstep" / "world.sqlite3"
@@ -203,12 +203,19 @@ def test_default_global_character_capacity_is_four(
         )
     raw["sessions"][0]["participant_ids"] = participants
     raw["memories"] = []
+    raw["skill_bindings"]["characters"] = {
+        character_id: {
+            "skill_id": "mygo.character.anon",
+            "version": "1.0.0",
+        }
+        for character_id in participants
+    }
     seed = tmp_path / "six-characters.yaml"
     seed.write_text(yaml.safe_dump(raw))
     initialize_world(seed, "capacity", worlds_dir)
     gateway = ObservingGateway()
 
-    advance_world("capacity", worlds_dir, gateway=gateway)
+    advance_world("capacity", worlds_dir, gateway=gateway, max_waves=1)
 
     assert gateway.max_active == 4
 
@@ -219,7 +226,7 @@ def test_semantic_repairs_are_limited_to_the_invalid_agent_call(
     initialize_world(MINIMAL_SEED, "repair", worlds_dir)
     gateway = RepairGateway()
 
-    receipt = advance_world("repair", worlds_dir, gateway=gateway)
+    receipt = advance_world("repair", worlds_dir, gateway=gateway, max_waves=1)
 
     assert Counter(gateway.calls) == Counter(
         {
@@ -277,12 +284,12 @@ def test_schema_failure_raw_response_is_traced_before_one_repair(
             "proposal_events": [],
             "external_events": [],
             "entity_changes": [],
-            "session_intent": "resolved",
+            "session_intent": "keep_open",
         },
     }
     gateway = FixtureGateway(responses)
 
-    receipt = advance_world("schema-repair", worlds_dir, gateway=gateway)
+    receipt = advance_world("schema-repair", worlds_dir, gateway=gateway, max_waves=1)
 
     assert receipt["model_call_count"] == 4
     assert len(gateway.calls) == 4
@@ -320,7 +327,7 @@ def test_retryable_transport_error_recovers_within_two_retries(
     initialize_world(MINIMAL_SEED, "retry-ok", worlds_dir)
     gateway = RetryingGateway(failures=2)
 
-    receipt = advance_world("retry-ok", worlds_dir, gateway=gateway)
+    receipt = advance_world("retry-ok", worlds_dir, gateway=gateway, max_waves=1)
 
     assert gateway.attempts["character-anon"] == 3
     assert receipt["status"] == "completed"

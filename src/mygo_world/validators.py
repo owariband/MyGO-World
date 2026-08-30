@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from hashlib import sha256
+from typing import Any, ClassVar
 
+from mygo_world.canonical import canonical_json
 from mygo_world.contracts import (
     ActionProposal,
     CandidateEvent,
     PerceptionFrame,
     SegmentDraft,
+    SuccessorSession,
     ValidatedCommitPlan,
     ValidationDiagnostic,
 )
@@ -103,6 +106,56 @@ class ProposalValidator:
                         "A Character may only propose changes to its own Memory",
                     )
                 )
+            if change.supersedes_memory_id is not None:
+                previous = next(
+                    (
+                        item
+                        for item in frame.memories
+                        if item.memory_id == change.supersedes_memory_id
+                    ),
+                    None,
+                )
+                if previous is None:
+                    diagnostics.append(
+                        _diagnostic(
+                            "MEMORY_SUPERSEDES_NOT_FOUND",
+                            f"memory_changes.{index}.supersedes_memory_id",
+                            "A Memory change may only supersede visible Memory owned by the Character",
+                        )
+                    )
+                elif (
+                    previous.agent_id != frame.character_id
+                    or previous.namespace != change.namespace
+                    or previous.memory_type != change.memory_type
+                ):
+                    diagnostics.append(
+                        _diagnostic(
+                            "MEMORY_SUPERSEDES_MISMATCH",
+                            f"memory_changes.{index}.supersedes_memory_id",
+                            "Superseded Memory must have the same owner, namespace and type",
+                        )
+                    )
+                elif change.memory_type == "commitment" and previous.status != "active":
+                    diagnostics.append(
+                        _diagnostic(
+                            "COMMITMENT_NOT_ACTIVE",
+                            f"memory_changes.{index}.supersedes_memory_id",
+                            "Only an active Commitment can be superseded",
+                        )
+                    )
+        supersedes = [
+            change.supersedes_memory_id
+            for change in proposal.memory_changes
+            if change.supersedes_memory_id is not None
+        ]
+        if len(supersedes) != len(set(supersedes)):
+            diagnostics.append(
+                _diagnostic(
+                    "MEMORY_SUPERSEDES_DUPLICATE",
+                    "memory_changes",
+                    "A Memory record may be superseded only once in a proposal",
+                )
+            )
         return ValidationOutcome(
             value=proposal if not diagnostics else None,
             diagnostics=tuple(diagnostics),
@@ -130,6 +183,9 @@ class SegmentValidator:
         proposals: list[ActionProposal],
         draft: SegmentDraft,
         source_trace_id: str,
+        completed_wave_count: int = 0,
+        pending_response_ids: tuple[str, ...] = (),
+        has_unresolved_key_commitments: bool = False,
     ) -> ValidationOutcome[ValidatedCommitPlan]:
         diagnostics: list[ValidationDiagnostic] = []
         base_version = int(snapshot["world_version"])  # type: ignore[arg-type]
@@ -394,8 +450,82 @@ class SegmentValidator:
                             )
                         )
 
+        next_pending_responses = set(pending_response_ids)
+        for proposal in proposals:
+            is_direct_response = (
+                proposal.action.kind == "utterance"
+                and bool(proposal.action.addressee_ids)
+            ) or (
+                proposal.action.kind == "interact"
+                and proposal.action.target_id in character_ids
+            )
+            if is_direct_response:
+                next_pending_responses.discard(proposal.actor_id)
+        for proposal in proposals:
+            if proposal.action.kind == "utterance":
+                next_pending_responses.update(proposal.action.addressee_ids)
+
+        closed_session_ids: list[str] = []
+        successor_sessions: list[SuccessorSession] = []
+        if session is not None and session.get("status") == "runnable":
+            closed_session_ids, successor_sessions = self._lineage_transition(
+                world_id=world_id,
+                base_version=base_version,
+                session=session,
+                sessions=sessions,
+                entities=entities,
+                proposals=proposals,
+                entity_changes=draft.entity_changes,
+                pending_response_ids=next_pending_responses,
+            )
+
+        if draft.session_intent == "resolved":
+            if successor_sessions:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_SESSION_TRANSITION_CONFLICT",
+                        "session_intent",
+                        "A partition or merge transition cannot also resolve the Session",
+                    )
+                )
+            if completed_wave_count < 1:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_SESSION_RESOLUTION_TOO_EARLY",
+                        "session_intent",
+                        "An Event Session must complete one earlier Wave before resolving",
+                    )
+                )
+            if next_pending_responses:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_SESSION_RESPONSE_PENDING",
+                        "session_intent",
+                        "An Event Session with a pending direct response cannot resolve",
+                    )
+                )
+            if session is not None and session.get("in_progress_action_ids"):
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_SESSION_ACTION_IN_PROGRESS",
+                        "session_intent",
+                        "An Event Session with an in-progress action cannot resolve",
+                    )
+                )
+            if has_unresolved_key_commitments:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_SESSION_COMMITMENT_PENDING",
+                        "session_intent",
+                        "An Event Session with a key Commitment cannot resolve",
+                    )
+                )
+
         if diagnostics:
             return ValidationOutcome(value=None, diagnostics=tuple(diagnostics))
+        session_intent = "partitioned" if successor_sessions else draft.session_intent
+        if session_intent == "resolved":
+            closed_session_ids = [draft.session_id]
         plan = ValidatedCommitPlan(
             world_id=world_id,
             base_world_version=base_version,
@@ -408,11 +538,129 @@ class SegmentValidator:
             accepted_memory_changes=[
                 change for proposal in proposals for change in proposal.memory_changes
             ],
-            session_intent=draft.session_intent,
+            session_intent=session_intent,
+            closed_session_ids=closed_session_ids,
+            successor_sessions=successor_sessions,
+            pending_response_ids=sorted(next_pending_responses),
             proposal_ids=sorted(proposals_by_id),
             source_trace_id=source_trace_id,
         )
         return ValidationOutcome(value=plan, diagnostics=())
+
+    def _lineage_transition(
+        self,
+        *,
+        world_id: str,
+        base_version: int,
+        session: dict[str, Any],
+        sessions: dict[str, dict[str, Any]],
+        entities: dict[str, dict[str, Any]],
+        proposals: list[ActionProposal],
+        entity_changes: list[Any],
+        pending_response_ids: set[str],
+    ) -> tuple[list[str], list[SuccessorSession]]:
+        current_session_id = str(session["session_id"])
+        affected_session_ids = {current_session_id}
+        participants = set(session.get("participant_ids", []))
+        character_ids = {
+            entity_id
+            for entity_id, entity in entities.items()
+            if entity.get("entity_type") == "character"
+        }
+
+        direct_targets: set[str] = set()
+        for proposal in proposals:
+            if proposal.action.kind == "utterance":
+                direct_targets.update(proposal.action.addressee_ids)
+            elif (
+                proposal.action.kind == "interact"
+                and proposal.action.target_id in character_ids
+            ):
+                direct_targets.add(proposal.action.target_id)
+
+        runnable_sessions = [
+            item for item in sessions.values() if item.get("status") == "runnable"
+        ]
+        for target_id in direct_targets - participants:
+            participants.add(target_id)
+            for other in runnable_sessions:
+                if target_id in other.get("participant_ids", []):
+                    affected_session_ids.add(str(other["session_id"]))
+                    participants.update(other.get("participant_ids", []))
+
+        # Closing a merged parent must carry all of its fixed members forward.
+        for affected_id in affected_session_ids:
+            participants.update(sessions[affected_id].get("participant_ids", []))
+            if affected_id != current_session_id:
+                pending_response_ids.update(
+                    sessions[affected_id].get("pending_response_ids", [])
+                )
+
+        positions = {
+            entity_id: (entity.get("location_id"), entity.get("scope_key"))
+            for entity_id, entity in entities.items()
+            if entity.get("entity_type") == "character"
+        }
+        for change in entity_changes:
+            if change.entity_id in positions and change.location_id is not None:
+                positions[change.entity_id] = (change.location_id, change.scope_key)
+
+        groups: dict[tuple[str, str], list[str]] = {}
+        for participant_id in sorted(participants):
+            position = positions.get(participant_id)
+            if position is None or position[0] is None or position[1] is None:
+                continue
+            key = (str(position[0]), str(position[1]))
+            groups.setdefault(key, []).append(participant_id)
+
+        current_participants = set(session.get("participant_ids", []))
+        unchanged = (
+            affected_session_ids == {current_session_id}
+            and participants == current_participants
+            and len(groups) == 1
+            and next(iter(groups))
+            == (str(session.get("location_id")), str(session.get("scope_key")))
+        )
+        if unchanged:
+            return [], []
+
+        ordered_groups = sorted(
+            groups.items(),
+            key=lambda item: tuple(item[1]),
+        )
+        successors: list[SuccessorSession] = []
+        for index, ((location_id, scope_key), member_ids) in enumerate(
+            ordered_groups, start=1
+        ):
+            parent_ids = sorted(
+                parent_id
+                for parent_id in affected_session_ids
+                if set(sessions[parent_id].get("participant_ids", [])) & set(member_ids)
+            )
+            if not parent_ids:
+                parent_ids = [current_session_id]
+            identity = canonical_json(
+                {
+                    "world_id": world_id,
+                    "world_version": base_version + 1,
+                    "parents": parent_ids,
+                    "participants": member_ids,
+                    "location_id": location_id,
+                    "scope_key": scope_key,
+                }
+            )
+            digest = sha256(identity.encode("utf-8")).hexdigest()[:16]
+            successors.append(
+                SuccessorSession(
+                    session_id=f"session-lineage-{base_version + 1}-{index}-{digest}",
+                    location_id=location_id,
+                    scope_key=scope_key,
+                    participant_ids=member_ids,
+                    parent_session_ids=parent_ids,
+                    pending_response_ids=sorted(set(member_ids) & pending_response_ids),
+                )
+            )
+        return sorted(affected_session_ids), successors
 
     def _validate_event_time(
         self,

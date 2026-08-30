@@ -127,6 +127,26 @@ class EventSessionMemberRow(Base):
     agent_id: Mapped[str] = mapped_column(String(200), primary_key=True)
 
 
+class EventSessionParentRow(Base):
+    __tablename__ = "event_session_parents"
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("event_sessions.session_id"), primary_key=True
+    )
+    parent_session_id: Mapped[str] = mapped_column(
+        ForeignKey("event_sessions.session_id"), primary_key=True
+    )
+
+
+class EventSessionPendingResponseRow(Base):
+    __tablename__ = "event_session_pending_responses"
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("event_sessions.session_id"), primary_key=True
+    )
+    responder_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+
+
 class RunnableSessionQueueRow(Base):
     __tablename__ = "runnable_session_queue"
 
@@ -154,8 +174,37 @@ class AgentMemoryRow(Base):
     )
     relative_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     importance: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(32))
+    supersedes_memory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_memory_records.memory_id"), unique=True
+    )
+    entity_tags_json: Mapped[str] = mapped_column(Text, nullable=False)
+    location_tags_json: Mapped[str] = mapped_column(Text, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SkillBindingRow(Base):
+    __tablename__ = "skill_bindings"
+    __table_args__ = (UniqueConstraint("world_id", "binding_order"),)
+
+    binding_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    binding_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id"), nullable=False, index=True
+    )
+    agent_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    previous_skill_id: Mapped[str | None] = mapped_column(String(200))
+    previous_skill_version: Mapped[str | None] = mapped_column(String(100))
+    previous_skill_content_hash: Mapped[str | None] = mapped_column(String(64))
+    skill_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    skill_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    skill_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    operator: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    bound_at: Mapped[str] = mapped_column(String(40), nullable=False)
 
 
 class GenerationTraceRow(Base):

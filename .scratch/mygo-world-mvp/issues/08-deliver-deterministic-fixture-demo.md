@@ -6,6 +6,8 @@
 
 Status: ready-for-agent
 
+**Execution goal:** `../goals/08-deliver-deterministic-fixture-demo.md`
+
 - [ ] `demo` 只针对不存在的新 World 串联初始化、推进和渲染，并返回包含 World、Batch、版本和产物信息的稳定 Receipt。
 - [ ] 相同 World ID 已存在时 `demo` 安全失败，不续跑、不删除也不覆盖已有 World。
 - [ ] Fixture 使用版本化目录组织；场景和调用清单使用 YAML，结构化 Agent 响应使用 JSON。

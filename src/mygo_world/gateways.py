@@ -45,6 +45,7 @@ class ModelRequest:
     skill_content_hash: str
     input_payload: dict[str, Any]
     model_config: dict[str, Any]
+    skill_body: str = ""
 
     @property
     def semantic_key(self) -> str:
@@ -63,6 +64,7 @@ class ModelRequest:
             "skill_id": self.skill_id,
             "skill_version": self.skill_version,
             "skill_content_hash": self.skill_content_hash,
+            "skill_body": self.skill_body,
             "input_payload": self.input_payload,
             "model_config": self.model_config,
             "input_hash": self.input_hash,
@@ -166,7 +168,8 @@ class OpenAICompatibleGateway:
                 {
                     "role": "system",
                     "content": (
-                        f"Use runtime skill {request.skill_id}@{request.skill_version}. "
+                        f"Runtime skill {request.skill_id}@{request.skill_version}:\n\n"
+                        f"{request.skill_body}\n\n"
                         "Return only a value matching the supplied JSON schema."
                     ),
                 },

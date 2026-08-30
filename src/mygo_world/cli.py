@@ -10,6 +10,8 @@ from typing import Any
 from mygo_world.broadcasting import render_world
 from mygo_world.errors import WorldError
 from mygo_world.runtime import advance_world
+from mygo_world.skill_bindings import bind_character_skill
+from mygo_world.skills import DEFAULT_SKILLS_DIR
 from mygo_world.worlds import initialize_world, show_world
 
 
@@ -21,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--world-id", required=True)
     init_parser.add_argument("--seed", required=True, type=Path)
     init_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    init_parser.add_argument("--skills-dir", type=Path, default=DEFAULT_SKILLS_DIR)
     init_parser.add_argument("--json", action="store_true", dest="as_json")
 
     show_parser = subparsers.add_parser("show", help="read a durable World Snapshot")
@@ -33,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     advance_parser.add_argument("--world-id", required=True)
     advance_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    advance_parser.add_argument("--skills-dir", type=Path, default=DEFAULT_SKILLS_DIR)
     advance_parser.add_argument(
         "--gateway", choices=("fixture", "provider"), default="fixture"
     )
@@ -47,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     render_parser.add_argument("--world-id", required=True)
     render_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    render_parser.add_argument("--skills-dir", type=Path, default=DEFAULT_SKILLS_DIR)
     render_parser.add_argument("--world-version", type=int)
     render_parser.add_argument("--asset-manifest", required=True, type=Path)
     render_parser.add_argument("--webgal-root", required=True, type=Path)
@@ -57,6 +62,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--gateway", choices=("fixture", "provider"), default="fixture"
     )
     render_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    bind_parser = subparsers.add_parser(
+        "skill-bind", help="bind a versioned Character Runtime Skill"
+    )
+    bind_parser.add_argument("--world-id", required=True)
+    bind_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    bind_parser.add_argument("--skills-dir", type=Path, default=DEFAULT_SKILLS_DIR)
+    bind_parser.add_argument("--character-id", required=True)
+    bind_parser.add_argument("--skill-id", required=True)
+    bind_parser.add_argument("--skill-version", required=True)
+    bind_parser.add_argument("--operator", required=True)
+    bind_parser.add_argument("--reason", required=True)
+    bind_parser.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -71,6 +89,13 @@ def _human_success(receipt: dict[str, Any]) -> str:
             f"World {receipt['world_id']} is at version {receipt['world_version']} "
             f"(snapshot {receipt['snapshot_checksum'][:12]}, "
             f"events {receipt['world_event_count']})"
+        )
+    if receipt["command"] == "skill-bind":
+        return (
+            f"Bound {receipt['character_id']} to "
+            f"{receipt['new_skill']['skill_id']}@{receipt['new_skill']['version']} "
+            f"in World {receipt['world_id']} (version unchanged at "
+            f"{receipt['world_version']})"
         )
     if receipt["command"] == "render" and receipt["status"] == "no_work":
         return (
@@ -107,7 +132,12 @@ def run(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "init":
-            receipt = initialize_world(args.seed, args.world_id, args.worlds_dir)
+            receipt = initialize_world(
+                args.seed,
+                args.world_id,
+                args.worlds_dir,
+                skills_dir=args.skills_dir,
+            )
         elif args.command == "show":
             receipt = show_world(args.world_id, args.worlds_dir)
         elif args.command == "advance":
@@ -119,8 +149,9 @@ def run(argv: Sequence[str] | None = None) -> int:
                 max_waves=args.max_waves,
                 request_budget=args.request_budget,
                 max_character_concurrency=args.character_concurrency,
+                skills_dir=args.skills_dir,
             )
-        else:
+        elif args.command == "render":
             receipt = render_world(
                 args.world_id,
                 args.worlds_dir,
@@ -129,6 +160,18 @@ def run(argv: Sequence[str] | None = None) -> int:
                 webgal_root=args.webgal_root,
                 artifact_root=args.artifact_root,
                 gateway_kind=args.gateway,
+                skills_dir=args.skills_dir,
+            )
+        else:
+            receipt = bind_character_skill(
+                args.world_id,
+                args.worlds_dir,
+                character_id=args.character_id,
+                skill_id=args.skill_id,
+                skill_version=args.skill_version,
+                operator=args.operator,
+                reason=args.reason,
+                skills_dir=args.skills_dir,
             )
     except WorldError as error:
         receipt = error.receipt or {

@@ -42,6 +42,7 @@ class PerceptionProjector:
         session_id: str,
         character_id: str,
         memories: list[AgentMemoryRow],
+        namespace: str | None = None,
     ) -> PerceptionFrame:
         session = next(
             (
@@ -108,7 +109,9 @@ class PerceptionProjector:
         for memory in sorted(memories, key=lambda item: item.memory_id):
             # Filtering here is defense in depth: a repository mistake cannot leak another
             # Character's private Memory into the model input.
-            if memory.agent_id != character_id:
+            if memory.agent_id != character_id or (
+                namespace is not None and memory.namespace != namespace
+            ):
                 continue
             perceived_memories.append(
                 PerceivedMemory(
@@ -118,6 +121,11 @@ class PerceptionProjector:
                     memory_type=memory.memory_type,
                     relative_time_ms=memory.relative_time_ms,
                     importance=memory.importance,
+                    source=memory.source,
+                    status=memory.status,
+                    supersedes_memory_id=memory.supersedes_memory_id,
+                    entity_tags=json.loads(memory.entity_tags_json),
+                    location_tags=json.loads(memory.location_tags_json),
                     payload=json.loads(memory.payload_json),
                 )
             )
@@ -146,20 +154,39 @@ class PerceptionProjector:
         self,
         events: list[RecognizedEvent],
         snapshot: dict[str, Any],
+        *,
+        base_snapshot: dict[str, Any] | None = None,
     ) -> list[ProjectedObservation]:
         observations: list[ProjectedObservation] = []
-        characters = [
-            item for item in snapshot["entities"] if item["entity_type"] == "character"
-        ]
-        for event in events:
+        initial = base_snapshot or snapshot
+        characters = {
+            item["entity_id"]: item
+            for item in initial["entities"]
+            if item["entity_type"] == "character"
+        }
+        positions = {
+            character_id: (item.get("location_id"), item.get("scope_key"))
+            for character_id, item in characters.items()
+        }
+        ordered_events = sorted(
+            events,
+            key=lambda item: (
+                item.candidate.start_time_ms,
+                item.candidate.end_time_ms,
+                item.event_order,
+            ),
+        )
+        for event in ordered_events:
             allowed = event.candidate.payload.get("visible_to_character_ids")
-            for character in characters:
+            for character_id in sorted(characters):
+                character_position = positions[character_id]
                 if (
-                    character.get("location_id") != event.candidate.location_id
-                    or character.get("scope_key") != event.candidate.scope_key
+                    character_position
+                    != (event.candidate.location_id, event.candidate.scope_key)
+                    and character_id != event.candidate.actor_id
                 ):
                     continue
-                if isinstance(allowed, list) and character["entity_id"] not in allowed:
+                if isinstance(allowed, list) and character_id not in allowed:
                     continue
                 payload = {
                     key: value
@@ -168,9 +195,10 @@ class PerceptionProjector:
                 }
                 observations.append(
                     ProjectedObservation(
-                        agent_id=character["entity_id"],
+                        agent_id=character_id,
                         event_id=event.event_id,
                         relative_time_ms=event.candidate.end_time_ms,
+                        location_id=event.candidate.location_id,
                         payload={
                             "content": payload,
                             "event_type": event.candidate.event_type,
@@ -179,6 +207,16 @@ class PerceptionProjector:
                         },
                     )
                 )
+            if (
+                event.candidate.event_type == "move"
+                and event.candidate.actor_id in positions
+            ):
+                destination = (
+                    event.candidate.payload.get("location_id"),
+                    event.candidate.payload.get("scope_key"),
+                )
+                if all(isinstance(item, str) and item for item in destination):
+                    positions[event.candidate.actor_id] = destination
         return observations
 
 
@@ -194,4 +232,5 @@ class ProjectedObservation:
     agent_id: str
     event_id: str
     relative_time_ms: int
+    location_id: str | None
     payload: dict[str, Any]
