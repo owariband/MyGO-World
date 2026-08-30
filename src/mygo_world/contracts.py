@@ -383,7 +383,7 @@ class ValidatedCommitPlan(StrictModel):
     events: list[CandidateEvent | ExternalEventCandidate]
     entity_changes: list[EntityStateChange] = Field(default_factory=list)
     accepted_memory_changes: list[MemoryChangeCandidate] = Field(default_factory=list)
-    session_intent: Literal["keep_open", "resolved"] = "keep_open"
+    session_intent: Literal["keep_open", "resolved", "limit_reached"] = "keep_open"
     proposal_ids: list[str]
     source_trace_id: str = Field(min_length=1)
 

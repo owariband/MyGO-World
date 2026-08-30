@@ -395,7 +395,7 @@ def test_advance_commits_one_atomic_version_with_multiple_events(
             "skill_id, model_id, validation_json FROM generation_traces "
             "ORDER BY agent_type"
         ).fetchall()
-    assert len(traces) == 2
+    assert len(traces) == 3
     assert all("api_key" not in canonical_json(row) for row in traces)
     assert all(json.loads(row[5])["ok"] for row in traces)
 
@@ -446,7 +446,7 @@ def test_commit_failure_rolls_back_all_authoritative_wave_records(
         # Traces intentionally survive an authoritative commit failure for diagnosis.
         assert connection.execute(
             "SELECT count(*) FROM generation_traces"
-        ).fetchone() == (2,)
+        ).fetchone() == (3,)
 
 
 def test_new_process_reads_wave_events_observations_and_checksum(

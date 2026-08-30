@@ -417,13 +417,13 @@ class WorldCommitter:
             session.flush()
             inject("entity_revisions")
 
-            if plan.session_intent == "resolved":
+            if plan.session_intent in {"resolved", "limit_reached"}:
                 event_session = session.get(EventSessionRow, plan.session_id)
                 if event_session is None:
                     raise ValueError("Validated Event Session is missing")
                 event_session.status = "closed"
                 event_session.closed_world_version = plan.new_world_version
-                event_session.closure_reason = "resolved"
+                event_session.closure_reason = plan.session_intent
                 queue_entry = session.scalar(
                     select(RunnableSessionQueueRow).where(
                         RunnableSessionQueueRow.session_id == plan.session_id
@@ -434,7 +434,7 @@ class WorldCommitter:
                 for item in new_snapshot["sessions"]:
                     if item["session_id"] == plan.session_id:
                         item["status"] = "closed"
-                        item["closure_reason"] = "resolved"
+                        item["closure_reason"] = plan.session_intent
                 new_snapshot["runnable_session_queue"] = [
                     item
                     for item in new_snapshot["runnable_session_queue"]

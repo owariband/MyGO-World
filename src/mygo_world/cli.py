@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     advance_parser.add_argument(
         "--gateway", choices=("fixture", "provider"), default="fixture"
     )
+    advance_parser.add_argument("--run-id")
+    advance_parser.add_argument("--max-waves", type=int, default=6)
+    advance_parser.add_argument("--request-budget", type=int, default=40)
+    advance_parser.add_argument("--character-concurrency", type=int, default=4)
     advance_parser.add_argument("--json", action="store_true", dest="as_json")
 
     render_parser = subparsers.add_parser(
@@ -111,6 +115,10 @@ def run(argv: Sequence[str] | None = None) -> int:
                 args.world_id,
                 args.worlds_dir,
                 gateway_kind=args.gateway,
+                run_id=args.run_id,
+                max_waves=args.max_waves,
+                request_budget=args.request_budget,
+                max_character_concurrency=args.character_concurrency,
             )
         else:
             receipt = render_world(
@@ -123,11 +131,11 @@ def run(argv: Sequence[str] | None = None) -> int:
                 gateway_kind=args.gateway,
             )
     except WorldError as error:
-        receipt = {
+        receipt = error.receipt or {
             "command": args.command,
             "status": "error",
-            "error": {"code": error.code, "message": error.message},
         }
+        receipt["error"] = {"code": error.code, "message": error.message}
         if args.as_json:
             print(
                 json.dumps(
