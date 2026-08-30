@@ -392,3 +392,183 @@ class ValidationDiagnostic(StrictModel):
     code: str = Field(min_length=1)
     path: str = Field(min_length=1)
     message: str = Field(min_length=1)
+
+
+# Broadcast and Render contracts use stable domain/asset IDs. Only RenderJob carries
+# paths, after deterministic validation against an Asset Manifest.
+
+
+class AssetEntry(StrictModel):
+    asset_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+
+
+class Live2DModelAsset(AssetEntry):
+    character_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    motions: list[str] = Field(default_factory=list)
+    expressions: list[str] = Field(default_factory=list)
+    entrance_effects: list[str] = Field(default_factory=list)
+
+
+class AssetManifest(StrictModel):
+    schema_version: Literal[1]
+    manifest_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    backgrounds: list[AssetEntry] = Field(min_length=1)
+    bgms: list[AssetEntry] = Field(default_factory=list)
+    live2d_models: list[Live2DModelAsset] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def stable_asset_ids_are_unique(self) -> AssetManifest:
+        ids = [
+            item.asset_id
+            for item in [*self.backgrounds, *self.bgms, *self.live2d_models]
+        ]
+        if len(ids) != len(set(ids)):
+            raise ValueError("asset_id values must be unique across the manifest")
+        return self
+
+
+class BroadcastEvent(StrictModel):
+    event_id: str = Field(min_length=1)
+    event_order: int = Field(ge=1)
+    world_version: int = Field(ge=1)
+    event_type: str = Field(min_length=1)
+    actor_id: str | None = None
+    start_time_ms: int = Field(ge=0)
+    end_time_ms: int = Field(ge=0)
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+    fact: dict[str, Any]
+
+
+class ChapterBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["chapter"]
+    title: str = Field(min_length=1)
+    subtitle: str | None = None
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class BgmBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["bgm"]
+    asset_id: str = Field(min_length=1)
+    volume: int = Field(default=70, ge=0, le=100)
+    fade_ms: int = Field(default=1000, ge=0, le=60_000)
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class StopBgmBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["stop_bgm"]
+    fade_ms: int = Field(default=1000, ge=0, le=60_000)
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class BackgroundBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["background"]
+    asset_id: str = Field(min_length=1)
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class ShowBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["show"]
+    character_id: str = Field(min_length=1)
+    model_asset_id: str = Field(min_length=1)
+    position: Literal["left", "center", "right"]
+    motion: str | None = None
+    expression: str | None = None
+    entrance_effect: str | None = None
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class HideBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["hide"]
+    position: Literal["left", "center", "right"]
+    source_event_ids: list[str] = Field(default_factory=list)
+
+
+class DialogueBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["dialogue"]
+    character_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    source_event_ids: list[str] = Field(min_length=1)
+    model_asset_id: str | None = None
+    motion: str | None = None
+    expression: str | None = None
+    entrance_effect: str | None = None
+
+
+class NarrationBeat(StrictModel):
+    beat_id: str = Field(min_length=1)
+    type: Literal["narration"]
+    text: str = Field(min_length=1)
+    source_event_ids: list[str] = Field(min_length=1)
+
+
+Beat = Annotated[
+    ChapterBeat
+    | BgmBeat
+    | StopBgmBeat
+    | BackgroundBeat
+    | ShowBeat
+    | HideBeat
+    | DialogueBeat
+    | NarrationBeat,
+    Field(discriminator="type"),
+]
+
+
+class BroadcastRender(StrictModel):
+    render_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    title: str = Field(min_length=1)
+    estimated_play_ms: int = Field(gt=0)
+    beats: list[Beat] = Field(min_length=1)
+
+
+class BroadcastDisposition(StrictModel):
+    event_id: str = Field(min_length=1)
+    status: Literal["included", "omitted"]
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def omitted_events_have_a_reason(self) -> BroadcastDisposition:
+        if self.status == "omitted" and not self.reason:
+            raise ValueError("omitted disposition requires a reason")
+        if self.status == "included" and self.reason is not None:
+            raise ValueError("included disposition cannot have a reason")
+        return self
+
+
+class BroadcastPlan(StrictModel):
+    schema_version: Literal[1] = 1
+    world_id: str = Field(min_length=1)
+    target_world_version: int = Field(ge=1)
+    dispositions: list[BroadcastDisposition] = Field(min_length=1)
+    renders: list[BroadcastRender] = Field(default_factory=list)
+
+
+class RenderJob(StrictModel):
+    schema_version: Literal[1] = 1
+    world_id: str = Field(min_length=1)
+    target_world_version: int = Field(ge=1)
+    render_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    title: str = Field(min_length=1)
+    estimated_play_ms: int = Field(gt=0)
+    # These are planner-owned, resolved Beat dictionaries. Asset IDs are retained
+    # for auditability and asset_path is relative to the corresponding WebGAL root.
+    beats: list[dict[str, Any]] = Field(min_length=1)
+
+
+class CompiledRender(StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
+    job: RenderJob
+    script: str = Field(min_length=1)
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

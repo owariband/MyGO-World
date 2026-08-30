@@ -178,3 +178,53 @@ class GenerationTraceRow(Base):
     structured_result_json: Mapped[str] = mapped_column(Text, nullable=False)
     validation_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class BroadcastRunRow(Base):
+    __tablename__ = "broadcast_runs"
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    world_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    source_trace_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_traces.trace_id"), nullable=False
+    )
+    plan_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class RenderRow(Base):
+    __tablename__ = "renders"
+    __table_args__ = (UniqueConstraint("world_id", "render_id"),)
+
+    render_record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    world_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    render_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("broadcast_runs.run_id"), nullable=False
+    )
+    target_world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    render_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    scene_path: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class BroadcastDispositionRow(Base):
+    __tablename__ = "broadcast_dispositions"
+
+    event_id: Mapped[str] = mapped_column(
+        ForeignKey("world_events.event_id"), primary_key=True
+    )
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("broadcast_runs.run_id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    render_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)

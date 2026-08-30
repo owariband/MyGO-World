@@ -1,0 +1,31 @@
+schema_version: 1
+manifest_id: mygo-minimal-assets
+version: 1.0.0
+backgrounds:
+  - asset_id: background-rehearsal-room
+    path: rehearsal-room.png
+bgms:
+  - asset_id: bgm-quiet-rehearsal
+    path: quiet-rehearsal.ogg
+live2d_models:
+  - asset_id: model-anon-test
+    character_id: character-anon
+    display_name: 爱音
+    path: anon/model.json
+    motions:
+      - idle
+      - greet
+    expressions:
+      - smile
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-soyo-test
+    character_id: character-soyo
+    display_name: 素世
+    path: soyo/model.json
+    motions:
+      - idle
+    expressions:
+      - neutral
+    entrance_effects:
+      - fadeIn

@@ -45,6 +45,7 @@ class WorldPaths:
         self.world_dir = self.worlds_dir / world_id
         self.database = self.world_dir / "world.sqlite3"
         self.mutation_lock = self.world_dir / "mutation.lock"
+        self.render_lock = self.world_dir / "render.lock"
 
 
 def validate_world_id(world_id: str) -> None:
