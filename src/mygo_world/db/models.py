@@ -178,3 +178,39 @@ class GenerationTraceRow(Base):
     structured_result_json: Mapped[str] = mapped_column(Text, nullable=False)
     validation_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class GenerationBatchRow(Base):
+    __tablename__ = "generation_batches"
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    world_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    wave_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    warnings_json: Mapped[str] = mapped_column(Text, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class GenerationWaveRow(Base):
+    __tablename__ = "generation_waves"
+    __table_args__ = (UniqueConstraint("run_id", "wave_number"),)
+
+    wave_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_batches.run_id"), nullable=False, index=True
+    )
+    wave_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    world_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)

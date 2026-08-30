@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+from typing import Any
+
 
 class WorldError(Exception):
     """Stable operator-facing error."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self, code: str, message: str, *, receipt: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.receipt = receipt
+        self.trace_attempts: tuple[Any, ...] = ()
+        self.schema_attempts: tuple[Any, ...] = ()
 
 
 class WorldAlreadyExistsError(WorldError):

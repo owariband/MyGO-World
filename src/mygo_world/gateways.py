@@ -7,11 +7,31 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from mygo_world.canonical import canonical_json, sha256_text
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+class ModelTransportError(RuntimeError):
+    """A provider failure which is safe to retry without changing the prompt."""
+
+
+class ModelRequestRejectedError(RuntimeError):
+    """A non-retryable provider response."""
+
+
+class ModelOutputInvalidError(ValueError):
+    """A response reached the model boundary but did not match its contract."""
+
+    def __init__(
+        self, request: ModelRequest, raw_response: str, diagnostic: str
+    ) -> None:
+        super().__init__(diagnostic)
+        self.request = request
+        self.raw_response = raw_response
+        self.diagnostic = diagnostic
 
 
 @dataclass(frozen=True)
@@ -101,8 +121,11 @@ class FixtureGateway:
                 f"expected {fixture.expected_input_hash}, got {request.input_hash}"
             )
         raw = canonical_json(fixture.body)
-        structured = response_type.model_validate_json(raw)
         self.calls.append(request)
+        try:
+            structured = response_type.model_validate_json(raw)
+        except ValidationError as exc:
+            raise ModelOutputInvalidError(request, raw, str(exc)) from exc
         return ModelGeneration(request=request, raw_response=raw, structured=structured)
 
 
@@ -115,7 +138,7 @@ class OpenAICompatibleGateway:
         base_url: str,
         api_key: str,
         model_id: str = "provider-model",
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 120.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -177,9 +200,17 @@ class OpenAICompatibleGateway:
                 http_request, timeout=self._timeout_seconds
             ) as response:
                 provider_body = response.read().decode("utf-8")
-        except (OSError, urllib.error.HTTPError) as exc:
+        except urllib.error.HTTPError as exc:
             # Never include request headers or the API key in diagnostics.
-            raise RuntimeError(
+            error_type = (
+                ModelTransportError
+                if exc.code in {408, 429} or 500 <= exc.code < 600
+                else ModelRequestRejectedError
+            )
+            raise error_type(f"Provider request failed with HTTP {exc.code}") from exc
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            # Never include request headers or the API key in diagnostics.
+            raise ModelTransportError(
                 f"Provider request failed: {type(exc).__name__}"
             ) from exc
 
@@ -189,7 +220,10 @@ class OpenAICompatibleGateway:
             raw = canonical_json(content)
         else:
             raw = str(content)
-        structured = response_type.model_validate_json(raw)
+        try:
+            structured = response_type.model_validate_json(raw)
+        except ValidationError as exc:
+            raise ModelOutputInvalidError(request, raw, str(exc)) from exc
         return ModelGeneration(request=request, raw_response=raw, structured=structured)
 
 

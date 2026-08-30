@@ -198,6 +198,14 @@ class SegmentValidator:
             )
 
         proposals_by_id = {item.proposal_id: item for item in proposals}
+        if len(proposals_by_id) != len(proposals):
+            diagnostics.append(
+                _diagnostic(
+                    "SEGMENT_DUPLICATE_PROPOSAL_ID",
+                    "proposals",
+                    "Action Proposal IDs must be unique within a Wave",
+                )
+            )
         events = [*draft.proposal_events, *draft.external_events]
         event_keys: dict[str, int] = {}
         for index, event in enumerate(events):
@@ -240,16 +248,14 @@ class SegmentValidator:
                 continue
             self._validate_intent(event, proposal, index, diagnostics)
 
-        represented_proposals = {
+        represented_proposals = [
             event.source_ref
             for event in draft.proposal_events
             if event.source_kind == "action_proposal"
-        }
+        ]
         for proposal in proposals:
-            if (
-                proposal.action.kind != "no_op"
-                and proposal.proposal_id not in represented_proposals
-            ):
+            representation_count = represented_proposals.count(proposal.proposal_id)
+            if proposal.action.kind != "no_op" and representation_count == 0:
                 diagnostics.append(
                     _diagnostic(
                         "SEGMENT_INTENT_MISMATCH",
@@ -257,6 +263,41 @@ class SegmentValidator:
                         f"Proposal '{proposal.proposal_id}' has no objective result",
                     )
                 )
+            elif proposal.action.kind != "no_op" and representation_count > 1:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_PROPOSAL_EVENT_COUNT_INVALID",
+                        "proposal_events",
+                        f"Proposal '{proposal.proposal_id}' has multiple objective results",
+                    )
+                )
+
+        no_op_ids = {
+            proposal.proposal_id
+            for proposal in proposals
+            if proposal.action.kind == "no_op"
+        }
+        for index, event in enumerate(draft.proposal_events):
+            if event.source_ref in no_op_ids:
+                diagnostics.append(
+                    _diagnostic(
+                        "SEGMENT_NO_OP_EVENT_FORBIDDEN",
+                        f"proposal_events.{index}",
+                        "A no_op proposal cannot produce a Character event",
+                    )
+                )
+        if (
+            proposals
+            and len(no_op_ids) == len(proposals)
+            and (events or draft.entity_changes)
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "SEGMENT_ALL_NO_OP_EVENT_FORBIDDEN",
+                    "events",
+                    "An all-no_op Wave cannot produce World Events or entity changes",
+                )
+            )
 
         character_ids = {
             entity_id
@@ -419,6 +460,14 @@ class SegmentValidator:
                 event.payload.get("location_id"),
                 event.payload.get("scope_key"),
             ) != (action.location_id, action.scope_key)
+        elif action.kind == "wait":
+            mismatch = (
+                mismatch or event.payload.get("duration_ms") != action.duration_ms
+            )
+            mismatch = mismatch or event.payload.get("reason") != action.reason
+            mismatch = mismatch or (
+                event.end_time_ms - event.start_time_ms != action.duration_ms
+            )
         if mismatch:
             diagnostics.append(
                 _diagnostic(
