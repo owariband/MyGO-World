@@ -29,10 +29,12 @@
 - [导演与导播层](director-broadcast.md)：Generative Agents 底座之上的叙事约束、角色自治和观看投影研究框架。
 - [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `Persona.perceive()` 的局部感知边界，并保留被否决答案、当前代价与未决部分。
 - [Agent Runtime Server 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Go + Eino ADK、`PersonActAgent` 内部认知 Graph、`agent / event / world` 分层、Memory 边界、外部库替代矩阵、Fixture Vertical Slice、分阶段 Plan 与启动指令。
+- [持久化模型](model.md)：World Ledger、Agent Memory、生成与校验 Trace、Render/Viewer 数据、重放要求和数据保留级别。
 - [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 挂载索引、版本化更新，以及 Director 到访前查询与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。
 - [决策记录](decisions.md)：已确认决策、当前建议和产品目标。
 - [未决问题](open-questions.md)：需要实现或实验回答的问题。
+- [Skill 外部参考](skill-references.md)：人物提炼、Character/Director/Broadcast Skill 字段与评测的外部调研输入。
 - [维护日志](log.md)：Wiki 维护历史。
 
 ## 当前源码锚点
@@ -49,4 +51,3 @@
 - [Eino ADK Agent 接口](https://github.com/cloudwego/eino/blob/v0.9.15/adk/interface.go#L447-L467)：一期 Agent 对外生命周期契约。
 - [Eino ADK ReAct Graph](https://github.com/cloudwego/eino/blob/v0.9.15/adk/react.go#L354-L558)：`adk.Agent` 内部使用 Compose Graph 与条件回边的源码依据。
 - [本地 WorkflowAgent 先例](../../../go-project/agent_core/agent/workflow/workflow_agent.go)：`compose.Workflow -> Runnable -> adk.Agent` 的现有工程实现。
-
