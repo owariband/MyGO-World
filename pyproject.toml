@@ -16,6 +16,7 @@ mygo-world = "mygo_world.cli:main"
 [dependency-groups]
 dev = [
   "pytest>=8.4,<9",
+  "ruff>=0.16.5",
 ]
 
 [build-system]
