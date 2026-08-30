@@ -1,4 +1,10 @@
 node_modules/
 .DS_Store
 .motor-code/log/
-
+.mygo/
+.env
+.env.local
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]

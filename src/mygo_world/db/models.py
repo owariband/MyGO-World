@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class WorldRow(Base):
+    __tablename__ = "worlds"
+
+    world_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    seed_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    seed_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    seed_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    calendar_anchor: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class WorldSegmentRow(Base):
+    __tablename__ = "world_segments"
+
+    segment_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    segment_order: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    world_version: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    segment_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_trace_id: Mapped[str | None] = mapped_column(String(36))
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    committed_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class WorldVersionRow(Base):
+    __tablename__ = "world_versions"
+
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    segment_id: Mapped[str] = mapped_column(
+        ForeignKey("world_segments.segment_id"), nullable=False, unique=True
+    )
+    world_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class EntityRevisionRow(Base):
+    __tablename__ = "entity_revisions"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "revision_order"),
+        UniqueConstraint("entity_id", "world_version"),
+    )
+
+    entity_revision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    entity_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    revision_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    segment_id: Mapped[str] = mapped_column(
+        ForeignKey("world_segments.segment_id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    location_id: Mapped[str | None] = mapped_column(String(200))
+    scope_key: Mapped[str | None] = mapped_column(String(200))
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WorldEventRow(Base):
+    __tablename__ = "world_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    event_order: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    segment_id: Mapped[str] = mapped_column(
+        ForeignKey("world_segments.segment_id"), nullable=False
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("event_sessions.session_id")
+    )
+    start_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SnapshotRow(Base):
+    __tablename__ = "snapshots"
+
+    world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), primary_key=True
+    )
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class EventSessionRow(Base):
+    __tablename__ = "event_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    location_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    closed_world_version: Mapped[int | None] = mapped_column(
+        ForeignKey("world_versions.version")
+    )
+    closure_reason: Mapped[str | None] = mapped_column(String(32))
+
+
+class EventSessionMemberRow(Base):
+    __tablename__ = "event_session_members"
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("event_sessions.session_id"), primary_key=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+
+
+class RunnableSessionQueueRow(Base):
+    __tablename__ = "runnable_session_queue"
+
+    queue_order: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("event_sessions.session_id"), nullable=False, unique=True
+    )
+    enqueued_world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    dequeued_world_version: Mapped[int | None] = mapped_column(
+        ForeignKey("world_versions.version")
+    )
+
+
+class AgentMemoryRow(Base):
+    __tablename__ = "agent_memory_records"
+
+    memory_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    namespace: Mapped[str] = mapped_column(String(100), nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    relative_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    importance: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)

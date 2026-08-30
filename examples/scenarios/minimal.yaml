@@ -1,0 +1,45 @@
+schema_version: 1
+seed_id: mygo-minimal
+version: 1.0.0
+name: Minimal MyGO World
+world_time_ms: 0
+calendar_anchor: "2026-08-31T09:00:00+08:00"
+entities:
+  - entity_type: location
+    entity_id: location-live-house
+    name: Live House RiNG
+    scopes:
+      - scope_key: lounge
+        name: Lounge
+        reachable_destinations: []
+    state:
+      description: A quiet lounge before rehearsal.
+  - entity_type: character
+    entity_id: character-anon
+    name: Anon
+    location_id: location-live-house
+    scope_key: lounge
+    state:
+      mood: curious
+  - entity_type: character
+    entity_id: character-soyo
+    name: Soyo
+    location_id: location-live-house
+    scope_key: lounge
+    state:
+      mood: guarded
+sessions:
+  - session_id: session-first-meeting
+    location_id: location-live-house
+    scope_key: lounge
+    participant_ids:
+      - character-anon
+      - character-soyo
+memories:
+  - memory_id: memory-anon-arrival
+    agent_id: character-anon
+    memory_type: observation
+    content: Anon has just arrived at RiNG for rehearsal.
+    location_tags:
+      - location-live-house
+    importance: 2
