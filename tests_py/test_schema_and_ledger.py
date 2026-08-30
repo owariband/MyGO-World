@@ -38,10 +38,16 @@ def test_alembic_cli_creates_latest_schema(tmp_path: Path) -> None:
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0002_generation_traces",)
+        ).fetchone() == ("0003_broadcast_renders",)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='worlds'"
         ).fetchone() == ("worlds",)
+        assert {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        } >= {"broadcast_runs", "broadcast_dispositions", "renders"}
 
 
 def test_non_init_command_rejects_outdated_schema(worlds_dir: Path) -> None:

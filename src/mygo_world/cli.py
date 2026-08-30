@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from mygo_world.broadcasting import render_world
 from mygo_world.errors import WorldError
 from mygo_world.runtime import advance_world
 from mygo_world.worlds import initialize_world, show_world
@@ -36,6 +37,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--gateway", choices=("fixture", "provider"), default="fixture"
     )
     advance_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    render_parser = subparsers.add_parser(
+        "render", help="render unprocessed committed Events as immutable WebGAL scenes"
+    )
+    render_parser.add_argument("--world-id", required=True)
+    render_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    render_parser.add_argument("--world-version", type=int)
+    render_parser.add_argument("--asset-manifest", required=True, type=Path)
+    render_parser.add_argument("--webgal-root", required=True, type=Path)
+    render_parser.add_argument(
+        "--artifact-root", type=Path, default=Path(".mygo/renders")
+    )
+    render_parser.add_argument(
+        "--gateway", choices=("fixture", "provider"), default="fixture"
+    )
+    render_parser.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -51,8 +68,18 @@ def _human_success(receipt: dict[str, Any]) -> str:
             f"(snapshot {receipt['snapshot_checksum'][:12]}, "
             f"events {receipt['world_event_count']})"
         )
+    if receipt["command"] == "render" and receipt["status"] == "no_work":
+        return (
+            f"World {receipt['world_id']} has no unprocessed Events through "
+            f"version {receipt['target_world_version']}"
+        )
     if receipt["status"] == "no_work":
         return f"World {receipt['world_id']} has no runnable Event Session"
+    if receipt["command"] == "render":
+        return (
+            f"Rendered {receipt['event_count']} Events from World "
+            f"{receipt['world_id']} as {receipt['render_count']} immutable scene(s)"
+        )
     return (
         f"Advanced World {receipt['world_id']} from version "
         f"{receipt['start_world_version']} to {receipt['end_world_version']} "
@@ -79,10 +106,20 @@ def run(argv: Sequence[str] | None = None) -> int:
             receipt = initialize_world(args.seed, args.world_id, args.worlds_dir)
         elif args.command == "show":
             receipt = show_world(args.world_id, args.worlds_dir)
-        else:
+        elif args.command == "advance":
             receipt = advance_world(
                 args.world_id,
                 args.worlds_dir,
+                gateway_kind=args.gateway,
+            )
+        else:
+            receipt = render_world(
+                args.world_id,
+                args.worlds_dir,
+                target_world_version=args.world_version,
+                asset_manifest_path=args.asset_manifest,
+                webgal_root=args.webgal_root,
+                artifact_root=args.artifact_root,
                 gateway_kind=args.gateway,
             )
     except WorldError as error:
