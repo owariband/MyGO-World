@@ -8,7 +8,7 @@
 - **进入 Phase 4 前必须验证：**Event 隔离键、`no_op` 唤醒、共享实体拒绝语义，以及单 Event 失败不阻塞其它 Event。
 - **进入 Phase 5 前必须冻结：**RenderJob envelope、Runtime/Plugin 幂等与乱序语义、状态回传、Viewer Cursor 持久化。
 - **接真实模型前必须具备：**Prompt 输入权限、结构化输出校验、GenerationTrace 和可定位失败分类。
-- **已确定且不再作为选型问题：**Agent Runtime 使用 Go + Eino ADK；Character 是自定义 `PersonActAgent`，内部 Compose Graph；不再比较 Python 手写 Loop、LangChain 或 LangGraph。
+- **已确定且不再作为当前选型问题：**Agent Runtime 使用 Python 3.12 + LangChain Core 1.6.1；PersonAct 当前是 strict Pydantic 值之间的 `RunnableSequence`。`with_types()` 不做 runtime validation；当前不使用 LangGraph，只有出现真实的复杂分支、暂停恢复或持久状态需求后才重新评估。
 - **产品化前才阻塞：**真实 30 分钟领先库存、成本预算、安全鉴权、复杂 barrier/迁移和高可用。
 
 ## Plugin 与 WebGAL 适配
@@ -92,20 +92,24 @@
 
 ## Agent 能力与数据
 
-1. Character Skill 的最小契约是什么？
+已确定：NPC DIY 使用受限 Manifest，经 strict Pydantic + 语义编译得到 frozen `CompiledPersonActSpec`；不开放任意 Runnable/Graph、namespace、provider、URL/MCP 或 World/Render 写工具。详见 [NPC DIY](npc-diy.md)。
+
+1. Character Skill 如何在当前 Persona/Goal/Relationship/Voice 基础上表达带 evidence 的关系条件策略，并做版本发布与兼容？
 2. 第一版使用通用模型 + Skill，还是角色微调模型？没有真实训练数据前不应承诺微调。
 3. Director 和 Broadcast 是否共享模型？
 4. 评测集如何覆盖角色一致性、认知越权、跨 Event 因果、剧情推进、Render 合法率和黑屏率？
 5. MyGO 番剧视频的镜头切分、角色/说话人识别、字幕对齐和 Evidence Clip 契约是什么？
 6. 人工 Gold Character Skill 如何定义，自动 Skill 应如何在保留集上比较关系条件行为与角色一致性？
-7. 三类 Fixture Agent 通过统一 Eino `adk.Agent` 边界时，哪些 Runner/Trace 代码可以复用，哪些内部 Graph 必须分开，才能避免大量 `if agent_type` 分支？
+7. 三类 Fixture Agent 共享 strict Model policy、`RunnableConfig` 与 Trace adapter 时，哪些调用代码可以复用，哪些 Pipeline/strategy 必须分开，才能避免大量 `if agent_type` 分支？
 8. Director/Broadcast 的 reflect 一期应是 No-op、阈值触发还是提交结果后触发；怎样避免把 Persona poignancy 机制机械复用？
 9. 通用 MemoryRecord 在一期最小字段已收敛为 `memory_id / agent_id / namespace / memory_type / created_at / content / tags / source_refs / metadata`；仍需实验哪些 metadata 值得结构化，以及跨 namespace 的显式授权是否一期需要。
 10. Prompt Contract 如何保证 Persona、Director、Broadcast 的输入权限和输出 Schema 不串层；第一批 Fixture 何时替换为真实模型？
-11. Eino Callback/AgentEvent 与项目 `GenerationTrace` 的映射是否足以区分 Prompt、检索、Graph、调度、Validator 和 Render 失败？
-12. `PersonActAgent` 专属 `AgentRunOption` 如何承载强类型 DecisionRequest；`CustomizedOutput` 应使用不可变值还是稳定 JSON envelope，才能避免 `any` 与事件复制带来的可变共享风险？
-13. 一期 `PersonActAgent` 只实现 `adk.Agent`，还是同时实现 `ResumableAgent`；若启用 checkpoint，Agent Graph checkpoint 与 World Snapshot/Ledger 如何使用稳定 ID 关联而不混为一份状态？
+11. LangChain callback/tracing 与项目 `GenerationTrace` 的映射是否足以区分 Prompt、检索、Runnable 节点、调度、Validator 和 Render 失败？
+12. ChatModel/Tool 的返回怎样统一显式 parse 为 strict Pydantic Model，并保证 `RunnableSequence` 的中间 `Any` 不越过公开边界？
+13. 当前固定 Pipeline 不使用 LangGraph；若未来出现复杂分支、暂停恢复或持久执行，什么证据足以触发重新评估，并怎样保证其 state/checkpoint 与 World Snapshot/Ledger 物理分离？
 14. 运行存储最终选 SQLite 还是 JSONL adapter；在单进程本地运行、原子提交、索引查询、重放和未来迁移之间如何取舍？
+15. Tool Catalog 的资源级 scope、版本兼容和配额如何表达，才能在增加工具时维持默认拒绝？
+16. Manifest 更新后，正在运行的 Session 固定旧 digest 到结束，还是支持显式迁移；旧 Trace 如何继续解析？
 
 ## Director / Broadcast 高层算法
 

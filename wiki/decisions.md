@@ -128,7 +128,7 @@
 
 - **状态：宏观方向已确认，Director 基础职责由 D-026 细化**
 - **日期：2026-08-20**
-- **决策：**以 Generative Agents 的 Perception、Memory、Planning、Reflection、Action 和 Sandbox Loop 作为 Character Agent 认知底座；新增 Director Agent 做每轮 Segment Completion 及低频 Narrative Intervention；新增 Broadcast Agent 负责 Event 选择、视角和观看时间投影。
+- **决策：**以 Generative Agents 的 Perception、Memory、Retrieval、Planning/Reacting 与 Reflection 作为 Character Agent 认知语义参考；其 Sandbox loop、`Persona.move()`、Maze/movement 与 `execute` 不迁移。新增 Director Agent 做每轮 Segment Completion 及低频 Narrative Intervention；新增 Broadcast Agent 负责 Event 选择、视角和观看时间投影。
 - **边界：**Binder、Validator、Committer、Transaction Ledger 和 Event Recognizer 仍是确定性治理组件；它们校验和提交 Director 草稿，但不替 Director 用固定规则决定故事时长。
 
 ## D-018｜MyGO 番剧到 Character Skill 作为后续算法方向
@@ -148,9 +148,10 @@
 
 ## D-020｜Character Runtime 以 Generative Agents 为认知 Baseline
 
-- **状态：宏观方向已确认，工程实现需改造**
+- **状态：认知语义方向保留；运行接口由 D-039 收敛**
 - **日期：2026-08-20**
-- **决策：**Character Agent 采用 Generative Agents 的 Perception、Memory Retrieval、Planning/Reacting、Reflection、Action 和 Sandbox Loop 作为第一版认知底座。
+- **决策：**Character Agent 迁移 Generative Agents 中可验证的 Perception、Private Memory、Retrieval、Planning/Reacting 与 Reflection 语义。
+- **明确不迁移：**Sandbox loop、`Persona.move()` 门面、Maze、地址/寻路/逐 tile movement 和 `execute.py`。外部 Event Scheduler 独占循环，Character 只做一次 `decide` 并返回 Proposal。
 - **保留改造：**生成完成后的 Actual Runtime 绑定、Director Segment Completion、局部事实/信念分层、Snapshot/Version、WorldTransaction Ledger、多人冲突治理和 trace 重放不照搬原源码。
 
 ## D-021｜Director 只控制未来机会、压力与约束
@@ -215,12 +216,12 @@
 - **决策：**所有用户明确指出的难点、卡点、代价、错位和不合理设计，统一维护在 [难点、卡点与代价账本](difficulty-ledger.md)。
 - **记录要求：**每个卡点先写成以 `？` 结束的设计问题，再保留首次提出时间、交换代价、当前回答、否决历史和未解决部分；被否决的是旧答案，不是问题。形成决定时同步本页，仍待研究时同步 `open-questions.md`，但不从账本删除历史。
 
-## D-029｜无 Maze 感知采用世界投影与角色注意力分层
+## D-029｜无 Maze 感知采用世界投影与 `decide` 内部注意力分层
 
 - **状态：建议方向，待 Golden Trace 验证**
 - **日期：2026-08-21**
-- **问题：**去掉 Maze 后，`Persona.perceive()` 如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？
-- **建议：**世界侧 `PerceptionProjector` 从已提交 WorldSegment 为每个角色生成 `PerceptionFrame`，负责硬可见性与字段裁剪；Frame 同时携带当前语义 affordances，替代 Maze spatial memory 给 `plan()` 提供的地点/物体选择；角色侧 `Persona.perceive(frame)` 只负责注意力、新颖性和记忆写入。
+- **问题：**去掉 Maze 后，`PersonActAgent.decide` 内部如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？
+- **建议：**世界侧 `PerceptionProjector` 从已提交 WorldSegment 为当前角色生成 `PerceptionFrame`，负责硬可见性与字段裁剪；Frame 同时携带当前语义 affordances，替代 Maze spatial memory 给 planning 提供的对象选择；角色侧 `decide` 内部 perceive 阶段只负责注意力、新颖性和本人 Memory 写入，它不是额外公开方法。
 - **顺序约束：**每次 Agent 调用只读取一个不可变 committed version；未提交输出不可见。同一 Event 内上一 Agent 一旦完成提交，下一 Agent 可以在新版本上感知；隔离 Event 可独立推进。
 - **边界：**Director 可以提出事件的 perceptual footprint，但不能把秘密直接写入角色记忆；Character Skill 可以重排候选、影响主观解释，但不能扩大硬可见范围。
 - **来源边界：**Character Proposal、Director Stimulus/Completion、System/Tool/Player Input 都只是候选来源；统一经 Validator/Committer 成为 WorldEvent 后，才能由 Projector 投影给 Persona。Director 不是 `perceive()` 的直连输入。
@@ -231,7 +232,7 @@
 - **状态：一期决策，跨 Event 隔离条件待验证**
 - **日期：2026-08-21**
 - **问题：**串行调用 Persona 时，如何保留第一版实现简单性，同时消除执行顺序对世界事实、对话先手和角色认知的污染？
-- **决策：**同一 Event 内按稳定顺序串行加载 Persona，每个 Persona 提交一次 `act / utter / respond / no_op` 后，下一参与者基于最新 committed Event state 再行动；没有共享角色、对象或因果依赖的 Event 可并行运行。
+- **决策：**同一 Event 内由 Scheduler 按稳定顺序调用各 Persona 的 `decide`，每次消费 `act / interact / utter / respond / wait / no_op` 中一个 Proposal 并完成提交后，下一参与者才基于最新 committed Event state 再行动；没有共享角色、对象或因果依赖的 Event 可并行运行。
 - **轮次：**Scheduler 决定谁获得下一次决策机会，不要求当前 Agent 猜测“应该让谁说话”。被点名角色会在 Frame 中收到 `addressed_to_me / pending_response`，但仍有回复、拒绝、延后或不行动的自主权。纯 `no_op` 只写 Decision Trace 并让出游标，不生成占位 WorldEvent；有世界语义的等待使用显式 `wait`。
 - **禁止：**一个 Persona 直接修改另一 Persona 的 live Scratch；Event 间存在共享实体或因果依赖时不得假装隔离并行。
 - **修正历史：**此前“全世界同一 immutable wave 收齐所有 Proposal 后一次提交”约束过强，一期改为 Event 内逐步提交；保留 Event 间隔离并行。
@@ -239,24 +240,24 @@
 
 ## D-031｜Agent Runtime 按 Agent / Event / World 分层，并提供 Agent 通用 Memory
 
-- **状态：领域分层继续有效；Python 技术栈已于 2026-08-22 被 D-034 取代**
+- **状态：领域分层继续有效；技术实现由 D-038 更新**
 - **日期：2026-08-21**
-- **原决策：**一期曾计划在 MyGO 项目内新增纯 Python `agent_runtime/`；2026-08-22 决定不沿用该技术栈和手写 Loop，但保留 `agent / event / world` 的领域所有权：Persona、Director、Broadcast 和通用 Memory 归入 `agent/`；EventSession、WorldEvent 和 Scheduler 归入 `event/`；语义环境、Ledger 和 PerceptionProjector 归入 `world/`。
-- **当前映射：**Go `agent/personact/` 以 `adk.Agent + compose.Graph` 承载 Character 认知流程；原 `associative_memory` 的领域语义提炼到 `agent/memory/`，Scratch/KnownPlace 仍是 Persona 私有状态；不迁移 `path_finder.py`。
-- **新增边界：**`cmd/runtime` 和 `rendergateway` 保持装配入口/出站适配器；不提前建立游戏设计层、素材层、播放器层或通用企业分层。
+- **原决策与历史修正：**一期最初计划纯 Python + 手写 AgentLoop，2026-08-22 曾切换到 Go + Eino；D-038 又将执行层迁回 Python 3.12 + LangChain Core。两次技术栈变化都不改变 `agent / event / world` 的领域所有权：Persona、Director、Broadcast 和通用 Memory 归入 `agent/`；EventSession、WorldEvent 和 Scheduler 归入 `event/`；语义环境、Ledger 和 PerceptionProjector 归入 `world/`。
+- **当前映射：**Python `agent/personact/` 的公共边界收敛为 `PersonActAgent.decide`；内部可按需使用 LangChain Runnable 承载模型/策略接线，但不对外暴露 Pipeline 或拥有循环。原 `associative_memory` 的领域语义提炼到 `agent/memory/`，Persona 私有 state 留在 PersonAct；不迁移 `Persona.move()`、Maze、`path_finder.py` 或 `execute.py`。
+- **新增边界：**Runtime 装配入口和 `rendergateway` 保持装配/出站职责；不提前建立游戏设计层、素材层、播放器层或通用企业分层。
 - **Memory 边界：**共用 Memory 实现不等于共享 Memory 内容。每个 Persona、Director、Broadcast 使用独立 `agent_id + namespace`；Director 全局记忆和 Broadcast 覆盖历史不得被 Persona 检索。
 - **后果：**目录直接表达“Agent 是决策主体，Memory 是 Agent 通用能力，Event 是互动容器，World 是事实环境”；Reflection、Prompt 和复杂检索算法可逐步替换，WebGAL 相关代码继续隔离在 `extensions/dynamic-render/`。
 
-## D-032｜三类 Agent 共享认知协议，不共享 Persona 具体实现
+## D-032｜三类 Agent 共享类型与调用约定，不共享 Persona 具体实现
 
-- **状态：基础协议已确认，内部 Graph 形态待 Fixture 验证**
+- **状态：基础边界已确认，具体 strategy 待 Fixture 验证**
 - **日期：2026-08-21**
-- **问题：**Persona、Director、Broadcast 是否应该共同使用 `perceive -> retrieve -> plan -> reflect -> execute`，从而决定 cognitive、memory、prompt 三类目录是否通用？
-- **决策：**三类 Agent 对外共享 Eino `adk.Agent` 协议、Runner、AgentEvent 与模型基础设施；概念上共享 `observe/perceive -> retrieve -> plan -> propose` 以及提交后的 `observe_outcome -> reflect`，但不要求共享同一张 Graph。
-- **执行边界：**`execute` 不进入 Agent Graph。Persona 输出 ActionProposal，Director 输出 SegmentDraft/DirectorProposal，Broadcast 只输出 BroadcastPlan；确定性 Render Planner 再把 BroadcastPlan 编译为 RenderJob。副作用由 World Committer 或 Render Gateway 完成。
-- **目录边界：**Memory Store/Retriever 提升为 `agent/memory/`；具体 Graph/strategy 与 prompt templates 保留在 `personact / director / broadcast` 各自目录。
-- **实现方式：**Character 使用自定义 `PersonActAgent`，内部 Compose Graph 承载认知节点与有界回环；Director/Broadcast 可分别使用 Chain、Graph 或规则实现，不建立万能 BaseAgent，也不使用 `adk.NewLoopAgent` 把认知阶段伪装成多个子 Agent。
-- **待验证：**三类 Fixture Agent 均可由 ADK Runner 驱动，且 Memory、Prompt、权限和副作用完全隔离。
+- **问题：**Persona、Director、Broadcast 应共享哪些基础设施，才不会把 Persona 的认知语义和外部 Runtime 循环强塞给其它 Agent？
+- **决策：**三类 Agent 共享 strict Pydantic 契约策略、LangChain Runnable/`RunnableConfig` 调用约定与模型基础设施；不共享一条 Persona Pipeline，也不共享顶层 Loop。
+- **执行边界：**Persona 的一次 `decide` 输出一个 strict/frozen ActionProposal；跨 wire 时再显式序列化 JSON。Director 输出 SegmentDraft/DirectorProposal，Broadcast 输出 BroadcastPlan；确定性 Render Planner 再把 BroadcastPlan 编译为 RenderJob。`execute` 和 Scheduler loop 都不进入 Agent Runnable，副作用由 World Committer 或 Render Gateway 完成。
+- **目录边界：**Memory Store/Retriever 提升为 `agent/memory/`；具体领域策略与 prompt templates 保留在 `personact / director / broadcast` 各自目录。
+- **实现方式：**Character 公开 `PersonActAgent.decide`；内部可使用领域函数或 Runnable。Director/Broadcast 可分别使用独立 Runnable 或规则实现，不建立万能 BaseAgent，也不为了形式统一引入 LangGraph。
+- **待验证：**三类 Fixture Agent 都返回各自 strict Pydantic Model，且 Memory、Prompt、权限和副作用完全隔离。
 
 ## D-033｜Memory 是 Agent 通用能力，但记忆内容按 namespace 隔离
 
@@ -269,23 +270,23 @@
 
 ## D-034｜Agent Runtime 采用 Go + Eino ADK，Character 实现为 PersonAct Agent
 
-- **状态：已确认，代码未实现**
+- **状态：superseded（已由 D-038 取代）**
 - **日期：2026-08-22**
 - **决策：**一期 Agent Runtime 使用 Go。Persona、Director、Broadcast 对外实现 Eino `adk.Agent`；Character 的工作名称为 `PersonActAgent`，内部使用 Eino Compose Graph 表达 Generative Agents 风格的 `perceive -> retrieve -> plan -> propose` 与有限补检索/修复回环。
 - **依据：**Eino 自身的 `adk.ChatModelAgent` 也是 ADK Agent 外壳加内部 ReAct Graph；本地 `agent_core` 也已验证 `compose.Workflow -> Runnable -> adk.Agent` 的薄适配模式。Graph 是 Agent 内部实现，不是与 ADK 对立的另一套方案。
 - **源码依据：**Eino [`adk.Agent`](https://github.com/cloudwego/eino/blob/v0.9.15/adk/interface.go#L447-L467)、[`compose.Runnable`](https://github.com/cloudwego/eino/blob/v0.9.15/compose/runnable.go#L28-L37) 与 [ADK ReAct Graph](https://github.com/cloudwego/eino/blob/v0.9.15/adk/react.go#L354-L558)；本地已有 [`WorkflowAgent`](../../../go-project/agent_core/agent/workflow/workflow_agent.go) 包装 Eino Workflow Runtime 的实现先例。
 - **运行边界：**一次 Character Decision Run 在产生 `ActionProposal` 或 `no_op` 后结束；Runtime 完成 Director Completion、Validator 与 Commit 后，再用独立 Feedback Run 触发 `observe_outcome -> conditional reflect`。一期不以 ADK interrupt 长时间挂起等待世界提交。
 - **状态边界：**Eino Graph state/checkpoint 只服务一次 Agent 执行的中断恢复；不能替代 Persona 长期 Memory、World Snapshot、World Ledger、Event scheduler cursor 或 commit protocol。
-- **后果：**原 D-031 的纯 Python Runtime 和手写 `cognitive_loop.py` 不再实施；Generative Agents 只作为认知算法与数据语义参考。
+- **历史后果：**该决策在 2026-08-22 至 2026-08-30 期间指导了 Eino PoC；其 `agent / event / world`、Proposal/Commit 和框架状态不替代 World 状态等领域边界继续保留。Go/Eino、ADK Runner、Compose Graph 与 checkpoint 的技术映射不再是现行方案。
 
 ## D-035｜成熟通用能力优先复用，世界域与认知语义保持自研
 
-- **状态：已确认**
+- **状态：原则继续有效；组件映射由 D-038 更新**
 - **日期：2026-08-22**
-- **决策：**Eino ADK/Compose 负责 Agent/Runner、Graph/Chain、AgentEvent、取消、Callback、模型与 Tool 接口、Prompt Template 和可选 checkpoint；使用 `adk.ChatModelAgent` 时复用其 retry/failover，自定义 Graph 的模型节点只允许增加一层经过测试的公共 adapter。Eino Embedder/Indexer/Retriever 作为后续检索后端的适配接口。禁止复制 Stanford 原型中的旧 OpenAI wrapper、手工 Prompt 占位替换、字符串截 JSON、裸异常重试、文件 mailbox、全量 JSON memory 重写和几何寻路。
-- **保留自研：**PerceptionProjector 的硬可见性、PersonAct 各认知节点语义、Memory namespace/provenance 与召回融合、World/Event Scheduler、world version、Temporal Binder、Validator/Committer、Ledger、Event Recognizer，以及 BroadcastPlan 到 RenderJob 的确定性转换。
+- **当前映射：**LangChain Core 负责 Runnable 组合、`RunnableConfig`、模型/Prompt/Tool 抽象与 callback/tracing 接线；Pydantic strict/frozen Model 负责运行时结构边界，pyright strict 负责静态接线。`with_types()` 不做 runtime validation。禁止复制 Stanford 原型中的旧 OpenAI wrapper、手工 Prompt 占位替换、字符串截 JSON、裸异常重试、文件 mailbox、全量 JSON memory 重写和几何寻路。
+- **保留自研：**PerceptionProjector 的硬可见性、PersonAct 认知语义、Memory namespace/provenance 与召回融合、World/Event Scheduler、world version、Temporal Binder、Validator/Committer、Ledger、Event Recognizer，以及 BroadcastPlan 到 RenderJob 的确定性转换。
 - **原则：**外部库替代 plumbing，不替代决定“角色知道什么、为什么行动、哪些事实可以提交”的项目算法。
-- **一期取舍：**Fixture 阶段使用 Fake Agent/Model 与严格 typed contract；不急于接真实 LLM、Embedding 或向量数据库。真实模型接入时再启用 ChatModel provider、structured output、有限 repair 与调用级 Trace。
+- **一期取舍：**Fixture 阶段使用 `CognitionStrategy` Protocol 的确定性实现与 strict Pydantic contract；不急于接真实 LLM、向量数据库或 LangGraph。真实模型接入时再增加 ChatModel adapter、显式 Pydantic parse、有限 repair 与调用级 Trace。
 
 ## D-036｜地点是一等、版本化的 World Model
 
@@ -299,4 +300,46 @@
 - **自治边界：**DiscoveryPlan 不能替具体 Character 说话、发消息或行动；需要角色主动传播时必须先经过该 Character 的 Proposal/interaction handshake。
 - **后果：**LocationModel 不是 Location Agent，也不是 Prompt 拼接缓存；它属于 World 权威。Director 可以读取全局地点上下文，但不能跳过 disclosure、时空条件和认知投影。详细模型见[地点 World Model](location-world-model.md)。
 - **标识边界：**World/Event 契约统一使用 `location_id`；`scene_id` 仅属于 Render/WebGAL 场景资源，由 Render Planner 映射，不再作为第二套世界地点 ID。
+
+## D-037｜NPC DIY 采用受限 Manifest 编译，不开放任意 Runnable/Graph
+
+- **状态：现行决策，PersonAct 单次认知 Slice 已实现**
+- **日期：2026-08-24**
+- **问题：**如何让创作者 DIY NPC，同时不让配置绕过角色认知、Memory namespace、World Commit 与 Render 权限？
+- **决策：**创作者在项目内提供受限 `agents.json`，只描述 Persona、初始私有记忆、允许的 Proposal 类型、受信 Tool 引用、有限行为参数和 Prompt Profile。Python Runtime 以 strict/frozen Pydantic Model 和语义校验将其编译成不可变 `CompiledPersonActSpec`，派生 `project/{project_id}/persona/{agent_id}` Memory scope，把 project/format version 纳入稳定 digest，并解析 Tool/Prompt 精确版本；受信 `PersonActAgent` 消费该 Spec，而不是为每个角色生成代码或开放 Runnable/Graph 编辑。
+- **权限边界：**Manifest 不允许声明 namespace、provider/secret、任意 URL/脚本/MCP、World/Ledger/Render 写工具。Tool Catalog 只向 PersonAct 暴露只读 query 或纯 compute；运行时 Proposal 还必须与当前 `PerceptionFrame.affordances` 和 visible evidence 相交，随后继续经过 Director、Binder、Validator、Committer。
+- **LangChain 边界：**LangChain Core 只能作为 `PersonActAgent.decide` 的内部模型/策略接线，`RunnableConfig` 只携带调用上下文；`with_types()` 不做 runtime validation。真正的运行时结构校验由 Pydantic 完成，领域权限由 Compiler 与 Proposal Validator 完成。当前不使用 LangGraph。
+- **一期取舍：**先用无网络 Fixture `CognitionStrategy` 验证编译、认知与权限边界；不做可视化编辑器、热更新、远程插件、创作者自选模型或 Director/Broadcast DIY。完整设计见 [NPC DIY](npc-diy.md)。
+
+## D-038｜Agent Runtime 采用 Python 3.12 + LangChain Core 强类型边界
+
+- **状态：现行决策；PersonAct 单次认知 Slice 已实现，完整 Runtime 未实现**
+- **日期：2026-08-31**
+- **问题：**如何让 Agent 编排贴合当前 Python 生态，同时在动态语言与 Runnable 组合中维持可审查、可运行时拒绝的强类型契约？
+- **决策：**Agent Runtime 使用 Python 3.12 与 `langchain-core==1.6.1`。Agent 步骤以带显式输入/输出注解的 `RunnableLambda` 和 `RunnableSequence` 组合；外部输入、模型/Tool 输出、跨模块契约与持久化边界使用统一 strict/frozen Pydantic Model；静态接线由 pyright strict 检查，ruff 与 pytest 作为质量门。环境和锁文件由 uv 管理。
+- **校验边界：**`Runnable.with_types()` 只提供类型与 Schema 元数据，不在 `invoke()` 时自动执行 runtime validation。所有不受信数据必须显式进入 Pydantic validation；通过结构校验后仍需领域代码检查 namespace、affordance、target、evidence、world version 与副作用权限。
+- **编排边界：**PersonAct 的公共 API 是一次 `decide`，不是 Runnable Pipeline 或 Agent Loop。只有出现真实的复杂分支、暂停恢复或持久执行需求，并经过 ADR 与契约测试后才重新评估 LangGraph；任何框架状态都不能替代 Event Scheduler、Persona 长期 Memory、World Snapshot、Ledger 或 commit protocol。
+- **所有权边界：**保留 D-031 至 D-037 的 `agent / event / world`、Memory namespace、Proposal/Commit、World/Render 分权。LangChain 只替代通用调用 plumbing，不拥有世界事实。
+- **实现事实：**当前已完成受限 NPC Manifest 编译、Persona Memory/State 与检索基础、固定 ActionProposal envelope + action union，以及 `PersonActAgent.decide` 的 prepare/perceive/retrieve/plan/propose Slice。Reflection/commit feedback、Director、Binder、Validator/Committer、Event/World Runtime、Broadcast 与真实模型仍未实现。
+
+## D-039｜迁移 Persona 认知语义，不迁移 `Persona.move()` 或 movement
+
+- **状态：现行纠正；PersonAct 单次认知 Slice 已实现，外部 Runtime 仍待实现**
+- **日期：2026-08-31**
+- **用户纠正：**Character Runtime 不应实现或暴露 `Persona.move()`，也不需要 Maze、path、tile movement 或 `execute`；外部 Event Scheduler 才拥有循环。
+- **决策入口：**Scheduler 基于 committed world version 选择一个角色，并以只含 `proposalId + frame` 的 `DecisionRequest` 调用 `PersonActAgent.decide`；spec/state/memory/strategy 由受信 Agent 实例持有。一次调用只返回该角色一个 strict/frozen `ActionProposal` 对象，然后立即结束。需要 wire JSON 时显式调用 `model_dump_json(by_alias=True)`。下一角色、下一轮、退避和重新唤醒都由 Scheduler 决定。
+- **Actor 边界：**公开 envelope 固定为 `proposalId / agentId / eventSessionId / basedOnWorldVersion / action / evidenceIds`。`agentId` 由受信 Agent 从 `CompiledPersonActSpec.agent_id` 注入，CognitionStrategy、模型和创作者不能选择或覆盖 actor。
+- **Action 边界：**`action` 是以 `kind` 判别的 union，固定 `act / interact / utter / respond / wait / no_op`；`interact.target` 是 `{kind: character|object, id}` 的显式单目标，`utter/respond.target` 必须是 character。没有 `move` variant、`locationId` 或多目标 `targetIds`。
+- **迁移范围：**迁移 perception、private memory、retrieval、planning/reacting 与 reflection 等认知语义；不迁移 Stanford 顶层循环、`Persona.move()` 门面、Maze、寻路、逐 tile movement、`execute.py` 或跨 Persona 原地写状态。
+- **实现校准：**World contract 与 `PersonActAgent.decide` 已采用固定 envelope 与 discriminated union；prepare/perceive/retrieve/plan/propose、actor 注入和 Proposal 权限边界已落地。同一 Agent 的调用由实例锁串行化，并以单个 immutable private snapshot 原子替换 state/memory/trace。不得把它扩大表述成 reflection/feedback、外部 Scheduler、movement、World Commit 或完整 Runtime。
+
+## D-040｜项目自研领域型 NPC ADK，LangChain 只作为内部基础设施
+
+- **状态：现行决策；PersonAct 核心 Slice 已实现**
+- **日期：2026-08-31**
+- **决策：**将 Creator Manifest、受信 `CompiledPersonActSpec`、Persona State/Memory/Retrieval、`PersonActAgent.decide`、ActionProposal schema、权限校验和 Trace 统称为 **Generative Go World NPC ADK**。这些契约和认知语义由本项目拥有。
+- **框架边界：**LangChain Core 只提供 Runnable、调用配置以及后续 ChatModel/Prompt/Tool 接入，不定义角色能力、可见性、Memory scope、Action 语义或 World authority；因此本项目不是“给 LangChain 配一层 Prompt”，也不是重新实现 LangChain。
+- **核心不变量：**`perceive -> retrieve -> plan -> ActionProposal -> Director / Validator / Committer -> Committed WorldEvent`。Proposal 是角色意图，不是执行结果；只有 Committer 能把候选动作变成世界事实。
+- **当前完成度：**可以称为自研 NPC ADK 的核心 Slice；外部 Scheduler、commit feedback/reflection、Director、World Validator/Committer、Ledger、真实模型 adapter 和完整 Runtime 仍待实现。
+- **环境约束：**Python 版本、虚拟环境、依赖与锁文件只使用 uv 管理，以 `.python-version + pyproject.toml + uv.lock` 为唯一口径；安装使用 `uv sync --frozen`，命令通过 `uv run` 执行，不并行维护 pip requirements、Poetry 或 Conda 配置。
 

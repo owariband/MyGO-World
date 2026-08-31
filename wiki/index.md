@@ -2,6 +2,29 @@
 
 这里维护「多事件 AI Native 世界剧场」的持续架构结论。Wiki 用于沉淀讨论、决策、机制和未决问题，不替代当前仓库源码；涉及现有行为时仍以代码为准。
 
+## 核心模型：Agent 提案，World 提交
+
+> **这是项目最高优先级的运行边界。**`ActionProposal` 表达“角色想做什么”，不是执行结果，更不是已经发生的世界事实。
+
+```text
+perceive -> retrieve -> plan -> ActionProposal
+                                  |
+                                  v
+                    Director / Validator / Committer
+                                  |
+                                  v
+                         Committed WorldEvent
+```
+
+- `PersonActAgent.decide` 每次只为当前角色产出一个 Action；`agentId` 由受信 `CompiledPersonActSpec` 注入。
+- `interact` 可以指向 Character 或非 Agent Object，但 target 类型必须显式进入契约；对 Character 发起交互不代表对方已接受或已经行动。
+- Director 只能补全候选世界段，Validator/Committer 才决定 Proposal 能否成为 `Committed WorldEvent`。
+- Agent 不执行 Maze 移动、不修改其他 Persona、不直接写 World/Ledger，也不控制 Render。
+
+## 项目定位：自研领域型 NPC ADK
+
+当前建设的是 **Generative Go World 自己的 NPC ADK**，不是对 LangChain 的二次包装，也不是通用 Agent Builder。项目自研并拥有 Creator Manifest、受信 Compiler、Persona State/Memory、认知阶段、Action Schema、权限校验和 Trace；LangChain Core 只是内部 Runnable 与未来模型接入基础设施。当前已落地 PersonAct 单次认知 Slice，外部 Scheduler、Director、World Commit、reflection feedback 和完整 Runtime 仍按下文边界继续实现。
+
 ## 当前结论
 
 - 世界不属于 Galgame 引擎。外部 World / Agent Runtime 才是 `world_time`、角色状态、局部认知、互动、World Transaction 和 World Event Ledger 的唯一权威；WebGAL/MyGO 不拥有也不推进世界时间。
@@ -12,7 +35,7 @@
 - 世界可同时存在多个主视角 Event，例如 `Anon / Soyo`、`Tomorin`、`Saki / Mutsumi / Uika`。玩家选择当前观察窗口并可随时切换；未被观看的 Event 仍可继续推进。
 - Agent 初步分为 Character Agent、Director Agent 和 Broadcast Agent。Character 基于 Persona 与局部认知生成行为；Director 至少承担生成结果返回后的时间/因果补完，并在更高层维护剧情约束与未解决线程；补完结果仍须经最小一致性校验后才成为客观 Event。Broadcast 只负责展示选择、摘要、镜头和时间投影。
 - Character Agent 产出结构化 `ActorPerformance / ActionProposal`；Director 基于角色输出与 measured latency 形成待校验 `SegmentDraft`；Temporal Binder、Minimal Validator 和 Committer 只负责绑定实耗、守住世界不变量并提交 Ledger；Event Recognizer 再聚合 `WorldEvent`。任何模型都不能绕过提交链直接控制播放器或宣称事实。
-- 宏观算法以 Generative Agents 的 Character Agent / Memory / Planning / Reflection / Sandbox Action Loop 为认知底座，再增加 Director Agent 做每轮 Temporal/Causal Completion 和低频叙事干预、Broadcast Agent 做 World Timeline → Render Timeline 的观看投影；Binder、Validator、Ledger、Committer 与 Event Recognizer 是最小确定性治理，但不硬编码故事时长。
+- 宏观算法借鉴 Generative Agents 的 Perception、Memory、Retrieval、Planning/Reacting 与 Reflection 认知语义，再增加 Director Agent 做每轮 Temporal/Causal Completion 和低频叙事干预、Broadcast Agent 做 World Timeline → Render Timeline 的观看投影。其 Sandbox loop、`Persona.move()`、Maze/path/tile movement 和 `execute` 不迁移；Binder、Validator、Ledger、Committer 与 Event Recognizer 是最小确定性治理，但不硬编码故事时长。
 - Timeline 不是 Event Hub 的 UI 控件或 Render Queue，而是 Agent 世界的执行语义：它统一承载动作区间、角色认知获得时间、互动生命周期、计划/承诺变化、WorldTransaction 因果历史和 Viewer 回放位置；MyGO/WebGAL 解析只是该世界向 Galgame 媒介投影的副产物。
 - World 由一等 `LocationModel` 维护地点身份、版本化客观事实、当前有效的 LocationInfo，以及指向唯一 WorldEvent Ledger 的地点 Event 索引。地点事实不会被 Agent 文本覆盖；Director 在角色前往地点前查询该地点上下文，只能提出合法的信息传播机会，角色仍须依据已提交的 Fact/Info 或传播 Event，经 PerceptionProjector -> `perceive` 才能真正获知。
 - 后续算法方向包括从 MyGO 番剧视频中归纳带证据的 Character Skill，再用于 Character Agent 的 Persona、关系条件策略、语言风格和行为偏好；该方向尚未实现，不等于已完成 VLM/微调能力。
@@ -20,15 +43,20 @@
 - 产品规则是“有 Ready Render 就加载，没有 Render 就保持黑屏”。黑屏由 Plugin Host 控制；WebGAL 可在遮罩下预热。
 - “播放前先运行约 30 分钟 Agent 流”不是普通性能优化，而是生成世界与观看世界的核心解耦机制：玩家消费已提交的演员剧本，Agent 在其前方持续生成和补完。它不代表一次性写死永久未来，但必须形成真实可消费库存，而不只是远端计划。
 - **已实现并验证：**Dynamic Render MVP 已支持结构化 Fixture Timeline、Render 校验/编译、进程内逐段队列、Event 切换、黑屏 Host、`webgalsync / TEMP_SCENE` 注入和文件热加载；2026-08-22 本地 `npm test` 为 14/14 通过。
-- **一期已冻结但尚未实现：**在项目内新增 Go `agent_runtime/`，使用 Eino ADK 作为 Agent 执行框架；Persona、Director、Broadcast 对外实现 `adk.Agent`。Character 的工作名称为 `PersonActAgent`，内部用 Eino Compose Graph 承载 `perceive -> retrieve -> plan -> propose` 与有界回环，而不是移植 Stanford 的手写 Python Runtime。`agent / event / world` 所有权分层、Memory namespace 隔离、Fixture Vertical Slice，以及 `BroadcastPlan -> RenderJob -> Dynamic Render` 方向继续保留。
-- **必须在实现中验证：**`PersonActAgent` 的 ADK 适配与 Graph checkpoint、Director/Broadcast 是否值得采用同构 Graph、Temporal Binder 如何处理 Director 自身耗时、跨 Event 共享实体如何归约、Prompt Contract、真实模型质量和约 30 分钟领先库存。它们不阻塞 Fixture 骨架开工，但不能被表述成已经解决。
+- **现行 Agent Runtime 技术方案：**Python 3.12 + `langchain-core==1.6.1`。Agent 步骤使用显式类型的 `RunnableLambda / RunnableSequence` 组合；外部输入、模型/Tool 输出和跨模块契约使用 strict/frozen Pydantic Model；静态接线由 pyright strict 检查。Python 版本、虚拟环境、依赖与锁文件统一由 uv 管理，ruff/pytest 也统一通过 `uv run` 执行；当前不使用 LangGraph。
+- **NPC DIY 已形成最小边界：**创作者只提交受限 `agents.json`；Python Runtime 严格校验并收敛为 frozen `CompiledPersonActSpec`。World contract 已落地固定 `ActionProposal` envelope、六类 `action.kind` union 与 character/object typed target；配置不能声明 Memory namespace、模型密钥、任意 Tool/URL、Runnable 拓扑、World Commit 或 Render 权限。
+- **PersonAct 单次认知 Slice 已落地：**`PersonActAgent.decide` 已实现 prepare/perceive/retrieve/plan/propose；外部 Event Scheduler 独占循环，一次调用只为 `spec.agent_id` 返回一个 strict/frozen `ActionProposal`。需要 wire JSON 时显式使用 `model_dump_json(by_alias=True)`；Agent 不实现 `Persona.move()` 或 movement。
+- **基础代码不等于完整 Runtime：**reflection/commit feedback、Memory 持久化、Director、Binder、Validator/Committer、Event Scheduler/Ledger、Broadcast、真实模型与完整咖啡 Golden Trace 仍未实现。
+- **必须准确理解强类型：**`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation。真正的运行时结构校验由 Pydantic 完成，领域合法性由 Compiler、Projector、Validator 与 Committer 保证。
+- **必须在实现中验证：**Director/Broadcast 是否需要独立 Runnable、Temporal Binder 如何处理 Director 自身耗时、跨 Event 共享实体如何归约、Prompt Contract、真实模型质量和约 30 分钟领先库存。它们不阻塞 Fixture 骨架开工，但不能被表述成已经解决。
 
 ## 导航
 
 - [架构](architecture.md)：产品语义、Agent 分工、状态模型和主链路。
 - [导演与导播层](director-broadcast.md)：Generative Agents 底座之上的叙事约束、角色自治和观看投影研究框架。
-- [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `Persona.perceive()` 的局部感知边界，并保留被否决答案、当前代价与未决部分。
-- [Agent Runtime Server 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Go + Eino ADK、`PersonActAgent` 内部认知 Graph、`agent / event / world` 分层、Memory 边界、外部库替代矩阵、Fixture Vertical Slice、分阶段 Plan 与启动指令。
+- [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `decide` 内部 perceive 的局部感知边界，并保留被否决答案、当前代价与未决部分。
+- [Agent Runtime 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Python + LangChain Core 强类型边界、`PersonActAgent.decide`、ActionProposal union、`agent / event / world` 分层、Memory 边界、Fixture Vertical Slice、分阶段 Plan 与启动指令。
+- [NPC DIY](npc-diy.md)：创作者配置、Pydantic 受信编译、`PersonActAgent.decide`、Proposal contract、当前实现证据与下一步。
 - [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 挂载索引、版本化更新，以及 Director 到访前查询与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。
 - [决策记录](decisions.md)：已确认决策、当前建议和产品目标。
@@ -46,7 +74,12 @@
 - [版本说明](../../MyGO_v3.1.1_ForScript/webgal-engine.json)：兄弟目录中的 MyGO `3.1.1`、WebGAL `4.5.19`。
 - [算法研究](../../../designs/generative-agents-world-event-algorithm/README.md)：外部 World Runtime、Agent 局部认知、互动握手、WorldEvent 识别和评测的当前设计。
 - [Generative Agents 论文](https://arxiv.org/html/2304.03442v2)：Sandbox time-step action loop 的论文证据。
-- [Eino ADK Agent 接口](https://github.com/cloudwego/eino/blob/v0.9.15/adk/interface.go#L447-L467)：一期 Agent 对外生命周期契约。
-- [Eino ADK ReAct Graph](https://github.com/cloudwego/eino/blob/v0.9.15/adk/react.go#L354-L558)：`adk.Agent` 内部使用 Compose Graph 与条件回边的源码依据。
-- [本地 WorkflowAgent 先例](../../../go-project/agent_core/agent/workflow/workflow_agent.go)：`compose.Workflow -> Runnable -> adk.Agent` 的现有工程实现。
+- [Python 依赖与质量配置](../pyproject.toml)：Python 3.12、LangChain Core、Pydantic、pyright strict、ruff 与 pytest 的锁定配置。
+- [统一 StrictModel](../agent_runtime/model.py)：strict、frozen、拒绝未知字段的运行时契约策略。
+- [NPC Manifest Compiler](../agent_runtime/agent/personact/compiler.py)：不受信配置到受信运行规格的能力收敛。
+- [World-owned Contracts](../agent_runtime/world/contracts.py)：固定 ActionProposal envelope、六类 action union 与 typed target。
+- [PersonAct Agent](../agent_runtime/agent/personact/agent.py)：`decide`、Persona 私有认知阶段、state/memory 原子更新与 DecisionTrace。
+- [Proposal Authority Boundary](../agent_runtime/agent/personact/proposal.py)：最终 Proposal 构造、actor 注入与 capability/affordance/evidence 校验。
+- [NPC DIY 契约测试](../agent_runtime/tests/test_personact.py)：类型、权限、namespace、affordance 和 evidence 拒绝路径。
+- [PersonAct 认知测试](../agent_runtime/tests/test_personact_agent.py)：attention、novelty、Memory retrieval、state 原子更新和单 Proposal 边界。
 

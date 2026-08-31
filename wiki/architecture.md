@@ -7,7 +7,7 @@
 1. 不再自研或侵入底层 Galgame 播放器，复用成熟的 WebGAL/MyGO Runtime、Live2D、背景、音乐和 UI。
 2. 在引擎外增加 Agent 编排与动态编译 Plugin；给定角色 Skill 或后续自有模型后，系统根据事件背景与世界状态生成剧情。
 3. 世界中可同时发生多个 Event。玩家不是沿预写分支树前进，而是在多个正在发展的角色事件间选择观察视角。
-4. 目标运行形态中，Character Agent、Director Agent 和 Broadcast Agent 在后台异步运行，提前积累可播放 Render，WebGAL 只动态展示当前 Render；当前代码只实现了 Dynamic Render MVP，三类 Agent Runtime 尚未落地。
+4. 目标运行形态中，Character Agent、Director Agent 和 Broadcast Agent 在后台异步运行，提前积累可播放 Render，WebGAL 只动态展示当前 Render；当前代码已实现 Dynamic Render MVP 与 PersonAct 单次认知 Slice，完整三类 Agent Runtime 尚未落地。
 5. 为掩盖生成延迟，目标上让 Agent 流在首播前预运行约 30 分钟，并在观看中持续补货。
 
 这不是“给传统 Galgame 加聊天框”，而是把作品的未来从静态脚本改为由世界状态与 Agent 持续生成。
@@ -37,6 +37,26 @@ WorldTransaction / WorldEvent Ledger     Viewer Cursor / 播放完成信号
 - Agent 不能读取 WebGAL Stage/GameVar/Backlog 作为世界真相；
 - Render 失败只能影响可观看性，不能撤销 WorldEvent。
 
+### 2.0.1 Proposal 是意图，Commit 才是事实
+
+这是自研 NPC ADK 与 World Runtime 之间最重要的分界：
+
+```text
+perceive -> retrieve -> plan -> ActionProposal
+                                  |
+                                  v
+                    Director / Validator / Committer
+                                  |
+                                  v
+                         Committed WorldEvent
+```
+
+`ActionProposal` 只回答“这个角色基于当前可见信息想做什么”。它携带 actor、所依据的 world version、Action 和 evidence，但不能证明动作成功，也不能代表交互目标作出了回应。
+
+例如 `Anon -> interact(character: Soyo)` 只表示 Anon 发起交互；Soyo 是否接受、拒绝或回应，必须由已提交 Event 投影到 Soyo 后，再由 Soyo 自己的 `decide` 决定。`Anon -> interact(object: coffee-machine-01)` 也只表示尝试操作物品；对象是否存在、是否可操作以及状态如何变化，由 Validator/Committer 裁决。
+
+因此，Stanford `execute.py` 的寻路和逐 tile movement 不属于本项目 Agent：Agent 终止于 Proposal，World 执行层才拥有持久副作用。
+
 论文层面的依据是 Sandbox time-step action loop：Agent 在每个 time step 感知和行动，Sandbox Server 更新共同世界后进入下一步。`world_tick / world_version / snapshot / resolver / atomic commit / canonical WorldEvent Ledger` 是本项目为可重放、多 Event 和冲突治理新增的工程契约，不冒充论文原实现。
 
 证据分类：
@@ -46,7 +66,7 @@ WorldTransaction / WorldEvent Ledger     Viewer Cursor / 播放完成信号
 - **Interpretation：**世界推进与演出推进是两个不同的因果系统，不能共享权威游标。
 - **Decision：**外部 World / Agent Runtime 持有世界权威，Render Plugin/Adapter 动态编译其产物，MyGO/WebGAL 只播放。
 
-### 2.0.1 生成完成驱动的 `World Time = Actual Runtime`
+### 2.0.2 生成完成驱动的 `World Time = Actual Runtime`
 
 **用户确认的关键判断：**
 
@@ -167,10 +187,13 @@ Character Skills / Persona / 可选模型
 ### 宏观算法来源与新增层
 
 ```text
-Generative Agents 认知底座
-  Character Agent
-  Perception / Memory Retrieval / Planning / Reflection / Action
-  Sandbox Environment Loop
+Generative Agents 认知语义参考
+  Perception / Memory Retrieval / Planning / Reflection
+  不迁移 Sandbox Loop / Persona.move / movement / execute
+             |
+             v
+本项目外部 Event Scheduler
+  选择角色 -> 调用一次 PersonActAgent.decide -> 消费一个 Proposal
              |
              v
 本项目新增的叙事控制层
@@ -187,11 +210,11 @@ MyGO / WebGAL Render Backend
 
 所以“原底座是 Generative Agents，再增加导演 Agent 和导播 Agent”在宏观上成立。确定性部分仍存在，但它只硬编码世界不变量、测量和提交协议，不预写“咖啡固定 120 秒煮完”之类的故事答案。
 
-上图的 `Action` 是 Generative Agents/论文中的认知阶段术语。本项目的工程接口统一叫 `propose()`：Agent 只能给出结构化意图或计划，真正的世界提交、RenderJob 生成和播放器副作用都在 ADK Agent/内部 Graph 之外完成。
+上图的 `Action` 是 Generative Agents/论文中的认知阶段术语。本项目的工程接口统一叫 `propose()`：Agent 只能给出结构化意图或计划，真正的世界提交、RenderJob 生成和播放器副作用都在 Agent Runnable 之外完成。
 
 ### 三类 Agent 的共用基座
 
-Persona、Director、Broadcast 对外共用 Eino `adk.Agent` 生命周期、Runner、事件流、Callback 和模型调用基础设施，但不共用 Persona 的具体认知模块。Character 的工作名称为 `PersonActAgent`，其内部使用 Eino Compose Graph 表达认知步骤：
+Persona、Director、Broadcast 共享 Python strict Pydantic 契约策略、LangChain Core Runnable/`RunnableConfig` 调用约定和模型适配基础设施，但不共用 Persona 的具体认知模块或顶层循环。Character 的公共边界是外部 Scheduler 调用一次 `PersonActAgent.decide`，得到一个 strict/frozen `ActionProposal`；跨 wire 时再显式序列化 JSON：
 
 ```text
 observe/perceive -> retrieve -> plan -> propose
@@ -203,12 +226,15 @@ observe/perceive -> retrieve -> plan -> propose
           observe_outcome -> reflect
 ```
 
-- `PersonActAgent` 实现 `adk.Agent`；内部 Graph 编排角色阶段、条件回边与最大迭代数，ADK Runner 负责统一运行、取消、事件流和可选 checkpoint；
-- Graph 只是 Agent 的内部实现，不是 World Runtime 的顶层抽象。`Proposal -> Director -> validate -> commit -> outcome` 仍由 Event/World Runtime 显式编排；
+- `PersonActAgent.decide` 每次只为 `spec.agent_id` 产生一个 Proposal；`agentId` 由受信代码注入，Agent 不选择下一角色或下一轮；
+- `decide` 内部使用带显式类型注解的 Runnable 组织 prepare/perceive/retrieve/plan/propose；当前不使用 LangGraph；
+- Runnable 只是 Agent 的内部实现，不是 World Runtime 的顶层抽象。`Proposal -> Director -> validate -> commit -> outcome` 仍由 Event/World Runtime 显式编排；
 - `agent/memory/` 提供通用 Record/Store/Retriever，但每个 Agent 使用独立 namespace；
-- 模型、Prompt、Tool、retry/failover 和调用级观测优先复用 Eino/Eino-ext；只保留领域输入构造、输出 Schema 与 GenerationTrace 映射；
+- 模型、Prompt、Tool 与调用级观测优先复用 LangChain Core 接口；所有不受信输入/输出显式经过 strict/frozen Pydantic Model，静态接线由 pyright strict 检查；
 - Persona、Director、Broadcast 各自保留具体 cognitive strategy、prompt templates、触发频率和输出类型；
-- `execute` 不属于通用 Agent 能力。三类 Agent 只输出 Proposal/Plan，副作用由 World Committer 或 Render Gateway 完成。Eino checkpoint 也只恢复 Agent Graph，不替代 World Snapshot、Ledger 或 commit protocol。
+- `execute` 不属于通用 Agent 能力。三类 Agent 只输出 Proposal/Plan，副作用由 World Committer 或 Render Gateway 完成。`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation；任何未来框架 checkpoint 也不能替代 World Snapshot、Ledger 或 commit protocol。
+
+当前仓库已实现 NPC DIY Manifest Compiler、Persona Memory/State 与检索基础、新的 World proposal contract，以及 `PersonActAgent.decide` 的单次认知 Slice。Reflection/commit feedback、Director、World Commit、Event Scheduler/Runtime 和 Broadcast 尚未落地。
 
 三类 Agent 的阶段语义不同：Persona 规划角色行动，Director 规划 Segment/Stimulus，Broadcast 规划观看投影。因此共享的是流程协议，不是同一个 `perceive.py / plan.py / execute.py`。
 
@@ -240,19 +266,17 @@ Committed WorldSegment / WorldEvent
        PerceptionProjector
                 │
                 ▼
-PerceptionFrame[每个 Character]
+PerceptionFrame[当前 Character]
                 │
                 ▼
-Persona.perceive()
-→ retrieve
-→ plan
-→ propose ActionProposal
+PersonActAgent.decide 内部
+→ perceive → retrieve → plan → propose ActionProposal
 
 提交结果后或达到 Persona 自身阈值
 → observe_outcome / reflect
 ```
 
-Director 是 WorldEvent 的候选来源之一，也是本轮时间/因果补完者；它不是 `Persona.perceive()` 的直连数据源。任何来源都必须先经过统一提交，之后才能按角色做认知隔离。
+Director 是 WorldEvent 的候选来源之一，也是本轮时间/因果补完者；它不是 `PersonActAgent.decide` 内部 perceive 的直连数据源。任何来源都必须先经过统一提交，之后才能按角色做认知隔离。
 
 Director 可以提出或补完突然下雨、前一位顾客离开、咖啡机提示音、短信到达和新角色进入 Scene 等外部事件，但不能把“咖啡好了”直接写进 Anon 的 Memory。正确链路必须是：
 
@@ -261,7 +285,7 @@ Director 提出/补完 coffee#42 ready
 → Validator 检查对象前后状态
 → Committer 提交 WorldEvent
 → PerceptionProjector 判断各角色能看到哪些字段
-→ Persona.perceive() 决定是否注意并记住
+→ `decide` 内部 perceive 决定是否注意并记住
 ```
 
 Event 也不只来源于 Director：Anon 说话和 Soyo 接受邀请来自 Character Proposal；咖啡完成和天气变化可以来自 Director；玩家介入来自 Player Input；工具回调来自 System/Tool Input。它们统一提交后才成为客观 WorldEvent。
@@ -283,7 +307,7 @@ Memory           角色如何保存、解释或误解 Observation
 Committed WorldSegment
   -> PerceptionProjector：判断该角色有机会感知哪些字段
   -> PerceptionFrame：本轮局部状态、候选刺激和 affordances
-  -> Persona.perceive：注意力、新颖性与记忆固化
+  -> `decide` 内部 perceive：注意力、新颖性与记忆固化
 ```
 
 Projector 不使用 LLM，也不把全局 Ledger 暴露给 Character。它只依据语义场景、参与者、消息接收者、感知通道和字段权限裁剪候选。Persona 可以因 Character Skill、目标和当前互动而注意到不同候选，但不能注意到 Projector 没有提供的隐藏事实。
@@ -296,12 +320,12 @@ Projector 不使用 LLM，也不把全局 Ledger 暴露给 Character。它只依
 parallel: Event A runtime | Event B runtime | Event C runtime
 
 inside Event A:
-  Anon think -> validate/commit -> project next observation
-  Soyo think -> validate/commit -> project next observation
+  Scheduler -> Anon.decide -> validate/commit -> project next observation
+  Scheduler -> Soyo.decide -> validate/commit -> project next observation
   ...
 ```
 
-串行顺序只是“谁获得下一次决策机会”，不是强制谁必须说话。Persona 每次可选择 `act / utter / respond / no_op`；Scheduler 在一次提交后自然把机会交给下一个参与者。若上一条 Event 明确点名 Soyo，Soyo 的 Frame 带 `addressed_to_me / pending_response`，但她仍可回复、拒绝、延后或 `no_op`。
+串行顺序只是“谁获得下一次决策机会”，不是强制谁必须说话。每次 `decide` 可选择 `act / interact / utter / respond / wait / no_op` 中的一项；Scheduler 在一次提交后自然把机会交给下一个参与者。若上一条 Event 明确点名 Soyo，Soyo 的 Frame 带 `addressed_to_me / pending_response`，但她仍可回复、拒绝、延后或 `no_op`。
 
 `no_op` 只记录到 Decision Trace，并让出 Event 内决策游标，同时携带下一次唤醒条件；它本身不应为了占位而污染 WorldEvent Ledger。只有“等待某人回应”“等待咖啡完成”等对世界有语义的主动等待，才生成 `wait` Proposal/Event。
 
@@ -545,7 +569,7 @@ production_to_consumption     后台产出速度 / 玩家消费速度
 
 ### 仍是设计
 
-- 三类 Agent 的真实执行链；
+- 除 PersonAct 单次认知 Slice 外的完整三类 Agent 执行链；
 - 多 Event 世界归约；
 - Event Log 与 Viewer Cursor；
 - 约 30 分钟真实 Warm-up、领先库存维持与多 Event 产消比；

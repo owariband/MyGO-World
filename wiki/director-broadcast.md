@@ -46,7 +46,9 @@ observe/perceive -> retrieve -> plan -> propose
           observe_outcome -> reflect
 ```
 
-Persona、Director、Broadcast 对外使用同一个 Eino `adk.Agent` 协议、Runner、事件与模型基础设施；Character 以自定义 `PersonActAgent` 封装内部 Compose Graph。三类 Agent 的阶段输入、Graph/strategy、Prompt、输出类型、触发频率和 Memory namespace 分别隔离，不要求 Director/Broadcast 机械复制 PersonAct 图。`execute` 不属于通用 Agent 能力：Agent 只提案，World Committer 或 Render Gateway 才产生副作用。
+Persona、Director、Broadcast 共享 strict/frozen Pydantic 契约策略、LangChain Core Runnable/`RunnableConfig` 调用约定与模型适配基础设施；Character 的公共入口是 `PersonActAgent.decide`，其内部 typed sequence 只组织 prepare/perceive/retrieve/plan/propose，不拥有 Event Scheduler 循环。三类 Agent 的阶段输入、内部 strategy、Prompt、输出类型、触发频率和 Memory namespace 分别隔离，不要求 Director/Broadcast 机械复制 PersonAct 流程。`execute` 不属于通用 Agent 能力：Agent 只提案，World Committer 或 Render Gateway 才产生副作用。`with_types()` 不做 runtime validation，当前不使用 LangGraph。
+
+实现状态上，当前已落地 `PersonActAgent.decide` 的单次认知 Slice；reflection/commit feedback、Director、Broadcast 及其与 World Commit 的完整链路仍是本页描述的研究/实现目标。
 
 2026-08-21 的修正进一步把 Director 拆成两种运行频率：
 
@@ -105,7 +107,7 @@ Director 只提出 SegmentDraft；单调时间、角色双占用、知识边界�
 
 ### 2.1.1 地点到访前的信息发现
 
-当 Character 的 `go_to(location)` Proposal 已通过移动前提校验时，Runtime 在该角色下一次基于目的地信息决策前，为 Director Graph 注入同一 `world_version` 的 `LocationView`。这是 mandatory typed input，不是由模型自行选择是否调用的开放 Tool。
+当 Character 的 `go_to(location)` Proposal 已通过移动前提校验时，Runtime 在该角色下一次基于目的地信息决策前，为 Director Pipeline/strategy 注入同一 `world_version` 的 `LocationView`。这是 mandatory strict Pydantic input，不是由模型自行选择是否调用的开放 Tool。
 
 Runtime 先确定性过滤已失效、角色已知或 disclosure 不允许的信息；只有仍存在多种合理传播方式或叙事时机时才调用 Director。Director 输出 `NoOp / DiscoveryPlan`，并只能引用 LocationInfo 声明的 discovery channel：
 

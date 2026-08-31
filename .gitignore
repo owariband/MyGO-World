@@ -1,4 +1,10 @@
 node_modules/
 .DS_Store
 .motor-code/log/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+*.pyc
 

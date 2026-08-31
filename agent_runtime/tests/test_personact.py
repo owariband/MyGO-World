@@ -1,0 +1,447 @@
+"""Contract tests for restricted NPC compilation and action proposals."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from agent_runtime.agent.personact.compiler import (
+    Catalog,
+    CompiledPersonActSpec,
+    PromptDefinition,
+    ToolDefinition,
+    ToolMode,
+    compile_manifest,
+)
+from agent_runtime.agent.personact.errors import (
+    ManifestCompileError,
+    ManifestDecodeError,
+    ProposalValidationError,
+)
+from agent_runtime.agent.personact.manifest import (
+    CapabilityRequest,
+    Manifest,
+    NPCDefinition,
+    ToolRequest,
+    load_manifest,
+)
+from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_proposal
+from agent_runtime.world.contracts import (
+    ActAction,
+    ActionProposal,
+    Affordance,
+    CharacterTarget,
+    InteractAction,
+    NoOpAction,
+    ObjectTarget,
+    PerceptionFrame,
+    ProposalKind,
+    RespondAction,
+    UtterAction,
+)
+
+FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
+
+
+def test_compile_is_stable_and_derives_authority() -> None:
+    manifest = load_manifest(FIXTURE_PATH)
+
+    first = compile_manifest(manifest, _catalog())
+    second = compile_manifest(manifest, _catalog())
+
+    assert first[0].digest == second[0].digest
+    assert first[0].memory_scope == "project/coffee-golden/persona/anon"
+    assert first[0].seeds[0].provenance.startswith(f"manifest:{first[0].digest}#")
+
+
+def test_manifest_rejects_unknown_authority_fields(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "agents.json"
+    manifest_path.write_text(
+        '{"formatVersion":1,"projectId":"p","provider":"creator-model","agents":[]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ManifestDecodeError, match="Extra inputs are not permitted"):
+        load_manifest(manifest_path)
+
+
+def test_manifest_is_strict_and_does_not_coerce_types(tmp_path: Path) -> None:
+    raw = FIXTURE_PATH.read_text(encoding="utf-8").replace(
+        '"maxContextRounds": 1',
+        '"maxContextRounds": "1"',
+        1,
+    )
+    manifest_path = tmp_path / "agents.json"
+    manifest_path.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(ManifestDecodeError, match="valid integer"):
+        load_manifest(manifest_path)
+
+
+def test_manifest_rejects_unknown_proposal_kind() -> None:
+    raw = FIXTURE_PATH.read_text(encoding="utf-8").replace(
+        '"utter", "respond", "wait", "no_op"',
+        '"commit_world"',
+        1,
+    )
+
+    with pytest.raises(ValidationError, match="commit_world"):
+        Manifest.model_validate_json(raw, strict=True, extra="forbid")
+
+
+def test_project_identity_partitions_digest_and_memory_scope() -> None:
+    first = load_manifest(FIXTURE_PATH)
+    second = Manifest(
+        format_version=first.format_version,
+        project_id="another-project",
+        agents=first.agents,
+    )
+
+    first_spec = compile_manifest(first, _catalog())[0]
+    second_spec = compile_manifest(second, _catalog())[0]
+
+    assert first_spec.digest != second_spec.digest
+    assert first_spec.memory_scope != second_spec.memory_scope
+    assert second_spec.memory_scope == "project/another-project/persona/anon"
+
+
+def test_frozen_models_reject_mutation_and_strict_revalidation() -> None:
+    frame = _frame(affordances=())
+
+    with pytest.raises(ValidationError, match="Input should be a valid integer"):
+        PerceptionFrame.model_validate(
+            {
+                **frame.model_dump(by_alias=False),
+                "based_on_world_version": "7",
+            },
+            strict=True,
+        )
+    assert frame.model_config.get("frozen") is True
+
+
+def test_compile_rejects_duplicate_catalog_ids() -> None:
+    duplicate = ToolDefinition(
+        id="visible_location.query",
+        version="2",
+        mode=ToolMode.QUERY,
+    )
+    catalog = Catalog(
+        tools=(*_catalog().tools, duplicate),
+        prompts=_catalog().prompts,
+    )
+
+    with pytest.raises(ManifestCompileError, match="catalog tool ids must be unique"):
+        compile_manifest(load_manifest(FIXTURE_PATH), catalog)
+
+
+def test_compile_rejects_duplicate_memory_seed_ids() -> None:
+    raw = FIXTURE_PATH.read_text(encoding="utf-8").replace(
+        '"seeds": [{',
+        '"seeds": [{"id":"knows-soyo","type":"background","content":"duplicate","tags":[]},{',
+        1,
+    )
+    manifest = Manifest.model_validate_json(raw, strict=True, extra="forbid")
+
+    with pytest.raises(ManifestCompileError, match="memory seed ids must be unique"):
+        compile_manifest(manifest, _catalog())
+
+
+def test_compile_rejects_mutating_tool() -> None:
+    manifest = load_manifest(FIXTURE_PATH)
+    capabilities = CapabilityRequest(
+        proposal_kinds=(ProposalKind.UTTER,),
+        tools=(ToolRequest(id="world.commit", max_calls_per_run=1),),
+    )
+    modified = _replace_first_agent(manifest, capabilities=capabilities)
+
+    with pytest.raises(ManifestCompileError, match="non-read-only tool"):
+        compile_manifest(modified, _catalog())
+
+
+def test_compile_rejects_unknown_prompt_profile() -> None:
+    manifest = load_manifest(FIXTURE_PATH)
+    modified = _replace_first_agent(manifest, prompt_profile="creator.system_prompt")
+
+    with pytest.raises(ManifestCompileError, match="unknown prompt profile"):
+        compile_manifest(modified, _catalog())
+
+
+def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
+    target = CharacterTarget(id="soyo")
+    proposal = build_action_proposal(
+        spec=_anon_spec(),
+        frame=_frame(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+        proposal_id="proposal-1",
+        draft=ProposalDraft(
+            action=UtterAction(target=target, content="轮到我们了，要这个吗？"),
+            evidence_ids=("queue-ready",),
+        ),
+    )
+
+    assert isinstance(proposal, ActionProposal)
+    assert json.loads(proposal.model_dump_json(by_alias=True)) == {
+        "proposalId": "proposal-1",
+        "agentId": "anon",
+        "eventSessionId": "cafe",
+        "basedOnWorldVersion": 7,
+        "action": {
+            "kind": "utter",
+            "target": {"kind": "character", "id": "soyo"},
+            "content": "轮到我们了，要这个吗？",
+        },
+        "evidenceIds": ["queue-ready"],
+    }
+
+
+def test_proposal_draft_rejects_actor_override() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ProposalDraft.model_validate(
+            {
+                "agentId": "soyo",
+                "action": {
+                    "kind": "no_op",
+                    "nextWakeup": "event_change",
+                },
+            },
+            strict=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(CharacterTarget(id="shared-id"), id="character"),
+        pytest.param(ObjectTarget(id="shared-id"), id="object"),
+    ],
+)
+def test_build_action_proposal_accepts_character_and_object_interact(
+    target: CharacterTarget | ObjectTarget,
+) -> None:
+    proposal = build_action_proposal(
+        spec=_anon_spec(),
+        frame=_frame(affordances=(Affordance(kind=ProposalKind.INTERACT, target=target),)),
+        proposal_id="proposal-1",
+        draft=ProposalDraft(
+            action=InteractAction(target=target, description="interact with target")
+        ),
+    )
+
+    assert isinstance(proposal.action, InteractAction)
+    assert proposal.action.target == target
+
+
+@pytest.mark.parametrize(
+    ("afforded_target", "draft_target"),
+    [
+        pytest.param(
+            CharacterTarget(id="shared-id"),
+            ObjectTarget(id="shared-id"),
+            id="character-affordance-object-draft",
+        ),
+        pytest.param(
+            ObjectTarget(id="shared-id"),
+            CharacterTarget(id="shared-id"),
+            id="object-affordance-character-draft",
+        ),
+    ],
+)
+def test_build_action_proposal_does_not_confuse_target_kind_with_same_id(
+    afforded_target: CharacterTarget | ObjectTarget,
+    draft_target: CharacterTarget | ObjectTarget,
+) -> None:
+    frame = _frame(affordances=(Affordance(kind=ProposalKind.INTERACT, target=afforded_target),))
+    draft = ProposalDraft(
+        action=InteractAction(target=draft_target, description="interact with target")
+    )
+
+    with pytest.raises(ProposalValidationError, match="not afforded"):
+        build_action_proposal(
+            spec=_anon_spec(),
+            frame=frame,
+            proposal_id="proposal-1",
+            draft=draft,
+        )
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        pytest.param(
+            UtterAction(target=CharacterTarget(id="soyo"), content="hi"),
+            id="utter",
+        ),
+        pytest.param(
+            RespondAction(target=CharacterTarget(id="soyo"), content="hi"),
+            id="respond",
+        ),
+    ],
+)
+def test_world_contract_accepts_character_target_for_speech(
+    action: UtterAction | RespondAction,
+) -> None:
+    draft = ProposalDraft(action=action)
+
+    assert draft.action == action
+    assert action.target == CharacterTarget(id="soyo")
+
+
+@pytest.mark.parametrize("kind", [ProposalKind.UTTER, ProposalKind.RESPOND])
+def test_world_contract_rejects_object_target_for_speech(kind: ProposalKind) -> None:
+    with pytest.raises(ValidationError, match="character"):
+        ProposalDraft.model_validate(
+            {
+                "action": {
+                    "kind": kind.value,
+                    "target": {"kind": "object", "id": "coffee-42"},
+                    "content": "hi",
+                }
+            },
+            strict=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "affordance",
+    [
+        pytest.param(
+            Affordance(
+                kind=ProposalKind.INTERACT,
+                target=CharacterTarget(id="tomori"),
+            ),
+            id="wrong-target",
+        ),
+        pytest.param(
+            Affordance(
+                kind=ProposalKind.UTTER,
+                target=CharacterTarget(id="soyo"),
+            ),
+            id="wrong-kind",
+        ),
+    ],
+)
+def test_build_action_proposal_rejects_wrong_target_or_affordance(
+    affordance: Affordance,
+) -> None:
+    draft = ProposalDraft(
+        action=InteractAction(
+            target=CharacterTarget(id="soyo"),
+            description="talk to Soyo",
+        )
+    )
+
+    with pytest.raises(ProposalValidationError, match="not afforded"):
+        build_action_proposal(
+            spec=_anon_spec(),
+            frame=_frame(affordances=(affordance,)),
+            proposal_id="proposal-1",
+            draft=draft,
+        )
+
+
+def test_build_action_proposal_rejects_kind_not_granted_by_spec() -> None:
+    with pytest.raises(ProposalValidationError, match="not granted"):
+        build_action_proposal(
+            spec=_anon_spec(),
+            frame=_frame(affordances=(Affordance(kind=ProposalKind.ACT),)),
+            proposal_id="proposal-1",
+            draft=ProposalDraft(action=ActAction(description="look around")),
+        )
+
+
+def test_build_action_proposal_rejects_hidden_evidence() -> None:
+    target = CharacterTarget(id="soyo")
+    draft = ProposalDraft(
+        action=UtterAction(target=target, content="hi"),
+        evidence_ids=("tomori-private-event",),
+    )
+
+    with pytest.raises(ProposalValidationError, match="outside the current frame"):
+        build_action_proposal(
+            spec=_anon_spec(),
+            frame=_frame(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+            proposal_id="proposal-1",
+            draft=draft,
+        )
+
+
+def test_no_op_needs_no_affordance_and_carries_no_evidence() -> None:
+    proposal = build_action_proposal(
+        spec=_anon_spec(),
+        frame=_frame(affordances=()),
+        proposal_id="proposal-1",
+        draft=ProposalDraft(action=NoOpAction(next_wakeup="event_change")),
+    )
+
+    assert isinstance(proposal.action, NoOpAction)
+    assert proposal.action.next_wakeup == "event_change"
+    assert proposal.evidence_ids == ()
+
+    with pytest.raises(ProposalValidationError, match="cannot carry evidence"):
+        build_action_proposal(
+            spec=_anon_spec(),
+            frame=_frame(affordances=(), visible_evidence_ids=("queue-ready",)),
+            proposal_id="proposal-2",
+            draft=ProposalDraft(
+                action=NoOpAction(next_wakeup="event_change"),
+                evidence_ids=("queue-ready",),
+            ),
+        )
+
+
+def _catalog() -> Catalog:
+    return Catalog(
+        tools=(
+            ToolDefinition(
+                id="visible_location.query",
+                version="1",
+                mode=ToolMode.QUERY,
+            ),
+            ToolDefinition(id="world.commit", version="1", mode=ToolMode.MUTATE),
+        ),
+        prompts=(PromptDefinition(id="personact.v1", version="1", digest="prompt-v1"),),
+    )
+
+
+def _anon_spec() -> CompiledPersonActSpec:
+    return compile_manifest(load_manifest(FIXTURE_PATH), _catalog())[0]
+
+
+def _frame(
+    *,
+    affordances: tuple[Affordance, ...],
+    visible_evidence_ids: tuple[str, ...] = ("queue-ready",),
+) -> PerceptionFrame:
+    return PerceptionFrame(
+        agent_id="anon",
+        event_session_id="cafe",
+        based_on_world_version=7,
+        current_location_id="cafe",
+        visible_evidence_ids=visible_evidence_ids,
+        affordances=affordances,
+    )
+
+
+def _replace_first_agent(
+    manifest: Manifest,
+    *,
+    capabilities: CapabilityRequest | None = None,
+    prompt_profile: str | None = None,
+) -> Manifest:
+    current = manifest.agents[0]
+    first = NPCDefinition(
+        id=current.id,
+        display_name=current.display_name,
+        persona=current.persona,
+        memory=current.memory,
+        capabilities=capabilities or current.capabilities,
+        behavior=current.behavior,
+        prompt_profile=prompt_profile or current.prompt_profile,
+    )
+    return Manifest(
+        format_version=manifest.format_version,
+        project_id=manifest.project_id,
+        agents=(first, *manifest.agents[1:]),
+    )

@@ -73,3 +73,23 @@
 - 根据用户确认，将一期 Agent Runtime 从“纯 Python + 自研通用 AgentLoop”修正为 Go + Eino ADK：Character 使用自定义 `PersonActAgent` 包装内部 Compose Graph，Decision Run 在 Proposal 后结束、World Commit 后另走 Feedback Run；Eino 接管 Agent/Runner、Graph/Chain、模型/Tool、Prompt、retry/failover、Callback 与可选 Agent checkpoint，MyGO 保留感知权限、Memory 语义、World/Event 调度、时间补全、Validator/Committer、Ledger 和确定性 Render，并记录 option 映射、`CustomizedOutput` 浅复制、checkpoint 分层、Graph 副作用幂等等适配风险。同步验证当前 `npm test` 为 14/14 通过。
 - 将 Wiki、结构化作品、开发工具、测试与 Dynamic Render Adapter 从固定版 WebGAL/MyGO 目录迁入同级 `generative_go_world`；底层播放器和大体积素材继续留在 `MyGO_v3.1.1_ForScript`，开发服务器以 `devRoot -> webgalRoot` 双根方式联调，后者默认使用兄弟目录并支持 `WEBGAL_ROOT` 覆盖。
 - 新增 Location World Model：地点以稳定 ID、版本化 Fact/Info 和 WorldEvent 引用构成可回放 LocationView；地点事实不能被自然语言覆盖，周期 Info 不等于实际 Event；角色前往地点前由 Runtime 触发 Director 查询并提出 DiscoveryPlan，角色只能依据已提交的 Fact/Info 或传播 Event 经感知投影后获知。
+
+## 2026-08-24
+
+- 明确 NPC DIY 使用“受限创作者 Manifest -> 受信 CompiledPersonActSpec -> 共享 PersonActAgent”的窄接口，不开放任意 Eino Graph、脚本、URL/MCP、Memory namespace、provider 或 World/Render 写权限。
+- 基于 Eino v0.9.15 源码核对 Agent、Runner、Compose Graph、Callback、Tool 与 checkpoint 能力，保留 Eino 执行状态和项目长期 Memory/World Ledger 的分层。
+- 落地无网络 Fixture PoC：严格 Manifest 读取、Catalog 权限收敛、稳定 digest、typed PersonAct Graph、ADK Runner 适配，以及跨 namespace、越权 Tool、非法 Prompt/Proposal、非 affordance target 和不可见 evidence 的拒绝测试。
+
+## 2026-08-31
+
+- 将现行 Agent Runtime 技术方案从 Go + Eino ADK 迁移为 Python 3.12 + `langchain-core==1.6.1`；保留 `agent / event / world`、Proposal/Commit、Memory namespace 与 World/Render 分权，D-034 标记为被 D-038 取代。
+- 建立强类型边界：统一 strict/frozen Pydantic Model 负责运行时结构校验，pyright strict 负责静态接线，ruff/pytest/uv 负责质量与环境；明确 LangChain `Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation。
+- 当前 PersonAct 使用 `RunnableLambda + RunnableSequence`，不引入 LangGraph；只有出现真实复杂分支、暂停恢复或持久执行需求后才重新评估，任何框架状态都不能替代 World Snapshot、Ledger 或 commit protocol。
+- 将 NPC DIY 文档迁移为 `npc-diy.md`，并按当前 Python 源码校准实现事实：只完成 Manifest Compiler、`CompiledPersonActSpec`、Fixture Planner、typed PersonAct Pipeline 与 Proposal 权限测试；完整 Agent Runtime 仍未实现。
+- 根据用户最新纠正，将 Character 公共边界收敛为外部 Event Scheduler 调用 `PersonActAgent.decide`：一次只为 `spec.agent_id` 返回一个 strict/frozen ActionProposal 对象，跨 wire 时再显式序列化 JSON；不实现或暴露 `Persona.move()`，不迁移 Sandbox loop、Maze、path/tile movement 或 `execute`。
+- 冻结 Proposal wire contract：固定 `proposalId / agentId / eventSessionId / basedOnWorldVersion / action / evidenceIds` envelope，`action.kind` 为 `act / interact / utter / respond / wait / no_op` 判别联合；`interact` 只有一个显式 character/object target，`utter/respond` 只能指向 character，且无 `move/locationId/targetIds`。
+- 随并行代码落地再次校准实现状态：`PersonActAgent.decide` 已完成 prepare/perceive/retrieve/plan/propose，返回 strict/frozen `ActionProposal` 对象；`proposal.py` 收敛为 Proposal 构造与权限校验。Reflection/commit feedback、Event Scheduler、World Commit 与完整 Runtime 仍未实现，且本次文档修改不宣称测试结果。
+- 记录 PersonAct review 收敛：同一 Agent 的 `decide` 由实例锁串行化并一次替换 immutable private snapshot；novelty 覆盖完整 EVENT stream 且使用 canonical identity，event ID/revision 成对校验；当前事件不参与自身 retrieval；部分日程合法，active action 使用当前 slot 剩余时长。
+- 将 `perceive -> retrieve -> plan -> ActionProposal -> Director / Validator / Committer -> Committed WorldEvent` 提升为项目最高优先级不变量，明确 Proposal 是角色意图而不是执行结果。
+- 正式将 Creator Manifest、Compiler、Persona State/Memory/Cognition、Action Contract、权限校验与 Trace 定位为项目自研的 `Generative Go World NPC ADK`；LangChain Core 只提供内部编排与模型接入基础设施。
+- Python 环境管理统一使用 uv：`.python-version` 固定解释器，`pyproject.toml` 声明依赖，`uv.lock` 锁定解析结果，安装与工具执行统一走 `uv sync --frozen` / `uv run`。

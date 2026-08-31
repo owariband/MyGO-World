@@ -44,7 +44,7 @@
 | H-010 | 2026-08-21 | OPEN | Anon 与 Soyo 排到什么时候、咖啡煮到什么时候、咖啡发生了什么，应该由谁决定？ | 放弃简单确定性离散事件表后，时间、结果和因果一致性必须由 Agent 生成并被校验 | Character 生成行为；Director 在响应后补齐 World Segment 的时间、结果和桥接 Event |
 | H-011 | 2026-08-21 | PARTIAL | 去掉 Maze 和部分 Entity 渲染后，一个外在事件如何处理？我们该如何权衡设计？ | 几何成本下降，语义世界建模与连续性成本上升 | 不重造 2D 物理；用生成后的语义 Segment、Event/Observation 和最小 Validator 恢复必要世界语义 |
 | H-012 | 2026-08-20 | PARTIAL | 如何把 Generative Agents 的临时 tile 四元组升级成具有全局身份、生命周期和共享历史的一等 Event？ | 必须新增 Event/Segment/Ledger，不能原封不动复用源码数据结构 | 将 `Intent / generated segment / committed WorldEvent / Observation` 分开 |
-| H-013 | 2026-08-20 | DECIDED | 如何复用 Generative Agents 的认知循环，同时避免照搬其浏览器 mailbox、串行执行和顺序偏差？ | 引入 Eino 依赖与一层 ADK/领域契约适配，但避免重复实现通用 Agent 基础设施 | Go + Eino ADK；自定义 `PersonActAgent` 内部用 Compose Graph 承载认知流程，世界循环仍由 MyGO Runtime 管理 |
+| H-013 | 2026-08-20 | DECIDED | 如何复用 Generative Agents 的认知语义，同时避免照搬其 `Persona.move()`、浏览器 mailbox、movement 和顺序偏差？ | 必须把原单体调用链拆成私有认知策略与外部 Scheduler，不能直接复用原门面 | `decide` 已迁移 prepare/perceive/retrieve/plan/propose；Event Scheduler 拥有循环，reflection 等待 commit feedback |
 | H-014 | 2026-08-20 | DECIDED | Character Runtime、Event、Director 和 Broadcast 应按什么顺序开发，才不会让高层优化掩盖底座问题？ | 高层算法研究必须延后，短期 Demo 的“好看程度”可能较低 | 先做 Character Runtime + Event；但保留最小 Director Segment Completion 作为时间闭合所需能力 |
 | H-015 | 2026-08-20 | PARTIAL | 全局 Runtime 知道多处事件时，如何保证每个角色仍只依据自己的观察、记忆和误解行动？ | 需要为同一事实维护客观状态、角色观察、记忆和误解多个层次 | Director 可读全局；Character 只读 Observation；禁止把全局剧情直接塞进角色记忆 |
 | H-016 | 2026-08-21 | PARTIAL | Director 和 Broadcast 应如何划分时间判定权，避免把世界事实与演出剪辑混在一起？ | 分层增加了一次生成与校验成本，但不分层就会把世界事实和演出剪辑混在一起 | Director 补完并标注世界段的语义时间；Broadcast 只消费标注决定观看方式 |
@@ -57,13 +57,17 @@
 | H-023 | 2026-08-20 | PARTIAL | 动态注入依赖固定 Bundle 的内部协议时，如何控制版本漂移、无 ACK、鉴权和重连风险？ | 上游升级可能失效，且缺 request ID、ACK、鉴权和可靠重连 | 版本锁定、契约测试、黑屏保护和 iframe/虚拟文件降级 |
 | H-024 | 2026-08-21 | OPEN | 不硬编码故事时长后，如何防止 Director 补完产生资源冲突、对象跳变和不可重放结果？ | 需要日志、Validator、Golden Trace 和修复循环；一致性不能再天然来自固定状态机 | 只硬编码不变量，不硬编码故事时长；提交前做约束检查，失败则让 Director 修补 |
 | H-025 | 2026-08-21 | OPEN | Director 自己的补完调用也消耗时间时，如何避免为解释自身 latency 而无限递归？ | 若再次调用去解释这段耗时会形成递归；若忽略又违反“Agent 响应时间可计时” | 提交器先记录未解释的 Director latency；是否下一波闭合、两阶段补完或只交给 Broadcast 省略，待实验 |
-| H-026 | 2026-08-21 | PARTIAL | 去掉 Maze 后，`Persona.perceive()` 如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？ | 必须新增语义场景、感知通道、字段裁剪、注意力与 provenance；认知链比扫描附近 tile 更显式 | `Committed WorldSegment -> PerceptionProjector -> PerceptionFrame -> Persona attention -> Observation/Memory`；待咖啡与对话 Trace 验证 |
+| H-026 | 2026-08-21 | PARTIAL | 去掉 Maze 后，`decide` 内部 perceive 如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？ | 必须新增语义场景、感知通道、字段裁剪、注意力与 provenance；认知链比扫描附近 tile 更显式 | `Committed WorldSegment -> PerceptionProjector -> PerceptionFrame -> decide/perceive -> Observation/Memory`；阶段已实现，待咖啡与对话 Trace 验证 |
 | H-027 | 2026-08-21 | DECIDED | 一期如何调度 Persona，既先把流程串起来，又允许角色知道何时回应或选择什么都不做？ | 同一 Event 吞吐受串行限制；跨 Event 并行必须识别共享角色、对象和因果依赖 | 同一 Event 内稳定串行并逐步提交；隔离 Event 并行；Scheduler 给决策机会，Frame 给待回应信号，Agent 可 `no_op` |
-| H-028 | 2026-08-21 | DECIDED | 纯 Agent Runtime 的目录怎样表达 Agent、Memory、Event 与 World 的真实所有权，而不是把所有模块扁平堆在一起？ | 需要约束 Go package 依赖、namespace 与循环引用，目录比简单平铺多一层 | `agent/{memory,personact,director,broadcast}` 与 `event/`、`world/` 平级；Memory 共用实现但隔离数据 |
-| H-029 | 2026-08-21 | DECIDED | Persona、Director、Broadcast 是否应共享同一套认知流程，从而让 cognitive_modules、memory_structures、prompt_template 成为通用基座？ | 共享过少会重复实现执行设施；共享一张 Graph 又会把 Persona 语义强塞给导演导播 | 对外共享 Eino `adk.Agent`/Runner/模型基础设施，各 Agent 保留专属 Graph/strategy、Prompt、namespace 和 Proposal |
-| H-030 | 2026-08-22 | DECIDED | Generative Agents 自造的 Loop、模型调用、Prompt、解析、重试和存储，哪些应继续自研，哪些应交给成熟库？ | 引入 Eino 及 adapter 会增加依赖与版本升级成本，但能删除大量重复且脆弱的 plumbing | Eino 接管 Agent 执行与模型基础设施；MyGO 只自研认知语义、Memory 权限/融合和 World/Event 治理 |
+| H-028 | 2026-08-21 | DECIDED | 纯 Agent Runtime 的目录怎样表达 Agent、Memory、Event 与 World 的真实所有权，而不是把所有模块扁平堆在一起？ | 需要约束 Python package 依赖、namespace 与双向导入，目录比简单平铺多一层 | `agent/{memory,personact,director,broadcast}` 与 `event/`、`world/` 平级；Memory 共用实现但隔离数据 |
+| H-029 | 2026-08-21 | DECIDED | Persona、Director、Broadcast 是否应共享同一套认知流程，从而让 cognitive_modules、memory_structures、prompt_template 成为通用基座？ | 共享过少会重复调用设施；共享一条 Pipeline 或 Loop 又会把 Persona 语义强塞给导演导播 | 共享 strict Pydantic policy、RunnableConfig 与模型适配，各 Agent 保留专属 strategy、Prompt、namespace 和 Proposal；Scheduler loop 不共享给 Agent |
+| H-030 | 2026-08-22 | DECIDED | Generative Agents 自造的 Loop、模型调用、Prompt、解析、重试和存储，哪些应继续自研，哪些应交给成熟库？ | 引入 LangChain Core、Pydantic 及 adapter 会增加依赖、类型边界和升级成本 | LangChain 接管 Runnable/模型调用 plumbing，Pydantic + pyright 守类型边界；MyGO 自研认知语义与 World/Event 治理 |
 | H-031 | 2026-08-22 | DECIDED | 地点事实、地点关联信息和发生于该地点的 Event 如何持久化，才能防止 Agent 杜撰或前后口径漂移？ | 需要增加版本化 Location 模型、Fact/Info CAS、地点索引和额外查询成本 | Location 是 World 层一等模型；Fact/Info append-only，Event 只挂 Ledger 引用，只有 Committer 可修改 |
 | H-032 | 2026-08-22 | PARTIAL | 角色前往某地点时，Director 如何利用地点已有 Info 决定其获知方式，又不把全局知识直接灌进角色 Memory？ | 每次到访多一次候选查询；有歧义时增加 Director 调用，并需验证披露与时空条件 | Runtime 查询 LocationView 并先确定性过滤；Director 返回 NoOp/DiscoveryPlan，已有信息由 Projector 投影，新传播行为先提交 Event，最终由 Persona 决定实际获知 |
+| H-033 | 2026-08-24 | PARTIAL | 如何让创作者 DIY NPC，同时不把 Agent 框架的可组合性变成越权修改世界、读取他人记忆或执行任意代码的入口？ | 放弃任意 Runnable/Graph、脚本、URL 和 MCP 插件；增加严格 Manifest 编译、Catalog、digest 与两阶段校验 | Manifest Compiler 与 PersonAct Slice 已落地；Agent 只产出 Proposal，World Validator/Committer 仍待完整咖啡 Golden Trace 验证 |
+| H-034 | 2026-08-31 | PARTIAL | Python 与 LangChain Runnable 的类型提示不等于运行时校验，怎样避免强类型边界退化成注解幻觉？ | 每个不受信边界都要显式 Pydantic parse，增加 Model、adapter、序列化和 schema 迁移成本；动态组合自由度降低 | strict/frozen Pydantic 负责 runtime validation，pyright strict 负责静态接线，领域 Validator 负责语义；`with_types()` 只作类型元数据 |
+| H-035 | 2026-08-31 | DECIDED | 如何迁移 Persona 的认知能力，却不把 `Persona.move()`、movement 和世界循环一起搬进 Agent？ | 需要由外部 Scheduler 显式编排每次决策，并把原单体 loop 拆成一次性接口 | Scheduler 调用 `PersonActAgent.decide`；每次仅返回一个由 spec 注入 actor 的 strict Proposal 对象，不实现 move/Maze/path/tile/execute |
+| H-036 | 2026-08-31 | PARTIAL | 如何让一个 Proposal JSON 同时具备稳定 envelope、互斥 action 字段和无歧义 target？ | 旧扁平 wire format 被破坏，Manifest digest、Fixture、Trace 和消费者需同步迁移 | Proposal contract 与 `decide` 已对齐；固定 envelope + action union 已实现，外部消费者与完整 Trace 仍待验证 |
 
 ## 关键卡点详述
 
@@ -208,7 +212,7 @@ render_projection          Broadcast 默认可省略 measured gap
 
 因此复杂度不是消失，而是从几何仿真迁移到语义生成、全局连续性和事后因果闭合。这是项目必须主动支付、也最有算法价值的代价。
 
-### H-026｜去掉 Maze 后，`Persona.perceive()` 如何获得外部信息？
+### H-026｜去掉 Maze 后，`decide` 内部 perceive 如何获得外部信息？
 
 官方实现把六件事放在同一个函数里：空间学习、候选事件收集、可见性过滤、注意力筛选、新颖性判断和记忆写入。移除 Maze 后，不应寻找一个新的“附近坐标算法”，而应重新划分权责：
 
@@ -218,7 +222,7 @@ Committed WorldSegment / WorldEvent
        只做硬可感知性与字段裁剪
   -> PerceptionFrame[character]
        当前局部状态 + 本轮可感知候选 + 当前可执行 affordances
-  -> Persona.perceive(frame)
+  -> PersonActAgent.decide 内部 perceive
        注意到什么 + 是否新颖 + 怎样进入角色记忆
   -> retrieve -> plan -> reflect
 ```
@@ -242,7 +246,7 @@ Committed WorldSegment / WorldEvent
 
 新颖性不能继续使用最近五条 `(subject, predicate, object)`。建议以 `(source_event_id, revision, visible_fields_hash)` 做幂等键：同一 Event 的同一 revision 不重复记忆；`queued -> brewing -> ready` 等新 revision 必须可再次感知；相同 SPO 的不同 occurrence 不能合并。
 
-每次 Persona 调用都基于一个不可变 committed world version 构造 Frame，任何角色都看不到其他 Agent 尚未提交的输出。同一 Event 内允许逐步推进：`Anon utterance commit -> Soyo direct observation -> Soyo reply`；隔离 Event 则各自拥有推进游标。这样既保留一期串行互动，也消除读取 live Scratch 的隐式先手。
+每次 `decide` 都基于一个不可变 committed world version 构造 Frame，任何角色都看不到其他 Agent 尚未提交的输出。同一 Event 内允许逐步推进：`Anon utterance commit -> Soyo direct observation -> Soyo reply`；隔离 Event 则各自拥有推进游标。这样既保留一期串行互动，也消除读取 live Scratch 的隐式先手。
 
 仍需回答：
 
@@ -289,7 +293,7 @@ parallel:
 inside Event A:
   choose next participant
   -> build latest PerceptionFrame
-  -> persona chooses act / utter / respond / no_op
+  -> PersonActAgent.decide chooses one act / interact / utter / respond / wait / no_op
   -> Director completion + validate + commit
   -> next participant
 ```
@@ -318,39 +322,40 @@ Agent 不需要自己推断“现在应该让对方说话”。Event Scheduler �
 
 ```text
 agent_runtime/
-├── go.mod
-├── cmd/runtime/
-└── internal/
-    ├── agent/{memory,personact,director,broadcast}/
-    ├── event/
-    ├── world/
-    └── rendergateway/
+├── model.py
+├── agent/{memory,personact,director,broadcast}/
+├── event/
+├── world/
+├── rendergateway/
+├── tests/
+└── testdata/
 ```
 
-`agent/` 表示 Agent 体系：`personact / director / broadcast` 是决策主体，`memory/` 是它们共同依赖的基础能力；`event/` 表示互动容器、轮次和事件生命周期；`world/` 表示不依赖任何具体 Agent 的客观状态、感知投影、校验与提交。`agent/personact/` 对外实现 Eino `adk.Agent`，内部 Compose Graph 沿用 Generative Agents 的认知阶段语义。
+`agent/` 表示 Agent 体系：`personact / director / broadcast` 是决策主体，`memory/` 是它们共同依赖的基础能力；`event/` 表示互动容器、轮次和事件生命周期，并独占 Scheduler loop；`world/` 表示不依赖任何具体 Agent 的客观状态、感知投影、校验与提交。`agent/personact/` 公开一次性 `decide`，内部才按需使用 LangChain Runnable。
 
 共用 Memory 模块不能演变成全员共享知识库。每个 Agent 都有独立 namespace：Persona 保存观察、情节与反思；Director 保存 Narrative Thread、补完历史与失败诊断；Broadcast 保存已覆盖区间和连续性状态。跨 namespace 读取必须通过显式授权或公开 WorldEvent，不能因为共用一个 Store 就越权。
 
-代价是必须认真约束 package 依赖，避免 Event Scheduler 调 World、World 又反向导入 Scheduler。第一期从具体 package 显式导入，不建立万能 facade。
+代价是必须认真约束 Python package 依赖，避免 Event Scheduler 调 World、World 又反向导入 Scheduler；还要避免用动态 import 或无类型 dict 绕过边界。第一期从具体 package 显式导入，不建立万能 facade。
 
 ### H-029｜Persona、Director、Broadcast 是否应共享同一套认知流程？
 
-答案是“共享 ADK 协议和基础设施，不共享一张 Persona Graph”。三类 Agent 都需要获取输入、检索历史、形成计划、输出提案和在结果后反思；但它们观察的对象、决策频率、权限与输出完全不同。
+答案是“共享类型策略与调用基础设施，不共享一条 Persona Pipeline 或顶层 Loop”。三类 Agent 的输入、决策频率、权限与输出完全不同；Event Scheduler 负责何时调用它们。
 
 ```text
 共用：
-  Eino adk.Agent / Runner / AgentEvent / cancel / callback / checkpoint
+  strict/frozen Pydantic Model policy
+  LangChain Runnable / RunnableConfig / callback / tracing 约定
   MemoryRecord / Store / Retriever
-  Eino ChatModel、Prompt Template、Tool、retry/failover
+  LangChain Core ChatModel、Prompt、Tool adapter 与有界技术重试
 
 专属：
-  PersonAct / Director / Broadcast 的 Graph 或 strategy
+  PersonAct / Director / Broadcast 的一次性入口与 strategy
   各自 prompt_template
   各自 Memory namespace
   各自 Proposal 类型
 ```
 
-Stanford 的三个目录不能整体搬运：`memory_structures` 只保留领域数据语义；Persona 的 Scratch/KnownPlace 保持私有；Character 认知节点进入 PersonAct Graph；Prompt 内容按 Agent 隔离，通用渲染和模型调用交给 Eino。
+Stanford 的三个目录不能整体搬运：`memory_structures` 只保留领域数据语义；Persona 私有 state 保持私有；Character 的认知语义进入 `decide` 内部 strategy；`Persona.move()` 与 `execute` 不迁移。Prompt 内容按 Agent 隔离，通用调用 plumbing 交给 LangChain Core。
 
 通用流程也不机械照搬原版顺序。原版 `reflect()` 是阈值触发的记忆归纳，并不是 execute 后反馈；原版 `execute()` 是 Maze 路径计算。在本项目中统一为提案前认知与提交后反馈：
 
@@ -360,19 +365,19 @@ Runtime validate/commit
 observe_outcome -> reflect
 ```
 
-PersonAct 的 Decision Run 在 Proposal 后结束，World 提交完成后再发起 Feedback Run。仍需用 Fixture 验证：ADK adapter 与 Graph state 是否清晰，Director/Broadcast 的 reflect 是否需要一期实现，还是先使用 No-op strategy。
+PersonAct 的 Decision Run 在一个 Proposal 后结束。`PersonActAgent.decide` 已实现 prepare/perceive/retrieve/plan/propose；World 提交完成后的 feedback/reflection 仍需用独立入口和完整 Fixture 验证，不能在 `decide` 中假跑。
 
 ### H-030｜如何避免重写 Generative Agents 已经有成熟替代品的基础设施？
 
 当前答案是按“通用机制 / 领域算法”切开：
 
-- Eino ADK/Compose 接管 Agent 接口、Runner、Graph/Chain、事件流、取消、Callback 和单次 Agent checkpoint；
-- Eino/Eino-ext 接管模型 provider、Tool、Prompt Template、retry/failover；后续需要语义检索时接 Embedder/Indexer/Retriever；
-- Go typed struct 与严格 JSON decode 取代字符串切片、`literal_eval` 和吞异常式 fallback；
+- LangChain Core 接管 Runnable 组合、`RunnableConfig`、模型/Prompt/Tool 抽象和 callback/tracing 接线；
+- strict/frozen Pydantic Model 接管不受信数据的运行时结构校验，pyright strict 检查静态接线；
+- `with_types()` 只提供类型/Schema 元数据，不能替代显式 Pydantic parse；
 - 不迁移 Django 文件 mailbox、busy polling、固定 Tick、Selenium、Tiled/Phaser 世界和 `path_finder.py`；
 - MyGO 自己持有 PerceptionProjector、角色记忆语义、namespace/provenance、检索融合、World/Event Scheduler、Temporal Binder、Validator/Committer、Ledger 与 Render Planner。
 
-这里仍有两项实现级选择：一期 Memory 存储使用 JSONL 还是 SQLite；`PersonActAgent` 是否在 Phase 0 就实现 `ResumableAgent`，还是先只实现 `adk.Agent`。它们不改变上述责任边界。
+这里仍有两项实现级选择：一期 Memory 存储使用 JSONL 还是 SQLite；未来复杂流程是否真的需要 LangGraph 的持久状态机。当前公共边界只是一次 `decide`，不以“以后可能需要 checkpoint”为由提前引入 LangGraph，也不能让框架接管 Scheduler loop。
 
 ### H-031 / H-032｜地点如何保持客观口径，又怎样成为角色可发现的信息环境？
 
@@ -393,6 +398,54 @@ Location identity
 角色形成前往地点的有效意图后，Runtime 查询对应 LocationView，先确定性过滤无效、已知或不可披露信息；有候选时 Director 只能提出 `NoOp / DiscoveryPlan`。既有公开 Fact/Info 可在校验后由 Projector 直接产生 Candidate；消息/告知等改变世界的传播必须先由 Committer 提交 WorldEvent。PersonAct 最终决定是否注意和记住。完整设计见[地点 World Model](location-world-model.md)。
 
 已支付的代价是：World 模型新增 Fact/Info revision、地点查询索引与 disclosure 校验；还需要确定 pre-arrival 与 post-arrival 两种 hook、周期 wakeup、地点历史窗口及 SQLite/JSONL 存储选择。
+
+### H-033｜如何让创作者 DIY NPC，同时不开放越权执行入口？
+
+LangChain 可以组合任意 Runnable、模型和 Tool，但“框架能执行”不等于“创作者应获得该权限”。如果直接开放 Runnable 拓扑、system prompt、URL、MCP 或 namespace，NPC 可以绕过 `PerceptionProjector -> Proposal -> Validator/Committer`，世界权威就会退化成提示词约定。
+
+当前已落地受信编译边界、新的 World proposal contract 与 `PersonActAgent.decide`：创作者配置 Persona、初始私有记忆、受限 Proposal 能力和 Catalog 引用；strict Pydantic loader 拒绝未知字段与类型 coercion，Compiler 派生 `project/{project_id}/persona/{agent_id}` scope，并把 project/format version 纳入 digest；它只解析 query/compute Tool 与版本化 Prompt，生成 frozen spec。`decide` 从 spec 注入 actor，并校验 capability、typed affordance 与 visible evidence。即使这些检查通过，也只是候选意图，最终仍由尚未实现的 World Validator/Committer 裁决。
+
+交换代价是 DIY 自由度低于通用 Agent Builder：一期不能上传代码、自由连线 Runnable/Graph、连接任意 MCP、选 provider 或修改系统 Prompt。得到的是可重放、可审计、可逐步扩展且不会侵蚀 `agent / event / world` 边界的角色创作面。
+
+仍需回答：Prompt/Profile 与 Character Skill 的发布和兼容策略；真实模型 shadow 到 gated commit 的质量 Gate；Tool Catalog 的资源级 scope；manifest 更新时旧 Runtime Session 和 Trace 的迁移/回放方式。
+
+### H-034｜Python 与 Runnable 的类型提示不等于运行时校验，怎样避免强类型边界退化成注解幻觉？
+
+Python 的类型注解默认不会在运行时执行，LangChain `Runnable.with_types()` 也只为 Runnable 绑定或暴露输入/输出类型信息。它不会在每次 `invoke()` 时自动把任意 dict 校验成领域 Model。`RunnableSequence` 还可能在内部擦除中间节点泛型，因此只给最外层写 `Runnable[Input, Output]` 不能证明整条链安全。
+
+当前答案分三层：
+
+1. pyright strict 检查所有公开接口、Protocol 和 Runnable 节点 callable 的静态接线；
+2. 统一 `StrictModel` 以 `strict=True / extra=forbid / frozen=True / revalidate_instances=always / validate_default=True` 处理所有外部输入、模型/Tool 输出、跨模块与持久化边界；禁止用不重新校验的 copy/update 捷径修改契约值；
+3. 项目 Validator 继续检查 Pydantic 无法表达的 namespace、affordance、evidence、world version 和提交权限。
+
+这会支付明确代价：模型和 adapter 数量增加；每个不受信边界都要显式 parse；Schema 演进要处理版本兼容；frozen 值更新需构造新对象；动态 Runnable 组合受到约束。得到的是失败能在靠近来源处暴露，类型 coercion 和未知字段不会静默进入 World 链。
+
+仍需验证：未来 ChatModel structured output 在 provider 差异下是否始终经过同一 Pydantic 路径；序列化 round-trip 是否保留严格性；callback/tracing metadata 是否需要独立受控模型；若引入 LangGraph，state schema 与 World schema 如何保持物理分离。
+
+### H-035｜如何迁移 Persona 的认知能力，却不把 `Persona.move()`、movement 和世界循环一起搬进 Agent？
+
+旧原型把世界步进、`Persona.move()` 门面、认知模块、`execute.py` 和 Maze movement 串成一条调用链。直接复刻会让 Agent 同时拥有“什么时候运行”和“世界怎样变化”的权力，也会重新引入浏览器 mailbox、寻路与逐 tile 状态。
+
+当前答案是把循环上提给外部 Event Scheduler：Scheduler 选择一个角色、固定 committed world version、构造 `DecisionRequest`，然后只调用一次 `PersonActAgent.decide`。`decide` 已迁移 prepare、perception、private memory、retrieval 与 planning/reacting 语义，每次只返回本角色一个 strict/frozen Proposal 后结束；需要 wire JSON 时再显式序列化。下一角色、下一轮和 wakeup 均由 Scheduler 决定。Reflection 必须等待 commit outcome，尚未实现。
+
+这意味着明确不实现或暴露 `Persona.move()`，不提供 `move` action，不迁移 Maze、path finder、地址解析、逐 tile movement 或 `execute.py`。角色的候选行为是否产生世界结果仍由 Director/Validator/Committer 决定。
+
+代价是原本隐含在一条函数链中的状态迁移必须拆成显式输入、私有 state 更新、Proposal、提交结果和 feedback；但得到的是可重放的调度权、单一 actor 边界，以及 Agent 无法绕过 World 的结构性保证。
+
+### H-036｜如何让一个 Proposal JSON 同时具备稳定 envelope、互斥 action 字段和无歧义 target？
+
+旧 Proposal 把 `kind / targetIds / locationId / content / nextWakeup` 放在同一层，允许大量无意义组合，还无法判断一个 ID 是 Character 还是 object。多目标也会引入部分 afford、部分提交和顺序歧义。
+
+当前答案是固定 envelope：
+
+```text
+proposalId / agentId / eventSessionId / basedOnWorldVersion / action / evidenceIds
+```
+
+`action` 以 `kind` 为 discriminator，固定 `act / interact / utter / respond / wait / no_op`。`interact.target` 是一个 `{kind: character|object, id}`；`utter/respond.target` 必须是 character；其它 variant 不接受 target。`agentId` 由 `spec.agent_id` 注入，action 不含 actor。没有 `move`、`locationId` 或 `targetIds` 兼容字段。
+
+代价是一次破坏性 wire migration：旧 Fixture、Trace、Manifest capability digest 与消费者必须同步；provider structured output 也需验证嵌套 discriminated union 的支持。迁移中不能保留宽松 alias 或双写两套格式，否则 strict 边界会失去意义。
 
 ## 后续维护要求
 

@@ -20,7 +20,7 @@ MyGO / WebGAL
 
 MyGO/WebGAL 内部已有 Sentence 推进、Auto/Fast Timer、Pixi 动画帧和每秒 `SYNCFC`，但这些只服务演出。它没有可供多 Agent 世界复用的权威 `world_time / tick_id / world_version`。因此 World Clock 必须由外部 Runtime 持有。
 
-这里的“动态编译 Agent Runtime 产物”分成两步：Go + Eino ADK Runtime 内的 Broadcast Agent 只输出 `BroadcastPlan`，确定性 Render Planner 结合已提交 Event Log 生成 `RenderJob`；外置 Render Plugin/Adapter 再校验并编译成 WebGAL DSL。MyGO/WebGAL 底座只执行 DSL 和呈现演出。Planner/Compiler 都不进入世界权威，也不要求侵入原引擎。`RenderArtifact` 是这类演出投影产物的总称，一期跨进程契约统一使用 `RenderJob`。
+这里的“动态编译 Agent Runtime 产物”分成两步：Python + LangChain Core Runtime 内的 Broadcast Agent 只输出 strict `BroadcastPlan`，确定性 Render Planner 结合已提交 Event Log 生成 `RenderJob`；外置 Render Plugin/Adapter 再校验并编译成 WebGAL DSL。MyGO/WebGAL 底座只执行 DSL 和呈现演出。Planner/Compiler 都不进入世界权威，也不要求侵入原引擎。`RenderArtifact` 是这类演出投影产物的总称，一期跨进程契约统一使用 `RenderJob`。当前只实现 NPC DIY PoC，Broadcast 与该跨进程链仍是目标设计。
 
 ### 为什么不能用 Sentence 当 Tick
 
@@ -149,9 +149,9 @@ Plugin Host
 └── Original MyGO/WebGAL Player
 ```
 
-Plugin 只从外部 World / Agent Runtime 接收不可变 RenderJob；WorldEvent 只在 Go Runtime 内供 Broadcast Agent 与 Render Planner 使用，不跨越 Plugin 边界。Plugin 不在浏览器内成为世界权威，不读取内部 Redux，不使用 WebGAL Backlog 保存 Event Log，也不要求原引擎新增命令。原静态作品入口保持可独立运行。
+Plugin 只从外部 World / Agent Runtime 接收不可变 RenderJob；WorldEvent 只在 Python Runtime 内供 Broadcast Agent 与 Render Planner 使用，不跨越 Plugin 边界。Plugin 不在浏览器内成为世界权威，不读取内部 Redux，不使用 WebGAL Backlog 保存 Event Log，也不要求原引擎新增命令。原静态作品入口保持可独立运行。
 
-Render Adapter 固定放在本工程的 `extensions/dynamic-render/`，Go World / Agent Runtime 固定放在根级 `agent_runtime/`；新功能不得散落进第三方 Bundle。
+Render Adapter 固定放在本工程的 `extensions/dynamic-render/`，Python World / Agent Runtime 固定放在根级 `agent_runtime/`；新功能不得散落进第三方 Bundle。
 
 ## 2. WebGAL 黑盒适配
 

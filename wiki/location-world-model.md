@@ -2,7 +2,7 @@
 
 ## 0. 状态与目标
 
-- **状态：核心边界已确认，代码未实现。**
+- **状态：核心边界已确认，代码未实现；当前 NPC DIY PoC 只包含最小 World-owned 输入/输出类型。**
 - **确认日期：2026-08-22。**
 - **目标：**让地点成为可按世界版本查询的一等 World Model，维护地点的稳定身份、已提交事实、当前有效信息和发生于此的 Event 引用，避免 Agent 临场杜撰环境并造成前后口径漂移。
 
@@ -33,78 +33,32 @@ Location identity
 
 ## 2. 一期最小数据契约
 
-```go
-type Location struct {
-    ID                  string
-    CanonicalName       string
-    Aliases             []string
-    Kind                string
-    ParentLocationID    string
-    TimeZone            string
-    CreatedWorldVersion uint64
-}
+```text
+Location
+  location_id / canonical_name / aliases / kind
+  parent_location_id / timezone / created_world_version
 
-type LocationFactRevision struct {
-    FactID                string
-    Revision              uint64
-    LocationID            string
-    Key                   string
-    Value                 FactValue
-    Operation             FactOperation // assert | replace | retire
-    PreviousRevision      uint64
-    EffectiveWorldVersion uint64
-    Disclosure            DisclosurePolicy
-    DiscoveryChannels     []string
-    SourceKind            string // seed | transaction
-    SourceRef             string
-    EvidenceIDs           []string
-    CommitSeq             uint64
-}
+LocationFactRevision
+  fact_id / revision / location_id / key / value / operation
+  previous_revision / effective_world_version / disclosure / discovery_channels
+  source_kind / source_ref / evidence_ids / commit_seq
 
-type LocationInfoRevision struct {
-    InfoID                string
-    Revision              uint64
-    LocationID            string
-    Kind                  string // phase 1: recurring_commitment
-    SubjectIDs            []string
-    Predicate             string
-    ObjectRefs            []string
-    Summary               string
-    ValidFrom             time.Time
-    ValidUntil            *time.Time
-    Recurrence            *RecurrenceRule
-    Disclosure            DisclosurePolicy
-    DiscoveryChannels     []string
-    Operation             InfoOperation // publish | replace | cancel
-    PreviousRevision      uint64
-    EffectiveWorldVersion uint64
-    SourceKind            string // seed | transaction
-    SourceRef             string
-    EvidenceIDs           []string
-    CommitSeq             uint64
-}
+LocationInfoRevision
+  info_id / revision / location_id / kind / subject_ids / predicate
+  object_refs / summary / valid_from / valid_until / recurrence
+  disclosure / discovery_channels / operation / previous_revision
+  effective_world_version / source_kind / source_ref / evidence_ids / commit_seq
 
-type LocationEventRef struct {
-    EventID         string
-    EventRevision  uint64
-    LocationID     string
-    Status          string
-    ParticipantIDs []string
-    StartedAt       time.Time
-    EndedAt         *time.Time
-    CommitSeq       uint64
-}
+LocationEventRef
+  event_id / event_revision / location_id / status / participant_ids
+  started_at / ended_at / commit_seq
 
-type LocationView struct {
-    BasedOnWorldVersion uint64
-    AtWorldTime         time.Time
-    Location            Location
-    ActiveFacts         []LocationFactRevision
-    ActiveInfo          []LocationInfoRevision
-    ActiveEventRefs     []LocationEventRef
-    RecentEventRefs     []LocationEventRef
-}
+LocationView
+  based_on_world_version / at_world_time / location
+  active_facts / active_info / active_event_refs / recent_event_refs
 ```
+
+实现时这些值使用统一 strict/frozen Pydantic Model：未知字段、隐式 coercion 和原地修改均被拒绝；pyright strict 检查静态引用。Pydantic 只能保证结构，Fact revision、disclosure 和 world-version 一致性仍由 World 领域逻辑校验。
 
 一期 `FactValue` 只支持经过注册的 `bool / string / integer / entity_ref`，Fact key 也必须进入 registry。例如：
 
@@ -179,7 +133,7 @@ QueryLocationContext(
 ```text
 Character 提出 go_to(RiNG)
 -> Validator 接受目的地与移动前提
--> Director Graph 的 mandatory LoadLocationContext 节点以同一 world version 查询 RiNG LocationView
+-> Director Pipeline/strategy 的 mandatory LoadLocationContext 步骤以同一 world version 查询 RiNG LocationView
 -> FilterDiscoveryCandidates 节点确定性去掉无效、已知和不可披露的 Info
 -> 有候选时 Director 输出 NoOp 或 DiscoveryPlan
 -> Validator 检查 Info revision、DisclosurePolicy、时间和传播渠道
@@ -198,7 +152,7 @@ delivery_timing / channel / visible_fields / evidence_ids
 
 合法方式可以是公开日程、场所海报、朋友告知、定向消息、到场后听见演出或工作人员说明。Director 决定的是**传播机制和机会**，不是直接宣告“角色已经知道”，也不能代替一个有自主性的 Character 说话或发送消息。
 
-`LoadLocationContext` 是 Director 内部必经的 typed Graph node，由 Runtime 注入只读 `LocationQuery`；它不是让模型自行决定要不要调用的开放 Tool。这样可以保证每次相关到访都查询同一版本的地点状态，同时无候选时在进入模型节点前直接返回 `NoOp`。
+`LoadLocationContext` 是 Director 内部必经的 typed Runnable/strategy 步骤，由 Runtime 注入 strict/frozen `LocationQuery`；它不是让模型自行决定要不要调用的开放 Tool。这样可以保证每次相关到访都查询同一版本的地点状态，同时无候选时在进入模型节点前直接返回 `NoOp`。当前 Director 尚未实现，这里描述的是一期契约。
 
 Director 只能从该 Info 声明的 `DiscoveryChannels` 中选择传播方式，不能临场杜撰一个并不存在的海报、广播或知情人。若需要新建传播媒介，它本身先作为 World change 提交。
 
@@ -265,7 +219,7 @@ ListLocationHistory(location_id, before_commit_seq, limit)
 
 `GetLocationView` 返回不可变快照，供 Validator、Projector 和 Director 使用。Director 默认只读取 active facts、active info、active event refs 以及与当前 visitor 相关的 known refs；历史必须显式分页，不能把地点全部历史塞进 Prompt。
 
-物理存储复用 World Ledger 的事务和索引能力。Location 不自建向量库；未来需要按自然语言搜索 LocationInfo 时，通过 Eino Retriever 适配现有索引，但权威结果仍回到稳定 `fact_id / info_id / event_id + revision`。
+物理存储复用 World Ledger 的事务和索引能力。Location 不自建向量库；未来需要按自然语言搜索 LocationInfo 时，可通过 LangChain Retriever/VectorStore 的窄 adapter 适配现有索引，但权威结果仍回到稳定 `fact_id / info_id / event_id + revision`。
 
 ## 8. 一期范围与验收
 

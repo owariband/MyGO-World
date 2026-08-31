@@ -6,7 +6,7 @@
 generative_go_world/
 ├── AGENT.md
 ├── wiki/
-├── agent_runtime/          # Go + Eino ADK，一期待实现
+├── agent_runtime/          # Python 3.12 + LangChain Core；当前为 PersonAct Slice
 ├── extensions/
 │   └── dynamic-render/     # RenderJob 到 WebGAL 的外置 Adapter
 ├── index.html              # 从外部加载 WebGAL Bundle 的自研页面壳
@@ -37,13 +37,25 @@ WEBGAL_ROOT=/absolute/path/to/MyGO_v3.1.1_ForScript npm test
 
 ## 立即运行
 
-需要 Node.js 20 或更高版本。首次运行先安装锁定依赖：
+制作层需要 Node.js 20 或更高版本。首次运行先安装锁定依赖：
 
 ```bash
 npm install
 npm test
 npm run dynamic -- --project rain-after
 ```
+
+Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice。LangChain Core 是内部编排依赖，不是 ADK 本身；外部 Scheduler 与 World 提交链仍待实现。Python 环境、依赖和工具统一使用 uv：
+
+```bash
+uv sync --frozen
+uv run ruff format --check agent_runtime
+uv run ruff check agent_runtime
+uv run pyright
+uv run pytest
+```
+
+当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State 与检索基础，以及 `PersonActAgent.decide` 的 prepare/perceive/retrieve/plan/propose Slice。外部 Event Scheduler 拥有循环；`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`，需要 wire JSON 时再调用 `model_dump_json(by_alias=True)`。Proposal 使用固定 envelope + discriminated action union，不包含 `move` variant、`locationId` 或多目标 `targetIds`。Reflection/commit feedback、Director、World Commit、Event Scheduler 与 Render ingress 仍待实现。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
 
 默认项目是 `rain-after`。开发服务器优先提供本仓库的自研 Overlay，并在文件不存在时从 `WEBGAL_ROOT` 提供 WebGAL 页面、Bundle、素材和媒体文件。
 
