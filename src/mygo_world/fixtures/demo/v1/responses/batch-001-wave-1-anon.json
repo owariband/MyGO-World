@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "proposal_id": "demo-proposal-anon-move",
+  "world_version": 1,
+  "session_id": "session-first-meeting",
+  "actor_id": "character-anon",
+  "intent_summary": "Moves from the lounge to the stage to focus.",
+  "action": {
+    "kind": "move",
+    "location_id": "location-live-house",
+    "scope_key": "stage"
+  },
+  "memory_changes": [
+    {
+      "agent_id": "character-anon",
+      "namespace": "default",
+      "memory_type": "belief",
+      "content": "Anon privately believes moving to the stage was the right choice.",
+      "importance": 3,
+      "location_tags": ["location-live-house"]
+    }
+  ]
+}

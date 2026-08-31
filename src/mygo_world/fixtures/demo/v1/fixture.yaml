@@ -1,0 +1,23 @@
+schema_version: 1
+fixture_id: mygo-world-deterministic-demo
+version: 1.0.0
+scenario: scenario.yaml
+calls: calls.yaml
+skills_dir: skills
+asset_manifest: assets/manifest.yaml
+webgal_template: assets/webgal
+clock: "2026-08-31T01:00:00+00:00"
+random_seed: 82408
+steps:
+  - command: advance
+    run_id: demo-batch-001
+    max_waves: 2
+    request_budget: 8
+    character_concurrency: 2
+  - command: render
+  - command: advance
+    run_id: demo-batch-002
+    max_waves: 1
+    request_budget: 4
+    character_concurrency: 2
+  - command: render

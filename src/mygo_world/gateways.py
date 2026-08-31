@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -10,8 +11,28 @@ from typing import Any, Protocol, TypeVar, runtime_checkable
 from pydantic import BaseModel, ValidationError
 
 from mygo_world.canonical import canonical_json, sha256_text
+from mygo_world.errors import WorldError
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+_LINEAGE_SESSION_PATTERN = re.compile(r"^(session-lineage-\d+-\d+)-[0-9a-f]{16}$")
+
+
+def normalize_fixture_input(value: Any) -> Any:
+    """Remove only portable run identity from a Fixture request projection."""
+
+    if isinstance(value, dict):
+        return {
+            key: "$WORLD_ID" if key == "world_id" else normalize_fixture_input(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [normalize_fixture_input(item) for item in value]
+    if isinstance(value, str):
+        match = _LINEAGE_SESSION_PATTERN.fullmatch(value)
+        if match is not None:
+            return f"{match.group(1)}-$DIGEST"
+    return value
 
 
 class ModelTransportError(RuntimeError):
@@ -50,6 +71,21 @@ class ModelRequest:
     @property
     def semantic_key(self) -> str:
         return f"{self.agent_type}:{self.agent_id}:{self.call_kind}"
+
+    @property
+    def fixture_key(self) -> str:
+        """Return the versioned Fixture address for this exact model call."""
+
+        batch_id = str(
+            self.input_payload.get(
+                "run_id", f"broadcast-v{self.input_payload.get('world_version', 0)}"
+            )
+        )
+        wave_number = int(self.input_payload.get("wave_number", 0))
+        return (
+            f"{self.agent_type}:{self.agent_id}:{batch_id}:"
+            f"{wave_number}:{self.call_kind}"
+        )
 
     @property
     def input_hash(self) -> str:
@@ -96,39 +132,69 @@ class FixtureResponse:
 class FixtureGateway:
     """Deterministic in-process responses; this implementation has no network code."""
 
-    def __init__(self, responses: dict[str, FixtureResponse | dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        responses: dict[str, FixtureResponse | dict[str, Any]],
+        *,
+        require_input_hashes: bool = False,
+        normalize_inputs: bool = False,
+    ) -> None:
         self._responses = {
             key: value if isinstance(value, FixtureResponse) else FixtureResponse(value)
             for key, value in responses.items()
         }
         self.calls: list[ModelRequest] = []
+        self.matched_keys: list[str] = []
         self.model_id = "fixture-model-v1"
         self.network_request_count = 0
+        self._require_input_hashes = require_input_hashes
+        self._normalize_inputs = normalize_inputs
 
     def generate(
         self, request: ModelRequest, response_type: type[ResponseT]
     ) -> ModelGeneration[ResponseT]:
-        try:
-            fixture = self._responses[request.semantic_key]
-        except KeyError as exc:
-            raise LookupError(
-                f"No Fixture response for semantic call '{request.semantic_key}'"
-            ) from exc
+        fixture_key = request.fixture_key
+        resolved_key = fixture_key
+        fixture = self._responses.get(fixture_key)
+        if fixture is None:
+            resolved_key = request.semantic_key
+            fixture = self._responses.get(request.semantic_key)
+        if fixture is None:
+            raise WorldError(
+                "FIXTURE_RESPONSE_MISSING",
+                f"No Fixture response for call '{fixture_key}'",
+            )
+        if self._require_input_hashes and fixture.expected_input_hash is None:
+            raise WorldError(
+                "FIXTURE_INPUT_HASH_MISSING",
+                f"Fixture input hash is required for '{resolved_key}'",
+            )
+        actual_input_hash = (
+            sha256_text(canonical_json(normalize_fixture_input(request.input_payload)))
+            if self._normalize_inputs
+            else request.input_hash
+        )
         if (
             fixture.expected_input_hash is not None
-            and fixture.expected_input_hash != request.input_hash
+            and fixture.expected_input_hash != actual_input_hash
         ):
-            raise ValueError(
-                f"Fixture input hash mismatch for '{request.semantic_key}': "
-                f"expected {fixture.expected_input_hash}, got {request.input_hash}"
+            raise WorldError(
+                "FIXTURE_INPUT_HASH_MISMATCH",
+                f"Fixture input hash mismatch for '{resolved_key}': "
+                f"expected {fixture.expected_input_hash}, got {actual_input_hash}",
             )
         raw = canonical_json(fixture.body)
         self.calls.append(request)
+        self.matched_keys.append(resolved_key)
         try:
             structured = response_type.model_validate_json(raw)
         except ValidationError as exc:
             raise ModelOutputInvalidError(request, raw, str(exc)) from exc
         return ModelGeneration(request=request, raw_response=raw, structured=structured)
+
+    @property
+    def unused_response_keys(self) -> tuple[str, ...]:
+        return tuple(sorted(set(self._responses) - set(self.matched_keys)))
 
 
 class OpenAICompatibleGateway:

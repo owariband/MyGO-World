@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "world_id": "{{world_id}}",
+  "target_world_version": 3,
+  "dispositions": [
+    {"event_id": "7986c887-58e1-42a4-bf21-e7be80a929d9", "status": "included"},
+    {"event_id": "9ffdafba-436e-4460-a06f-06cd9fc85745", "status": "included"},
+    {"event_id": "768e2802-dc9d-4f81-883f-2d9f8e524c60", "status": "included"},
+    {"event_id": "c7e30eba-4b51-4e91-9a72-38f3fc6a29ac", "status": "included"}
+  ],
+  "renders": [
+    {
+      "render_id": "render-v3-001",
+      "title": "World Version 3",
+      "estimated_play_ms": 12000,
+      "beats": [
+        {"beat_id": "chapter", "type": "chapter", "title": "World Version 3", "source_event_ids": []},
+        {"beat_id": "audio", "type": "stop_bgm", "fade_ms": 0, "source_event_ids": []},
+        {"beat_id": "background", "type": "background", "asset_id": "background-rehearsal-room", "source_event_ids": []},
+        {
+          "beat_id": "event-1",
+          "type": "narration",
+          "text": "{\"intent_summary\":\"Moves from the lounge to the stage to focus.\",\"location_id\":\"location-live-house\",\"scope_key\":\"stage\"}",
+          "source_event_ids": ["7986c887-58e1-42a4-bf21-e7be80a929d9"]
+        },
+        {"beat_id": "show-2", "type": "show", "character_id": "character-soyo", "model_asset_id": "model-soyo-demo", "position": "center", "source_event_ids": []},
+        {
+          "beat_id": "event-2",
+          "type": "dialogue",
+          "character_id": "character-soyo",
+          "model_asset_id": "model-soyo-demo",
+          "text": "爱音，先等一下。",
+          "source_event_ids": ["9ffdafba-436e-4460-a06f-06cd9fc85745"]
+        },
+        {
+          "beat_id": "event-3",
+          "type": "narration",
+          "text": "The lounge door closes softly after Anon leaves.",
+          "source_event_ids": ["768e2802-dc9d-4f81-883f-2d9f8e524c60"]
+        },
+        {
+          "beat_id": "event-4",
+          "type": "narration",
+          "text": "{\"duration_ms\":1000,\"intent_summary\":\"Waits on the stage for one second.\",\"reason\":\"Listens from the stage\"}",
+          "source_event_ids": ["c7e30eba-4b51-4e91-9a72-38f3fc6a29ac"]
+        }
+      ]
+    }
+  ]
+}

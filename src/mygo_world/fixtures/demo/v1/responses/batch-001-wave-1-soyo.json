@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "proposal_id": "demo-proposal-soyo-speak",
+  "world_version": 1,
+  "session_id": "session-first-meeting",
+  "actor_id": "character-soyo",
+  "intent_summary": "Asks Anon to wait before leaving.",
+  "action": {
+    "kind": "utterance",
+    "text": "爱音，先等一下。",
+    "addressee_ids": ["character-anon"]
+  },
+  "memory_changes": []
+}

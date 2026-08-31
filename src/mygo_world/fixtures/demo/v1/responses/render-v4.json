@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "world_id": "{{world_id}}",
+  "target_world_version": 4,
+  "dispositions": [
+    {"event_id": "dc346e7d-73a7-4926-95d3-9be3396956a3", "status": "included"}
+  ],
+  "renders": [
+    {
+      "render_id": "render-v4-001",
+      "title": "World Version 4",
+      "estimated_play_ms": 3000,
+      "beats": [
+        {"beat_id": "chapter", "type": "chapter", "title": "World Version 4", "source_event_ids": []},
+        {"beat_id": "audio", "type": "stop_bgm", "fade_ms": 0, "source_event_ids": []},
+        {"beat_id": "background", "type": "background", "asset_id": "background-rehearsal-room", "source_event_ids": []},
+        {
+          "beat_id": "event-1",
+          "type": "narration",
+          "text": "{\"duration_ms\":1000,\"intent_summary\":\"Waits in the lounge for one second.\",\"reason\":\"Collects her thoughts\"}",
+          "source_event_ids": ["dc346e7d-73a7-4926-95d3-9be3396956a3"]
+        }
+      ]
+    }
+  ]
+}

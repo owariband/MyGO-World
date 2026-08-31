@@ -1,0 +1,73 @@
+schema_version: 1
+seed_id: mygo-deterministic-demo
+version: 1.0.0
+name: Deterministic MyGO Fixture World
+world_time_ms: 0
+calendar_anchor: "2026-08-31T09:00:00+08:00"
+skill_bindings:
+  characters:
+    character-anon:
+      skill_id: mygo.character.anon
+      version: 1.0.0
+    character-soyo:
+      skill_id: mygo.character.soyo
+      version: 1.0.0
+  director:
+    skill_id: mygo.director.default
+    version: 1.0.0
+  broadcast:
+    skill_id: mygo.broadcast.default
+    version: 1.0.0
+entities:
+  - entity_type: location
+    entity_id: location-live-house
+    name: Live House RiNG
+    scopes:
+      - scope_key: lounge
+        name: Lounge
+        reachable_destinations:
+          - location_id: location-live-house
+            scope_key: stage
+      - scope_key: stage
+        name: Stage
+        reachable_destinations:
+          - location_id: location-live-house
+            scope_key: lounge
+    state:
+      description: A quiet lounge before rehearsal.
+  - entity_type: character
+    entity_id: character-anon
+    name: Anon
+    location_id: location-live-house
+    scope_key: lounge
+    state:
+      mood: curious
+  - entity_type: character
+    entity_id: character-soyo
+    name: Soyo
+    location_id: location-live-house
+    scope_key: lounge
+    state:
+      mood: guarded
+sessions:
+  - session_id: session-first-meeting
+    location_id: location-live-house
+    scope_key: lounge
+    participant_ids:
+      - character-anon
+      - character-soyo
+memories:
+  - memory_id: memory-anon-private-goal
+    agent_id: character-anon
+    memory_type: belief
+    content: Anon privately believes the empty stage will help her focus.
+    location_tags:
+      - location-live-house
+    importance: 3
+  - memory_id: memory-soyo-private-concern
+    agent_id: character-soyo
+    memory_type: belief
+    content: Soyo privately worries that the rehearsal will become chaotic.
+    location_tags:
+      - location-live-house
+    importance: 3

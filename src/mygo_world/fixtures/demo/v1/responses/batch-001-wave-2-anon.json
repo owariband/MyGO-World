@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "proposal_id": "demo-proposal-anon-wait",
+  "world_version": 2,
+  "session_id": "{{anon_successor_session_id}}",
+  "actor_id": "character-anon",
+  "intent_summary": "Waits on the stage for one second.",
+  "action": {
+    "kind": "wait",
+    "duration_ms": 1000,
+    "reason": "Listens from the stage"
+  },
+  "memory_changes": []
+}

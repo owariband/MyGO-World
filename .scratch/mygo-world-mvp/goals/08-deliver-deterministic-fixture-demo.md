@@ -1,51 +1,51 @@
 Goal: 完成 ticket 08，交付无需网络的版本化 Fixture MVP Demo，并证明两次全新运行产生相同的规范领域结果与 WebGAL 产物
 
 Completion criteria:
-- [ ] CLI 新增 `demo` 命令，且只允许以不存在的 World ID 启动完整演示。
-- [ ] `demo` 对已存在的 World ID 稳定失败，且不新增、删除或修改该 World 的数据库记录和文件。
-- [ ] `demo --json` 返回字段顺序与结构稳定的 Receipt，包含 World ID、Generation Batch ID、目标 World Version、Broadcast Run ID 和全部 Render 产物路径及内容 hash。
-- [ ] `demo` 的人类输出提供与 JSON Receipt 等价的 World、Batch、版本和 Render 产物标识。
-- [ ] Fixture 位于显式版本号目录下。
-- [ ] Fixture 的 Scenario 与 Agent 调用清单使用 YAML。
-- [ ] Fixture 的所有 Character、Director 与 Broadcast 结构化响应使用 JSON。
-- [ ] FixtureGateway 使用 agent type、agent ID、Generation Batch、Generation Wave 和 call kind 的组合键定位唯一响应。
-- [ ] FixtureGateway 在返回响应前强制比对规范化请求输入的 SHA-256，缺失或不匹配时稳定失败。
-- [ ] 现有不含 Batch/Wave 键的 FixtureGateway 测试与 ticket 01–07 调用保持兼容。
-- [ ] Demo 注入固定时钟。
-- [ ] Demo 注入确定性的 ID 生成器。
-- [ ] Demo 注入固定随机种子。
-- [ ] Demo 为执行路径中的每次 Character、Director 与 Broadcast 调用提供显式 Fixture 响应。
-- [ ] 主 Fixture 从空目录通过生产 CLI 路径执行 `init → advance → render`，不直接写数据库或发布目录。
-- [ ] 主 Fixture 不绕过生产 Validator、Repository、World Committer、Event Recognizer、Projector、RenderPlanner、RenderCompiler 或 ModelGateway。
-- [ ] 主 Fixture 至少执行一个含多个 Character 的 Generation Wave。
-- [ ] 主 Fixture 产生一次 Event Session 分裂，并验证旧 Session 关闭及全部后继 Session 的确定性 FIFO 入队顺序。
-- [ ] 主 Fixture 验证角色离开旧 Interaction Scope 后的 Observation 与下一 Wave PerceptionFrame 均满足 Scope 隔离。
-- [ ] 主 Fixture 验证下一 Generation Batch 从持久队列的队首 Session 继续。
-- [ ] 主 Fixture 验证角色私有 Memory 在后续 Generation Batch 的模型输入中出现且不跨角色泄露。
-- [ ] 主 Fixture 验证绑定的 Character、Director 与 Broadcast Runtime Skill 正文被对应模型请求使用。
-- [ ] 主 Fixture 在已有成功 Render 后提交新 Event，并验证下一次 `render` 只消费新增 frontier。
-- [ ] 规范导出包含按稳定键排序的 World Ledger。
-- [ ] 规范导出包含当前 Snapshot 与 checksum。
-- [ ] 规范导出包含按 agent/namespace/时间/ID 稳定排序的 Memory 历史。
-- [ ] 规范导出包含 Broadcast Plan、Broadcast Disposition 与 Render 元数据。
-- [ ] 两个独立空目录中的完整 Demo 运行产生逐字节相同的规范导出文件。
-- [ ] 两个独立空目录中的完整 Demo 运行产生逐字节相同的 WebGAL 场景脚本。
-- [ ] 两个独立空目录中的完整 Demo 运行产生相同的 Snapshot checksum。
-- [ ] 两个独立空目录中的完整 Demo 运行产生相同的全部 Render 内容 hash。
-- [ ] 确定性比较不读取或比较 SQLite 数据库原始文件字节。
-- [ ] Validator 最终失败 Fixture 证明失败候选只保留在 Generation Trace，且不推进 World Version。
-- [ ] World Committer 注入失败 Fixture 证明 Ledger、Memory、Snapshot、Session 队列和 World Version 全部回滚。
-- [ ] 请求预算耗尽 Fixture 返回稳定失败 Receipt，且不会发起超出预算的模型请求。
-- [ ] 取消后恢复 Fixture 证明重启进程可从持久状态安全继续，且不会重复已提交的 Wave。
-- [ ] Render 文件已发布但数据库未收尾 Fixture 证明重试复用同 hash 文件并补齐元数据与 Disposition。
-- [ ] 默认 pytest 不读取 Provider 凭据、不访问网络，也不依赖外部 MyGO 安装或资源目录。
-- [ ] `uv run pytest` 全部成功退出。
-- [ ] `uv run ruff check .` 全部成功退出。
-- [ ] `uv run ruff format --check .` 全部成功退出。
-- [ ] `uv run python -m compileall src tests_py` 全部成功退出。
-- [ ] Alembic 只有一个 head，且空数据库可以升级到该 head。
-- [ ] `WEBGAL_ROOT=/Users/yyu03/project/dev/MyGO_v3.1.1 npm test` 全部成功退出。
-- [ ] 将 ticket 08 标记为 `resolved` 前，ticket 05 与 ticket 07 的 issue 文件均明确包含 `Status: resolved`；任一依赖未完成时保留 ticket 08 为 `claimed` 并报告依赖。
+- [x] CLI 新增 `demo` 命令，且只允许以不存在的 World ID 启动完整演示。
+- [x] `demo` 对已存在的 World ID 稳定失败，且不新增、删除或修改该 World 的数据库记录和文件。
+- [x] `demo --json` 返回字段顺序与结构稳定的 Receipt，包含 World ID、Generation Batch ID、目标 World Version、Broadcast Run ID 和全部 Render 产物路径及内容 hash。
+- [x] `demo` 的人类输出提供与 JSON Receipt 等价的 World、Batch、版本和 Render 产物标识。
+- [x] Fixture 位于显式版本号目录下。
+- [x] Fixture 的 Scenario 与 Agent 调用清单使用 YAML。
+- [x] Fixture 的所有 Character、Director 与 Broadcast 结构化响应使用 JSON。
+- [x] FixtureGateway 使用 agent type、agent ID、Generation Batch、Generation Wave 和 call kind 的组合键定位唯一响应。
+- [x] FixtureGateway 在返回响应前强制比对规范化请求输入的 SHA-256，缺失或不匹配时稳定失败。
+- [x] 现有不含 Batch/Wave 键的 FixtureGateway 测试与 ticket 01–07 调用保持兼容。
+- [x] Demo 注入固定时钟。
+- [x] Demo 注入确定性的 ID 生成器。
+- [x] Demo 注入固定随机种子。
+- [x] Demo 为执行路径中的每次 Character、Director 与 Broadcast 调用提供显式 Fixture 响应。
+- [x] 主 Fixture 从空目录通过生产 CLI 路径执行 `init → advance → render`，不直接写数据库或发布目录。
+- [x] 主 Fixture 不绕过生产 Validator、Repository、World Committer、Event Recognizer、Projector、RenderPlanner、RenderCompiler 或 ModelGateway。
+- [x] 主 Fixture 至少执行一个含多个 Character 的 Generation Wave。
+- [x] 主 Fixture 产生一次 Event Session 分裂，并验证旧 Session 关闭及全部后继 Session 的确定性 FIFO 入队顺序。
+- [x] 主 Fixture 验证角色离开旧 Interaction Scope 后的 Observation 与下一 Wave PerceptionFrame 均满足 Scope 隔离。
+- [x] 主 Fixture 验证下一 Generation Batch 从持久队列的队首 Session 继续。
+- [x] 主 Fixture 验证角色私有 Memory 在后续 Generation Batch 的模型输入中出现且不跨角色泄露。
+- [x] 主 Fixture 验证绑定的 Character、Director 与 Broadcast Runtime Skill 正文被对应模型请求使用。
+- [x] 主 Fixture 在已有成功 Render 后提交新 Event，并验证下一次 `render` 只消费新增 frontier。
+- [x] 规范导出包含按稳定键排序的 World Ledger。
+- [x] 规范导出包含当前 Snapshot 与 checksum。
+- [x] 规范导出包含按 agent/namespace/时间/ID 稳定排序的 Memory 历史。
+- [x] 规范导出包含 Broadcast Plan、Broadcast Disposition 与 Render 元数据。
+- [x] 两个独立空目录中的完整 Demo 运行产生逐字节相同的规范导出文件。
+- [x] 两个独立空目录中的完整 Demo 运行产生逐字节相同的 WebGAL 场景脚本。
+- [x] 两个独立空目录中的完整 Demo 运行产生相同的 Snapshot checksum。
+- [x] 两个独立空目录中的完整 Demo 运行产生相同的全部 Render 内容 hash。
+- [x] 确定性比较不读取或比较 SQLite 数据库原始文件字节。
+- [x] Validator 最终失败 Fixture 证明失败候选只保留在 Generation Trace，且不推进 World Version。
+- [x] World Committer 注入失败 Fixture 证明 Ledger、Memory、Snapshot、Session 队列和 World Version 全部回滚。
+- [x] 请求预算耗尽 Fixture 返回稳定失败 Receipt，且不会发起超出预算的模型请求。
+- [x] 取消后恢复 Fixture 证明重启进程可从持久状态安全继续，且不会重复已提交的 Wave。
+- [x] Render 文件已发布但数据库未收尾 Fixture 证明重试复用同 hash 文件并补齐元数据与 Disposition。
+- [x] 默认 pytest 不读取 Provider 凭据、不访问网络，也不依赖外部 MyGO 安装或资源目录。
+- [x] `uv run pytest` 全部成功退出。
+- [x] `uv run ruff check .` 全部成功退出。
+- [x] `uv run ruff format --check .` 全部成功退出。
+- [x] `uv run python -m compileall src tests_py` 全部成功退出。
+- [x] Alembic 只有一个 head，且空数据库可以升级到该 head。
+- [x] `WEBGAL_ROOT=/Users/yyu03/project/dev/MyGO_v3.1.1 npm test` 全部成功退出。
+- [x] 将 ticket 08 标记为 `resolved` 前，ticket 05 与 ticket 07 的 issue 文件均明确包含 `Status: resolved`；任一依赖未完成时保留 ticket 08 为 `claimed` 并报告依赖。
 
 Constraints:
 - 08 可以与 07 并行启动，但必须把 `src/mygo_world/broadcasting.py`、`src/mygo_world/rendering.py`、Render 数据表/迁移和 `tests_py/test_rendering.py` 视为只读公共接口。

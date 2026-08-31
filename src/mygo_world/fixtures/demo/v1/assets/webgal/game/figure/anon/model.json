@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "FileReferences": {
+    "Motions": {
+      "idle": [{"File": "motions/idle.motion3.json"}],
+      "greet": [{"File": "motions/greet.motion3.json"}]
+    },
+    "Expressions": [{"Name": "smile", "File": "expressions/smile.exp3.json"}]
+  }
+}

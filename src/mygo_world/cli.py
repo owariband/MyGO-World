@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mygo_world.broadcasting import render_world
+from mygo_world.demo import DEFAULT_FIXTURE_VERSION, fixture_root, run_demo
 from mygo_world.errors import WorldError
 from mygo_world.runtime import advance_world
 from mygo_world.skill_bindings import bind_character_skill
@@ -63,6 +64,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     render_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    demo_parser = subparsers.add_parser(
+        "demo", help="run the deterministic, offline Fixture MVP Demo"
+    )
+    demo_parser.add_argument("--world-id", required=True)
+    demo_parser.add_argument("--output-dir", type=Path, default=Path(".mygo/demo"))
+    demo_parser.add_argument("--worlds-dir", type=Path)
+    demo_parser.add_argument("--webgal-root", type=Path)
+    demo_parser.add_argument("--artifact-root", type=Path)
+    demo_parser.add_argument("--canonical-export", type=Path)
+    demo_parser.add_argument("--fixture-dir", type=Path)
+    demo_parser.add_argument("--fixture-version", default=DEFAULT_FIXTURE_VERSION)
+    demo_parser.add_argument("--json", action="store_true", dest="as_json")
+
     bind_parser = subparsers.add_parser(
         "skill-bind", help="bind a versioned Character Runtime Skill"
     )
@@ -108,6 +122,17 @@ def _human_success(receipt: dict[str, Any]) -> str:
         return (
             f"Rendered {receipt['event_count']} Events from World "
             f"{receipt['world_id']} as {receipt['render_count']} immutable scene(s)"
+        )
+    if receipt["command"] == "demo":
+        artifacts = ", ".join(
+            f"{item['render_id']}={item['content_hash']} ({item['scene_path']})"
+            for item in receipt["renders"]
+        )
+        return (
+            f"Demo World {receipt['world_id']} completed with Batches "
+            f"{', '.join(receipt['generation_batch_ids'])} at version "
+            f"{receipt['target_world_version']}; Broadcast Runs "
+            f"{', '.join(receipt['broadcast_run_ids'])}; renders: {artifacts}"
         )
     return (
         f"Advanced World {receipt['world_id']} from version "
@@ -161,6 +186,19 @@ def run(argv: Sequence[str] | None = None) -> int:
                 artifact_root=args.artifact_root,
                 gateway_kind=args.gateway,
                 skills_dir=args.skills_dir,
+            )
+        elif args.command == "demo":
+            output_dir = args.output_dir
+            receipt = run_demo(
+                args.world_id,
+                worlds_dir=args.worlds_dir or output_dir / "worlds",
+                webgal_root=args.webgal_root or output_dir / "webgal",
+                artifact_root=args.artifact_root or output_dir / "artifacts",
+                export_path=(
+                    args.canonical_export
+                    or output_dir / "exports" / f"{args.world_id}.json"
+                ),
+                fixture_dir=args.fixture_dir or fixture_root(args.fixture_version),
             )
         else:
             receipt = bind_character_skill(

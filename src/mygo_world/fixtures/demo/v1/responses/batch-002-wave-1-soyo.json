@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "proposal_id": "demo-proposal-soyo-wait",
+  "world_version": 3,
+  "session_id": "{{soyo_successor_session_id}}",
+  "actor_id": "character-soyo",
+  "intent_summary": "Waits in the lounge for one second.",
+  "action": {
+    "kind": "wait",
+    "duration_ms": 1000,
+    "reason": "Collects her thoughts"
+  },
+  "memory_changes": []
+}
