@@ -6,6 +6,8 @@
 
 Status: ready-for-agent
 
+**Execution goal:** `../goals/09-run-real-provider-live-demo.md`
+
 - [ ] 真实适配器只通过 `ModelGateway` 接入，不让 Provider SDK 类型进入领域模型或 World Runtime。
 - [ ] Base URL、API key、model ID 和模型参数由进程环境提供，并可从未纳入版本控制的本地环境文件加载。
 - [ ] Provider 支持原生 JSON Schema 时使用原生结构化输出；不支持时解析 JSON 文本并使用同一 Pydantic Schema 校验。

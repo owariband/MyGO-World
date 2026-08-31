@@ -1,0 +1,81 @@
+Goal: 完成 ticket 09，在不改变 Fixture 已验证领域语义的前提下接入一个真实 OpenAI-compatible Provider，并完成 Anon × Soyo、真实 MyGO 素材与 WebGAL Render 的显式 Live 验收
+
+Completion criteria:
+- [ ] 真实 Provider 适配器实现现有 `ModelGateway`，Character、Director、Broadcast 与领域契约不导入 Provider SDK 类型。
+- [ ] `MYGO_MODEL_BASE_URL`、`MYGO_MODEL_API_KEY`、`MYGO_MODEL_ID`、结构化输出模式及模型参数均可由进程环境配置。
+- [ ] 可显式指定已被 Git 忽略的本地环境文件；进程环境覆盖文件中的同名值，缺失或非法配置在任何 World 变更和网络请求前返回稳定错误。
+- [ ] API key、Authorization header 和本地环境文件内容不会进入异常、CLI 输出、Generation Trace、OpenTelemetry span 或验收产物。
+- [ ] 全局模型参数经过类型与保留字段校验后用于 Character、Director 和 Broadcast；MVP 不增加第二 Provider 或按 Agent 类型覆盖 Provider/model 的能力。
+- [ ] JSON Schema 模式向 Provider 发送目标 Pydantic 类型的原生 JSON Schema，并用同一类型校验返回值。
+- [ ] JSON 文本模式不发送 Provider 原生 Schema 参数，从常见 Markdown code fence 或纯 JSON 文本中提取单个 JSON 值，并用同一 Pydantic 类型校验。
+- [ ] 两种结构化输出模式均有不访问外网的 HTTP 边界测试，覆盖请求形状、合法响应、畸形响应、4xx、429、5xx、超时及脱敏错误。
+- [ ] `advance` 和 `render` 的真实调用均保持每请求默认 120 秒超时、最多两次传输重试和一次带稳定诊断的语义修复。
+- [ ] `advance` 默认最多 40 次、`render` 默认最多 6 次实际 Provider 请求；初次调用、传输重试及语义修复都计入预算，预算耗尽前不会再发请求。
+- [ ] Character 并发限制继续覆盖真实 Provider 调用，且失败的 Character 调用不会被转换为虚构 `no_op`。
+- [ ] OpenTelemetry 为 `advance`、Generation Wave、Character/Director 调用、`render` 和 Broadcast 调用建立可关联 span，并记录 agent kind/ID、call kind、model ID、尝试次数、结果、耗时及可用的 token 用量。
+- [ ] OpenTelemetry span 不记录 API key、Authorization header、完整 Prompt、原始响应或私有 Memory；无 exporter 配置时 Runtime 仍可正常运行。
+- [ ] 仓库内提供版本化 Live Scenario、Anon/Soyo 独立 Character Skill、Director/Broadcast Skill，以及只引用真实 MyGO 文件的 Asset Manifest；不复制外部 MyGO 素材到仓库。
+- [ ] Live Scenario 为 Anon 与 Soyo 初始化不同的私有 Memory；验收 Trace 证明每个 Character 请求只含自己的 Memory，且不含另一角色的私有内容。
+- [ ] Live Asset Manifest 中的背景、BGM、Anon/Soyo Live2D model、motion 与 expression 均能在 `$WEBGAL_ROOT` 下解析，并通过现有 RenderPlanner/RenderCompiler 的文件和元数据校验。
+- [ ] 提供一个文档化、非交互的显式 Live 验收入口，从不存在的 World ID 走生产 `init → advance --gateway provider → render --gateway provider` 路径；默认 Fixture `demo` 行为保持不变。
+- [ ] Live 验收使用同一全局 Provider/model 配置调用 Anon、Soyo、Director 和 Broadcast，不以 Fixture、手写数据库记录或预制 Broadcast Plan 替代任何模型调用。
+- [ ] Live 验收中 Anon 与 Soyo 至少各有一个通过 Proposal Validator、Director 和 Segment Validator 后提交的有效 Action Proposal，并能从 Ledger 与 Generation Trace 交叉验证。
+- [ ] 目标 Event Session 在不超过默认六个 Generation Wave 内以 `resolved` 自然结束；`limit_reached`、失败 Batch 或仍开放 Session 均使验收非零退出。
+- [ ] Live Broadcast 至少消费一个新 World Event，生成至少一个自包含 Render，并把通过 RenderCompiler 校验的 WebGAL 场景脚本发布到真实 `$WEBGAL_ROOT`。
+- [ ] Live 验收将稳定字段顺序的 CLI Receipt、canonical domain export、完整脱敏 Generation Trace 导出和 Render 元数据写入被 Git 忽略的独立输出目录。
+- [ ] Live Receipt 包含 World ID、Generation Batch ID、最终 World Version、Session 关闭原因、Provider 请求数、Broadcast Run ID，以及每个 Render 的路径与 SHA-256。
+- [ ] 验收程序重新读取每个已发布脚本并验证 SHA-256 与 Receipt/数据库一致，且不会启动 WebGAL 播放器。
+- [ ] Live 测试注册 `live` marker；`uv run pytest` 明确排除它，且在没有 Provider 凭据、环境文件或外部 MyGO 目录时不读取这些输入、不访问网络。
+- [ ] 显式 Live 命令在配置齐全时真实执行而非 skip，并把成功 Receipt 与产物保存到指定目录；配置缺失时预检失败且不创建 World 或发起请求。
+- [ ] 提供基于固定脱敏样例的 Pydantic Evals 入口，报告样例 ID、质量结果、延迟以及 Provider 返回时的 token/成本数据；Eval 分数不替代 Schema、权限、因果、来源、Session 和素材硬校验。
+- [ ] 默认 Fixture 测试证明 ticket 08 的 canonical export、Snapshot checksum、WebGAL 脚本与 Render hash 确定性没有回退。
+- [ ] `uv run pytest` 全部成功退出，且输出证明 `live` 测试未被执行。
+- [ ] `uv run ruff check .` 全部成功退出。
+- [ ] `uv run ruff format --check .` 全部成功退出。
+- [ ] `uv run python -m compileall -q src tests_py` 全部成功退出。
+- [ ] Alembic 只有一个 head；若本 ticket 不需要持久化新字段，则不新增迁移。
+- [ ] `WEBGAL_ROOT=/Users/yyu03/project/dev/MyGO_v3.1.1 npm test` 全部成功退出。
+- [ ] `MYGO_ENV_FILE=.env.local WEBGAL_ROOT=/Users/yyu03/project/dev/MyGO_v3.1.1 uv run pytest -m live tests_py/test_live_provider_demo.py` 使用真实 Provider 成功退出，并满足上述 Live 硬验收。
+- [ ] 只有上述显式 Live 命令成功且验收产物可审计后，ticket 09 才标记为 `resolved`；缺少凭据、Provider 可用性或真实素材时保留为未解决并报告具体阻塞项。
+
+Constraints:
+- 保持 ticket 01–08 已验证的 World、Ledger、Snapshot、Session FIFO、Memory/Skill 隔离、Validator、World Committer、Broadcast frontier、可恢复发布及 Fixture 确定性语义。
+- 默认 `demo`、默认 pytest 和 CI 必须继续完全离线，不读取 Provider 凭据，也不依赖 `/Users/yyu03/project/dev/MyGO_v3.1.1`。
+- Live 模式必须由显式参数或 `live` marker 启用；发现环境变量或 `.env.local` 不得自动触发付费网络调用。
+- 不提交 `.env`、`.env.local`、API key、Authorization header、Live 输出目录、World 数据库或外部 MyGO 素材；只提交 Scenario、Skill、Asset Manifest、代码、测试与文档。
+- Provider 配置只允许影响模型传输和模型参数，不得授予额外感知、Memory、工具、权限或提交能力。
+- 不将 Provider 响应直接写入 World；所有候选继续经过现有 Pydantic Schema、Proposal Validator、Segment Validator 与 World Committer。
+- 不放宽一次语义修复、最多两次传输重试、默认六 Wave、Character 并发限制、请求预算或 Render provenance/素材校验来迁就真实模型。
+- Live 输出不可用精确自然语言 Golden 判断成功；验收只依赖结构、角色有效行动、自然 Session 结束、持久化来源、素材校验、文件存在与内容 hash 等机器可验证条件。
+- OpenTelemetry 默认本地 no-op 或显式 exporter；不得把遥测可用性变成 World 正确性的前置条件。
+- Pydantic Evals 是单独的质量观测入口，不允许以 LLM judge 或主观得分覆盖 Runtime 的确定性硬失败。
+- 生产 Runtime 不调用 Node，不启动 WebGAL 播放器，不实现多 Provider、按 Agent 覆盖模型、工具调用、内部 Agent loop 或玩家输入。
+- 真实 Live 运行是带成本的外部操作；执行前先做无网络预检，严格使用指定预算，并在 Receipt 中报告实际请求数。
+- 当前工作区中的 `skills-lock.json` 属于用户文件，除非用户另行授权，不修改也不纳入提交。
+
+Context:
+- `.scratch/mygo-world-mvp/spec.md`
+- `.scratch/mygo-world-mvp/issues/09-run-real-provider-live-demo.md`
+- `.scratch/mygo-world-mvp/goals/08-deliver-deterministic-fixture-demo.md`
+- `MVP.md`
+- `CONTEXT.md`
+- `docs/adr/0011-separate-character-description-from-assets.md`
+- `docs/adr/0012-pin-generation-provenance.md`
+- `docs/adr/0015-bound-model-repair-and-session-generation.md`
+- `docs/adr/0017-renders-are-segmented-and-traceable.md`
+- `docs/adr/0021-use-an-explicit-model-gateway.md`
+- `docs/adr/0022-validate-before-atomic-world-commit.md`
+- `pyproject.toml`
+- `.gitignore`
+- `src/mygo_world/gateways.py`
+- `src/mygo_world/runtime.py`
+- `src/mygo_world/broadcasting.py`
+- `src/mygo_world/rendering.py`
+- `src/mygo_world/cli.py`
+- `src/mygo_world/demo.py`
+- `src/mygo_world/canonical_export.py`
+- `tests_py/test_generation_wave.py`
+- `tests_py/test_lockstep_batch.py`
+- `tests_py/test_rendering.py`
+- `tests_py/test_fixture_demo.py`
+- `/Users/yyu03/project/dev/MyGO_v3.1.1`
