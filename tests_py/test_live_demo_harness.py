@@ -224,8 +224,12 @@ MYGO_MODEL_PARAMETERS_JSON={{"temperature":0}}
     director_schema = json.dumps(director_request["response_format"])
     assert '"const": "action_proposal"' in director_schema
     director_prompt = director_request["messages"][0]["content"]
-    assert "source_kind` exactly to `action_proposal" in director_prompt
-    assert "copy `actor_id` and `intent_summary` exactly" in director_prompt
+    assert "`source_kind` 必须严格填写为 `action_proposal`" in director_prompt
+    assert "原样复制 `actor_id` 和 `intent_summary`" in director_prompt
+    system_prompts = [item["messages"][0]["content"] for item in request_bodies]
+    assert any("你是排练前身处 RiNG 的千早爱音" in item for item in system_prompts)
+    assert any("你是排练前身处 RiNG 的长崎素世" in item for item in system_prompts)
+    assert any("将已提交的事件编排成一个简洁" in item for item in system_prompts)
     assert receipt["session_closure_reason"] == "resolved"
     serialized = (output_dir / "generation-traces.json").read_text(encoding="utf-8")
     assert "offline-test-secret" not in serialized

@@ -1,54 +1,54 @@
 schema_version: 1
 seed_id: mygo-anon-soyo-live
-version: 1.0.0
-name: Anon and Soyo Live Provider Acceptance
+version: 1.1.0
+name: 爱音与素世真实 Provider 验收
 world_time_ms: 0
 calendar_anchor: "2026-08-31T17:00:00+08:00"
 skill_bindings:
   characters:
     character-anon:
       skill_id: mygo.character.anon-live
-      version: 1.0.0
+      version: 1.1.0
     character-soyo:
       skill_id: mygo.character.soyo-live
-      version: 1.0.0
+      version: 1.1.0
   director:
     skill_id: mygo.director.live
-    version: 1.0.1
+    version: 1.1.0
   broadcast:
     skill_id: mygo.broadcast.live
-    version: 1.0.0
+    version: 1.1.0
 entities:
   - entity_type: location
     entity_id: location-ring-lounge
-    name: RiNG Lounge
+    name: RiNG 休息室
     scopes:
       - scope_key: lounge
-        name: Lounge before rehearsal
+        name: 排练前的休息室
         reachable_destinations: []
     state:
-      description: The quiet RiNG lounge shortly before MyGO rehearsal.
+      description: MyGO 排练开始前，安静的 RiNG 休息室。
   - entity_type: object
     entity_id: object-set-list
-    name: Rehearsal set list
+    name: 排练曲目单
     location_id: location-ring-lounge
     scope_key: lounge
     state:
-      status: awaiting confirmation
+      status: 等待确认
   - entity_type: character
     entity_id: character-anon
-    name: Chihaya Anon
+    name: 千早爱音
     location_id: location-ring-lounge
     scope_key: lounge
     state:
-      mood: eager
+      mood: 兴致勃勃
   - entity_type: character
     entity_id: character-soyo
-    name: Nagasaki Soyo
+    name: 长崎素世
     location_id: location-ring-lounge
     scope_key: lounge
     state:
-      mood: composed
+      mood: 从容
 sessions:
   - session_id: session-live-set-list
     location_id: location-ring-lounge
@@ -60,7 +60,7 @@ memories:
   - memory_id: memory-live-anon-private
     agent_id: character-anon
     memory_type: belief
-    content: "PRIVATE_ANON: Anon hopes Soyo will openly approve her opening-song idea."
+    content: "PRIVATE_ANON：爱音希望素世能明确赞同她提出的开场曲想法。"
     entity_tags:
       - character-soyo
     location_tags:
@@ -69,7 +69,7 @@ memories:
   - memory_id: memory-live-soyo-private
     agent_id: character-soyo
     memory_type: belief
-    content: "PRIVATE_SOYO: Soyo privately wants a calm opening that protects the ensemble balance."
+    content: "PRIVATE_SOYO：素世私下希望用一首平稳的曲目开场，以维持乐队整体的平衡。"
     entity_tags:
       - character-anon
     location_tags:
