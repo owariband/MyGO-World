@@ -1,0 +1,77 @@
+schema_version: 1
+seed_id: mygo-anon-soyo-live
+version: 1.0.0
+name: Anon and Soyo Live Provider Acceptance
+world_time_ms: 0
+calendar_anchor: "2026-08-31T17:00:00+08:00"
+skill_bindings:
+  characters:
+    character-anon:
+      skill_id: mygo.character.anon-live
+      version: 1.0.0
+    character-soyo:
+      skill_id: mygo.character.soyo-live
+      version: 1.0.0
+  director:
+    skill_id: mygo.director.live
+    version: 1.0.0
+  broadcast:
+    skill_id: mygo.broadcast.live
+    version: 1.0.0
+entities:
+  - entity_type: location
+    entity_id: location-ring-lounge
+    name: RiNG Lounge
+    scopes:
+      - scope_key: lounge
+        name: Lounge before rehearsal
+        reachable_destinations: []
+    state:
+      description: The quiet RiNG lounge shortly before MyGO rehearsal.
+  - entity_type: object
+    entity_id: object-set-list
+    name: Rehearsal set list
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      status: awaiting confirmation
+  - entity_type: character
+    entity_id: character-anon
+    name: Chihaya Anon
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: eager
+  - entity_type: character
+    entity_id: character-soyo
+    name: Nagasaki Soyo
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: composed
+sessions:
+  - session_id: session-live-set-list
+    location_id: location-ring-lounge
+    scope_key: lounge
+    participant_ids:
+      - character-anon
+      - character-soyo
+memories:
+  - memory_id: memory-live-anon-private
+    agent_id: character-anon
+    memory_type: belief
+    content: "PRIVATE_ANON: Anon hopes Soyo will openly approve her opening-song idea."
+    entity_tags:
+      - character-soyo
+    location_tags:
+      - location-ring-lounge
+    importance: 4
+  - memory_id: memory-live-soyo-private
+    agent_id: character-soyo
+    memory_type: belief
+    content: "PRIVATE_SOYO: Soyo privately wants a calm opening that protects the ensemble balance."
+    entity_tags:
+      - character-anon
+    location_tags:
+      - location-ring-lounge
+    importance: 4

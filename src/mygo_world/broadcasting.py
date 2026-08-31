@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,10 @@ from mygo_world.gateways import (
     FixtureGateway,
     ModelGateway,
     ModelGeneration,
+    ModelOutputInvalidError,
     ModelRequest,
+    ModelRequestRejectedError,
+    ModelTransportError,
     OpenAICompatibleGateway,
 )
 from mygo_world.rendering import (
@@ -50,7 +54,76 @@ from mygo_world.rendering import (
 )
 from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
 from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
+from mygo_world.telemetry import model_call_span, record_generation, traced_operation
 from mygo_world.worlds import WorldPaths, mutation_lock, validate_world_id
+
+DEFAULT_RENDER_REQUEST_BUDGET = 6
+DEFAULT_TRANSPORT_RETRIES = 2
+
+
+@dataclass
+class _RequestBudget:
+    limit: int
+    used: int = 0
+
+    def consume(self) -> None:
+        if self.used >= self.limit:
+            raise WorldError(
+                "REQUEST_BUDGET_EXHAUSTED",
+                f"Provider request budget of {self.limit} was exhausted",
+            )
+        self.used += 1
+
+
+def _gateway_model_config(gateway: ModelGateway) -> dict[str, Any]:
+    configured = getattr(gateway, "model_parameters", None)
+    return dict(configured) if isinstance(configured, dict) else {"temperature": 0}
+
+
+def _call_gateway(
+    gateway: ModelGateway,
+    request: ModelRequest,
+    *,
+    budget: _RequestBudget,
+    retries: int,
+) -> ModelGeneration[BroadcastPlan]:
+    last_error: BaseException | None = None
+    for attempt in range(retries + 1):
+        try:
+            budget.consume()
+            with model_call_span(request, attempt + 1) as span:
+                generation = gateway.generate(request, BroadcastPlan)
+                record_generation(span, generation)
+                return replace(generation, transport_attempts=attempt + 1)
+        except ModelRequestRejectedError as exc:
+            raise WorldError("MODEL_REQUEST_REJECTED", str(exc)) from exc
+        except (ModelTransportError, TimeoutError, ConnectionError, OSError) as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+    assert last_error is not None
+    raise WorldError(
+        "MODEL_TRANSPORT_FAILED",
+        f"Provider request failed after {retries + 1} attempts: "
+        f"{type(last_error).__name__}",
+    ) from last_error
+
+
+def _repair_request(request: ModelRequest, diagnostic: dict[str, Any]) -> ModelRequest:
+    payload = dict(request.input_payload)
+    payload["repair"] = diagnostic
+    return ModelRequest(
+        agent_type=request.agent_type,
+        agent_id=request.agent_id,
+        call_kind="broadcast_plan_repair",
+        model_id=request.model_id,
+        skill_id=request.skill_id,
+        skill_version=request.skill_version,
+        skill_content_hash=request.skill_content_hash,
+        input_payload=payload,
+        model_config=request.model_config,
+        skill_body=request.skill_body,
+    )
 
 
 def _broadcast_event(row: WorldEventRow) -> BroadcastEvent:
@@ -212,6 +285,13 @@ def _trace_record(
     validation: dict[str, Any],
 ) -> GenerationTraceRecord:
     request = generation.request
+    trace_validation = dict(validation)
+    if generation.usage is not None or generation.latency_ms is not None:
+        trace_validation["provider"] = {
+            "usage": generation.usage,
+            "latency_ms": generation.latency_ms,
+            "transport_attempts": generation.transport_attempts,
+        }
     return GenerationTraceRecord(
         trace_id=trace_id,
         world_id=world_id,
@@ -228,10 +308,49 @@ def _trace_record(
         request=request.trace_payload(),
         raw_response=generation.raw_response,
         structured_result=generation.structured.model_dump(mode="json"),
-        validation=validation,
+        validation=trace_validation,
     )
 
 
+def _invalid_trace_record(
+    *,
+    trace_id: str,
+    world_id: str,
+    error: ModelOutputInvalidError,
+    attempt: int,
+) -> GenerationTraceRecord:
+    request = error.request
+    return GenerationTraceRecord(
+        trace_id=trace_id,
+        world_id=world_id,
+        input_world_version=int(request.input_payload["world_version"]),
+        session_id="broadcast",
+        agent_type=request.agent_type,
+        agent_id=request.agent_id,
+        call_kind=request.call_kind,
+        skill_id=request.skill_id,
+        skill_version=request.skill_version,
+        skill_content_hash=request.skill_content_hash,
+        model_id=request.model_id,
+        model_config=request.model_config,
+        request=request.trace_payload(),
+        raw_response=error.raw_response,
+        structured_result={},
+        validation={
+            "ok": False,
+            "attempt": attempt,
+            "diagnostics": [
+                {
+                    "code": "MODEL_SCHEMA_INVALID",
+                    "path": "$",
+                    "message": error.diagnostic,
+                }
+            ],
+        },
+    )
+
+
+@traced_operation("mygo.render")
 def render_world(
     world_id: str,
     worlds_dir: Path,
@@ -249,8 +368,26 @@ def render_world(
     id_generator: IdGenerator = uuid4_id,
     failure_injector: Callable[[str], None] | None = None,
     skills_dir: Path = DEFAULT_SKILLS_DIR,
+    request_budget: int = DEFAULT_RENDER_REQUEST_BUDGET,
+    transport_retries: int = DEFAULT_TRANSPORT_RETRIES,
+    env_file: Path | None = None,
 ) -> dict[str, Any]:
     validate_world_id(world_id)
+    if request_budget < 1:
+        raise WorldError("REQUEST_BUDGET_INVALID", "request_budget must be positive")
+    if transport_retries < 0 or transport_retries > 2:
+        raise WorldError(
+            "TRANSPORT_RETRIES_INVALID",
+            "transport_retries must be between zero and two",
+        )
+    if gateway_kind not in {"fixture", "provider"}:
+        raise WorldError("GATEWAY_INVALID", f"Unknown gateway '{gateway_kind}'")
+    if gateway is None and gateway_kind == "provider":
+        try:
+            gateway = OpenAICompatibleGateway.from_environment(env_file=env_file)
+        except ValueError as exc:
+            raise WorldError("GATEWAY_CONFIGURATION_INVALID", str(exc)) from exc
+    budget = _RequestBudget(request_budget)
     paths = WorldPaths(worlds_dir, world_id)
     if not paths.database.is_file():
         raise WorldNotFoundError(world_id)
@@ -322,13 +459,6 @@ def render_world(
                             )
                         }
                     )
-                elif gateway_kind == "provider":
-                    try:
-                        gateway = OpenAICompatibleGateway.from_environment()
-                    except ValueError as exc:
-                        raise WorldError(
-                            "GATEWAY_CONFIGURATION_INVALID", str(exc)
-                        ) from exc
                 else:
                     raise WorldError(
                         "GATEWAY_INVALID", f"Unknown gateway '{gateway_kind}'"
@@ -349,54 +479,97 @@ def render_world(
                     "events": [event.model_dump(mode="json") for event in events],
                     "asset_candidates": _asset_candidates(manifest),
                 },
-                model_config={"temperature": 0},
+                model_config=_gateway_model_config(gateway),
                 skill_body=broadcast_skill.body,
             )
-            generation = gateway.generate(request, BroadcastPlan)
-            trace_id = id_generator()
-            try:
-                jobs = (planner or RenderPlanner()).plan(
-                    generation.structured,
-                    world_id=world_id,
-                    target_world_version=target,
-                    events=events,
-                    frontier_event_ids={event.event_id for event in frontier},
-                    manifest=manifest,
-                    webgal_root=webgal_root,
-                )
-            except RenderPlanInvalid as exc:
-                WorldCommitter(
-                    engine, clock=clock, id_generator=id_generator
-                ).record_generation_traces(
-                    [
+            trace_records: list[GenerationTraceRecord] = []
+            current_request = request
+            jobs = None
+            generation = None
+            for semantic_attempt in (1, 2):
+                try:
+                    generation = _call_gateway(
+                        gateway,
+                        current_request,
+                        budget=budget,
+                        retries=transport_retries,
+                    )
+                except ModelOutputInvalidError as exc:
+                    trace_records.append(
+                        _invalid_trace_record(
+                            trace_id=id_generator(),
+                            world_id=world_id,
+                            error=exc,
+                            attempt=semantic_attempt,
+                        )
+                    )
+                    if semantic_attempt == 2:
+                        WorldCommitter(
+                            engine, clock=clock, id_generator=id_generator
+                        ).record_generation_traces(trace_records)
+                        raise WorldError(
+                            "MODEL_SCHEMA_INVALID",
+                            "Broadcast returned invalid structured output",
+                        ) from exc
+                    current_request = _repair_request(
+                        request,
+                        {
+                            "code": "MODEL_SCHEMA_INVALID",
+                            "message": exc.diagnostic,
+                        },
+                    )
+                    continue
+                trace_id = id_generator()
+                try:
+                    jobs = (planner or RenderPlanner()).plan(
+                        generation.structured,
+                        world_id=world_id,
+                        target_world_version=target,
+                        events=events,
+                        frontier_event_ids={event.event_id for event in frontier},
+                        manifest=manifest,
+                        webgal_root=webgal_root,
+                    )
+                except RenderPlanInvalid as exc:
+                    diagnostic = {
+                        "ok": False,
+                        "attempt": semantic_attempt,
+                        "diagnostics": [
+                            item.model_dump(mode="json") for item in exc.diagnostics
+                        ],
+                    }
+                    trace_records.append(
                         _trace_record(
                             trace_id=trace_id,
                             world_id=world_id,
                             generation=generation,
-                            validation={
-                                "ok": False,
-                                "diagnostics": [
-                                    item.model_dump(mode="json")
-                                    for item in exc.diagnostics
-                                ],
-                            },
+                            validation=diagnostic,
                         )
-                    ]
-                )
-                raise
-
-            WorldCommitter(
-                engine, clock=clock, id_generator=id_generator
-            ).record_generation_traces(
-                [
+                    )
+                    if semantic_attempt == 2:
+                        WorldCommitter(
+                            engine, clock=clock, id_generator=id_generator
+                        ).record_generation_traces(trace_records)
+                        raise
+                    current_request = _repair_request(request, diagnostic)
+                    continue
+                trace_records.append(
                     _trace_record(
                         trace_id=trace_id,
                         world_id=world_id,
                         generation=generation,
-                        validation={"ok": True, "diagnostics": []},
+                        validation={
+                            "ok": True,
+                            "attempt": semantic_attempt,
+                            "diagnostics": [],
+                        },
                     )
-                ]
-            )
+                )
+                break
+            assert generation is not None and jobs is not None
+            WorldCommitter(
+                engine, clock=clock, id_generator=id_generator
+            ).record_generation_traces(trace_records)
             compiled = [(compiler or RenderCompiler()).compile(job) for job in jobs]
             publisher = render_gateway or RenderGateway()
             published: list[tuple[CompiledRender, Path, bool]] = []
@@ -509,7 +682,7 @@ def render_world(
                     }
                     for item, scene_path, reused in published
                 ],
-                "model_call_count": 1,
+                "model_call_count": budget.used,
                 "gateway": gateway_kind,
                 "network_request_count": getattr(
                     gateway, "network_request_count", None

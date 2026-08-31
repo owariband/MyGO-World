@@ -41,6 +41,63 @@ def load_asset_manifest(path: Path) -> AssetManifest:
         raise WorldError("ASSET_MANIFEST_INVALID", details) from exc
 
 
+def validate_asset_manifest_files(manifest: AssetManifest, webgal_root: Path) -> None:
+    """Validate every whitelisted Live asset before a paid Provider call."""
+
+    planner = RenderPlanner()
+    diagnostics: list[ValidationDiagnostic] = []
+    for index, entry in enumerate(manifest.backgrounds):
+        planner._asset_path(
+            entry,
+            asset_id=entry.asset_id,
+            category="background",
+            webgal_root=webgal_root,
+            path=f"backgrounds.{index}",
+            diagnostics=diagnostics,
+        )
+    for index, entry in enumerate(manifest.bgms):
+        planner._asset_path(
+            entry,
+            asset_id=entry.asset_id,
+            category="bgm",
+            webgal_root=webgal_root,
+            path=f"bgms.{index}",
+            diagnostics=diagnostics,
+        )
+    for index, model in enumerate(manifest.live2d_models):
+        planner._validate_model_capabilities(
+            model,
+            motion=None,
+            expression=None,
+            entrance_effect=None,
+            webgal_root=webgal_root,
+            path=f"live2d_models.{index}",
+            diagnostics=diagnostics,
+        )
+        for motion in model.motions:
+            planner._validate_model_capabilities(
+                model,
+                motion=motion,
+                expression=None,
+                entrance_effect=None,
+                webgal_root=webgal_root,
+                path=f"live2d_models.{index}",
+                diagnostics=diagnostics,
+            )
+        for expression in model.expressions:
+            planner._validate_model_capabilities(
+                model,
+                motion=None,
+                expression=expression,
+                entrance_effect=None,
+                webgal_root=webgal_root,
+                path=f"live2d_models.{index}",
+                diagnostics=diagnostics,
+            )
+    if diagnostics:
+        raise RenderPlanInvalid(diagnostics)
+
+
 class RenderPlanInvalid(WorldError):
     def __init__(self, diagnostics: list[ValidationDiagnostic]) -> None:
         self.diagnostics = tuple(diagnostics)

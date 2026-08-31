@@ -5,7 +5,10 @@ description = "Durable generative world runtime for MyGO"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "alembic>=1.16,<2",
+  "opentelemetry-api>=1.36,<2",
+  "opentelemetry-sdk>=1.36,<2",
   "pydantic>=2.11,<3",
+  "pydantic-evals>=1.0,<2",
   "pyyaml>=6.0,<7",
   "sqlalchemy>=2.0,<3",
 ]
@@ -27,5 +30,8 @@ build-backend = "hatchling.build"
 packages = ["src/mygo_world"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q -m 'not live'"
 testpaths = ["tests_py"]
+markers = [
+  "live: explicit paid tests that require Provider credentials and external MyGO assets",
+]

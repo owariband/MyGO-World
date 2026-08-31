@@ -1,0 +1,53 @@
+schema_version: 1
+dataset_id: mygo-provider-quality-v1
+samples:
+  - sample_id: anon-visible-object-action
+    character_id: character-anon
+    skill_body: >-
+      Propose one concise interact action targeting object-set-list. Copy all
+      identity and version fields from the PerceptionFrame. Return only the
+      requested structured object and do not add Memory changes.
+    perception_frame:
+      schema_version: 1
+      world_id: eval-world
+      world_version: 1
+      world_time_ms: 0
+      session_id: eval-session
+      character_id: character-anon
+      location_id: location-ring-lounge
+      scope_key: lounge
+      participant_ids: [character-anon, character-soyo]
+      visible_entities:
+        - entity_id: object-set-list
+          entity_type: object
+          name: Rehearsal set list
+          location_id: location-ring-lounge
+          scope_key: lounge
+          state: {status: awaiting confirmation}
+      reachable_destinations: []
+      memories: []
+  - sample_id: soyo-visible-object-action
+    character_id: character-soyo
+    skill_body: >-
+      Propose one concise interact action targeting object-set-list. Copy all
+      identity and version fields from the PerceptionFrame. Return only the
+      requested structured object and do not add Memory changes.
+    perception_frame:
+      schema_version: 1
+      world_id: eval-world
+      world_version: 1
+      world_time_ms: 0
+      session_id: eval-session
+      character_id: character-soyo
+      location_id: location-ring-lounge
+      scope_key: lounge
+      participant_ids: [character-anon, character-soyo]
+      visible_entities:
+        - entity_id: object-set-list
+          entity_type: object
+          name: Rehearsal set list
+          location_id: location-ring-lounge
+          scope_key: lounge
+          state: {status: awaiting confirmation}
+      reachable_destinations: []
+      memories: []

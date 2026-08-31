@@ -1,0 +1,34 @@
+schema_version: 1
+manifest_id: mygo-live-assets
+version: 1.0.0
+backgrounds:
+  - asset_id: background-ring-lounge
+    path: 演出、排练/其他演出场地/演出厅休息室.png
+bgms:
+  - asset_id: bgm-mygo-title
+    path: s_Title.mp3
+live2d_models:
+  - asset_id: model-anon-live
+    character_id: character-anon
+    display_name: 千早爱音
+    path: anon/live_default/model.json
+    motions:
+      - anon/idle01
+      - anon/smile01
+    expressions:
+      - anon/default
+      - anon/smile01
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-soyo-live
+    character_id: character-soyo
+    display_name: 长崎素世
+    path: soyo/live_default/model.json
+    motions:
+      - anon/idle01
+      - anon/smile01
+    expressions:
+      - anon/default
+      - anon/smile01
+    entrance_effects:
+      - fadeIn

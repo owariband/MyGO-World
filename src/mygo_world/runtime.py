@@ -6,7 +6,7 @@ import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,13 @@ from mygo_world.memory import AgentMemoryRepository
 from mygo_world.perception import PerceptionProjector
 from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
 from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
+from mygo_world.telemetry import (
+    finish_wave_span,
+    model_call_span,
+    record_generation,
+    start_wave_span,
+    traced_operation,
+)
 from mygo_world.validators import ProposalValidator, SegmentValidator
 from mygo_world.worlds import WorldPaths, mutation_lock, validate_world_id
 
@@ -65,6 +72,11 @@ DEFAULT_CHARACTER_CONCURRENCY = 4
 DEFAULT_MAX_WAVES = 6
 
 _GLOBAL_CHARACTER_SEMAPHORE = threading.BoundedSemaphore(DEFAULT_CHARACTER_CONCURRENCY)
+
+
+def _gateway_model_config(gateway: ModelGateway) -> dict[str, Any]:
+    configured = getattr(gateway, "model_parameters", None)
+    return dict(configured) if isinstance(configured, dict) else {"temperature": 0}
 
 
 def _default_fixture_responses(
@@ -194,6 +206,13 @@ def _trace_record(
     validation: dict[str, Any],
 ) -> GenerationTraceRecord:
     request = generation.request
+    trace_validation = dict(validation)
+    if generation.usage is not None or generation.latency_ms is not None:
+        trace_validation["provider"] = {
+            "usage": generation.usage,
+            "latency_ms": generation.latency_ms,
+            "transport_attempts": generation.transport_attempts,
+        }
     return GenerationTraceRecord(
         trace_id=trace_id,
         world_id=world_id,
@@ -210,7 +229,7 @@ def _trace_record(
         request=request.trace_payload(),
         raw_response=generation.raw_response,
         structured_result=generation.structured.model_dump(mode="json"),
-        validation=validation,
+        validation=trace_validation,
     )
 
 
@@ -309,14 +328,20 @@ def _call_gateway[ResponseT: BaseModel](
         try:
             if semaphore is None:
                 budget.consume()
-                return gateway.generate(request, response_type)
+                with model_call_span(request, attempt + 1) as span:
+                    generation = gateway.generate(request, response_type)
+                    record_generation(span, generation)
+                    return replace(generation, transport_attempts=attempt + 1)
             with semaphore:
                 if cancellation_event.is_set():
                     raise WorldError(
                         "BATCH_CANCELLED", "Generation Batch was cancelled"
                     )
                 budget.consume()
-                return gateway.generate(request, response_type)
+                with model_call_span(request, attempt + 1) as span:
+                    generation = gateway.generate(request, response_type)
+                    record_generation(span, generation)
+                    return replace(generation, transport_attempts=attempt + 1)
         except ModelRequestRejectedError as exc:
             raise WorldError("MODEL_REQUEST_REJECTED", str(exc)) from exc
         except (ModelTransportError, TimeoutError, ConnectionError, OSError) as exc:
@@ -612,6 +637,13 @@ def _start_wave(
                 updated_at=now,
             )
         )
+    start_wave_span(
+        wave_id,
+        run_id=run_id,
+        session_id=session_id,
+        wave_number=wave_number,
+        world_version=version,
+    )
 
 
 def _finish_wave(
@@ -630,6 +662,7 @@ def _finish_wave(
             wave.end_world_version = end_version
             wave.error_code = error_code
             wave.updated_at = _timestamp(clock)
+    finish_wave_span(wave_id, result=status)
 
 
 def _finish_batch(
@@ -843,6 +876,7 @@ def _cancel_on_signals(cancel: threading.Event) -> Iterator[None]:
             signal.signal(item, handler)
 
 
+@traced_operation("mygo.advance")
 def advance_world(
     world_id: str,
     worlds_dir: Path,
@@ -859,6 +893,7 @@ def advance_world(
     id_generator: IdGenerator = uuid4_id,
     failure_injector: Any | None = None,
     skills_dir: Path = DEFAULT_SKILLS_DIR,
+    env_file: Path | None = None,
 ) -> dict[str, Any]:
     validate_world_id(world_id)
     if max_waves < 1:
@@ -875,6 +910,16 @@ def advance_world(
             "TRANSPORT_RETRIES_INVALID",
             "transport_retries must be between zero and two",
         )
+    if gateway_kind not in {"fixture", "provider"}:
+        raise WorldError("GATEWAY_INVALID", f"Unknown gateway '{gateway_kind}'")
+    selected_gateway = gateway
+    if selected_gateway is None and gateway_kind == "provider":
+        try:
+            selected_gateway = OpenAICompatibleGateway.from_environment(
+                env_file=env_file
+            )
+        except ValueError as exc:
+            raise WorldError("GATEWAY_CONFIGURATION_INVALID", str(exc)) from exc
 
     paths = WorldPaths(worlds_dir, world_id)
     if not paths.database.is_file():
@@ -887,7 +932,6 @@ def advance_world(
     active_wave_id: str | None = None
     last_result: Any | None = None
     using_builtin_fixture = gateway is None and gateway_kind == "fixture"
-    selected_gateway = gateway
 
     with mutation_lock(paths.mutation_lock), _cancel_on_signals(cancel):
         engine = create_world_engine(paths.database)
@@ -969,15 +1013,6 @@ def advance_world(
                                     participant_ids=participant_ids,
                                 )
                             )
-                        elif gateway_kind == "provider":
-                            try:
-                                selected_gateway = (
-                                    OpenAICompatibleGateway.from_environment()
-                                )
-                            except ValueError as exc:
-                                raise WorldError(
-                                    "GATEWAY_CONFIGURATION_INVALID", str(exc)
-                                ) from exc
                         else:
                             raise WorldError(
                                 "GATEWAY_INVALID", f"Unknown gateway '{gateway_kind}'"
@@ -1021,7 +1056,7 @@ def advance_world(
                                     "wave_number": wave_number,
                                     "perception_frame": frame.model_dump(mode="json"),
                                 },
-                                model_config={"temperature": 0},
+                                model_config=_gateway_model_config(selected_gateway),
                                 skill_body=skill.body,
                             )
                             futures[
@@ -1136,7 +1171,7 @@ def advance_world(
                                 item.model_dump(mode="json") for item in proposals
                             ],
                         },
-                        model_config={"temperature": 0},
+                        model_config=_gateway_model_config(selected_gateway),
                         skill_body=director_skill.body,
                     )
                     try:

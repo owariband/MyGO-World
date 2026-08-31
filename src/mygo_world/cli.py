@@ -10,6 +10,8 @@ from typing import Any
 from mygo_world.broadcasting import render_world
 from mygo_world.demo import DEFAULT_FIXTURE_VERSION, fixture_root, run_demo
 from mygo_world.errors import WorldError
+from mygo_world.evals import run_provider_evals
+from mygo_world.live_demo import run_live_demo
 from mygo_world.runtime import advance_world
 from mygo_world.skill_bindings import bind_character_skill
 from mygo_world.skills import DEFAULT_SKILLS_DIR
@@ -45,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     advance_parser.add_argument("--max-waves", type=int, default=6)
     advance_parser.add_argument("--request-budget", type=int, default=40)
     advance_parser.add_argument("--character-concurrency", type=int, default=4)
+    advance_parser.add_argument("--env-file", type=Path)
     advance_parser.add_argument("--json", action="store_true", dest="as_json")
 
     render_parser = subparsers.add_parser(
@@ -62,7 +65,25 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument(
         "--gateway", choices=("fixture", "provider"), default="fixture"
     )
+    render_parser.add_argument("--request-budget", type=int, default=6)
+    render_parser.add_argument("--env-file", type=Path)
     render_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    live_parser = subparsers.add_parser(
+        "live-demo", help="run the explicit paid Provider acceptance demo"
+    )
+    live_parser.add_argument("--world-id", required=True)
+    live_parser.add_argument("--output-dir", type=Path, default=Path(".mygo/live"))
+    live_parser.add_argument("--webgal-root", type=Path)
+    live_parser.add_argument("--env-file", type=Path)
+    live_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    eval_parser = subparsers.add_parser(
+        "eval-provider", help="run fixed, non-authoritative Provider quality Evals"
+    )
+    eval_parser.add_argument("--dataset", type=Path)
+    eval_parser.add_argument("--env-file", type=Path)
+    eval_parser.add_argument("--json", action="store_true", dest="as_json")
 
     demo_parser = subparsers.add_parser(
         "demo", help="run the deterministic, offline Fixture MVP Demo"
@@ -134,6 +155,18 @@ def _human_success(receipt: dict[str, Any]) -> str:
             f"{receipt['target_world_version']}; Broadcast Runs "
             f"{', '.join(receipt['broadcast_run_ids'])}; renders: {artifacts}"
         )
+    if receipt["command"] == "live-demo":
+        return (
+            f"Live demo {receipt['world_id']} resolved at version "
+            f"{receipt['final_world_version']} with "
+            f"{receipt['provider_request_count']} Provider requests and "
+            f"{len(receipt['renders'])} verified Render(s)"
+        )
+    if receipt["command"] == "eval-provider":
+        return (
+            f"Evaluated {receipt['sample_count']} fixed Provider sample(s): "
+            f"{receipt['status']}"
+        )
     return (
         f"Advanced World {receipt['world_id']} from version "
         f"{receipt['start_world_version']} to {receipt['end_world_version']} "
@@ -175,6 +208,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 request_budget=args.request_budget,
                 max_character_concurrency=args.character_concurrency,
                 skills_dir=args.skills_dir,
+                env_file=args.env_file,
             )
         elif args.command == "render":
             receipt = render_world(
@@ -186,6 +220,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                 artifact_root=args.artifact_root,
                 gateway_kind=args.gateway,
                 skills_dir=args.skills_dir,
+                request_budget=args.request_budget,
+                env_file=args.env_file,
             )
         elif args.command == "demo":
             output_dir = args.output_dir
@@ -200,6 +236,18 @@ def run(argv: Sequence[str] | None = None) -> int:
                 ),
                 fixture_dir=args.fixture_dir or fixture_root(args.fixture_version),
             )
+        elif args.command == "live-demo":
+            receipt = run_live_demo(
+                args.world_id,
+                output_dir=args.output_dir,
+                webgal_root=args.webgal_root,
+                env_file=args.env_file,
+            )
+        elif args.command == "eval-provider":
+            options = {"env_file": args.env_file}
+            if args.dataset is not None:
+                options["dataset_path"] = args.dataset
+            receipt = run_provider_evals(**options)
         else:
             receipt = bind_character_skill(
                 args.world_id,
