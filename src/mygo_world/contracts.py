@@ -556,6 +556,7 @@ class BroadcastEvent(StrictModel):
     event_id: str = Field(min_length=1)
     event_order: int = Field(ge=1)
     world_version: int = Field(ge=1)
+    session_id: str | None = None
     event_type: str = Field(min_length=1)
     actor_id: str | None = None
     start_time_ms: int = Field(ge=0)

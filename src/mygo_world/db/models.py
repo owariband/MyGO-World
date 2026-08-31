@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -246,7 +253,11 @@ class BroadcastRunRow(Base):
 
 class RenderRow(Base):
     __tablename__ = "renders"
-    __table_args__ = (UniqueConstraint("world_id", "render_id"),)
+    __table_args__ = (
+        UniqueConstraint("world_id", "render_id"),
+        UniqueConstraint("run_id", "render_order"),
+        CheckConstraint("render_order > 0", name="ck_render_order_positive"),
+    )
 
     render_record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     world_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -266,6 +277,17 @@ class RenderRow(Base):
 
 class BroadcastDispositionRow(Base):
     __tablename__ = "broadcast_dispositions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('included', 'omitted')", name="ck_broadcast_status"
+        ),
+        CheckConstraint(
+            "(status = 'included' AND reason IS NULL) OR "
+            "(status = 'omitted' AND reason IS NOT NULL "
+            "AND length(trim(reason)) > 0)",
+            name="ck_broadcast_reason",
+        ),
+    )
 
     event_id: Mapped[str] = mapped_column(
         ForeignKey("world_events.event_id"), primary_key=True

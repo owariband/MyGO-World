@@ -66,7 +66,7 @@ def test_init_atomically_materializes_genesis_world(worlds_dir: Path) -> None:
         "agent_memory_records": 1,
     }
     assert segment_type == "genesis"
-    assert schema_revision == "0006_session_lineages"
+    assert schema_revision == "0007_recoverable_rendering"
 
 
 def test_init_uses_injected_clock_and_domain_ids(worlds_dir: Path) -> None:

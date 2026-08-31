@@ -59,6 +59,7 @@ def _broadcast_event(row: WorldEventRow) -> BroadcastEvent:
         event_id=row.event_id,
         event_order=row.event_order,
         world_version=row.world_version,
+        session_id=row.session_id,
         event_type=row.event_type,
         actor_id=payload.get("actor_id"),
         start_time_ms=row.start_time_ms,
@@ -253,21 +254,12 @@ def render_world(
     paths = WorldPaths(worlds_dir, world_id)
     if not paths.database.is_file():
         raise WorldNotFoundError(world_id)
-    manifest = load_asset_manifest(asset_manifest_path)
     inject = failure_injector or (lambda _stage: None)
 
     with mutation_lock(paths.render_lock):
         engine = create_world_engine(paths.database)
         try:
             require_current_schema(paths.database, engine)
-            bindings = load_effective_skills(
-                engine,
-                world_id=world_id,
-                catalog=RuntimeSkillCatalog.load(skills_dir),
-            )
-            broadcast_skill = require_effective_skill(
-                bindings, "broadcast", "global-broadcast"
-            )
             with Session(engine) as session:
                 world = session.get(WorldRow, world_id)
                 if world is None:
@@ -307,6 +299,16 @@ def render_world(
                     "model_call_count": 0,
                     "render_count": 0,
                 }
+
+            manifest = load_asset_manifest(asset_manifest_path)
+            bindings = load_effective_skills(
+                engine,
+                world_id=world_id,
+                catalog=RuntimeSkillCatalog.load(skills_dir),
+            )
+            broadcast_skill = require_effective_skill(
+                bindings, "broadcast", "global-broadcast"
+            )
 
             if gateway is None:
                 if gateway_kind == "fixture":
