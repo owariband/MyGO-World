@@ -182,8 +182,19 @@ def initialize_world(
     return receipt
 
 
-def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
+def show_world(
+    world_id: str,
+    worlds_dir: Path,
+    *,
+    memory_agent_id: str | None = None,
+    memory_namespace: str | None = None,
+) -> dict[str, Any]:
     validate_world_id(world_id)
+    if (memory_agent_id is None) != (memory_namespace is None):
+        raise WorldError(
+            "MEMORY_SCOPE_INVALID",
+            "Memory reads require both an agent ID and a namespace",
+        )
     paths = WorldPaths(worlds_dir, world_id)
     if not paths.database.is_file():
         raise WorldNotFoundError(world_id)
@@ -216,24 +227,20 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                     select(WorldEventRow).order_by(WorldEventRow.event_order)
                 )
             )
-            observations = list(
-                session.scalars(
-                    select(AgentMemoryRow)
-                    .where(AgentMemoryRow.memory_type == "observation")
-                    .order_by(AgentMemoryRow.memory_id)
-                )
-            )
-            memories = list(
-                session.scalars(
-                    select(AgentMemoryRow).order_by(
-                        AgentMemoryRow.agent_id,
-                        AgentMemoryRow.namespace,
-                        AgentMemoryRow.memory_id,
+            memories: list[AgentMemoryRow] = []
+            if memory_agent_id is not None and memory_namespace is not None:
+                memories = list(
+                    session.scalars(
+                        select(AgentMemoryRow)
+                        .where(
+                            AgentMemoryRow.agent_id == memory_agent_id,
+                            AgentMemoryRow.namespace == memory_namespace,
+                        )
+                        .order_by(AgentMemoryRow.memory_id)
                     )
                 )
-            )
             snapshot = json.loads(snapshot_row.snapshot_json)
-            return {
+            receipt = {
                 "command": "show",
                 "status": "ok",
                 "world_id": world.world_id,
@@ -256,7 +263,19 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                     }
                     for item in events
                 ],
-                "observations": [
+                "seed": {
+                    "seed_id": world.seed_id,
+                    "version": world.seed_version,
+                    "content_hash": world.seed_content_hash,
+                },
+                "database_path": str(paths.database),
+            }
+            if memory_agent_id is not None:
+                receipt["memory_scope"] = {
+                    "agent_id": memory_agent_id,
+                    "namespace": memory_namespace,
+                }
+                receipt["observations"] = [
                     {
                         "memory_id": item.memory_id,
                         "agent_id": item.agent_id,
@@ -264,9 +283,10 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                         "relative_time_ms": item.relative_time_ms,
                         "payload": json.loads(item.payload_json),
                     }
-                    for item in observations
-                ],
-                "memories": [
+                    for item in memories
+                    if item.memory_type == "observation"
+                ]
+                receipt["memories"] = [
                     {
                         "memory_id": item.memory_id,
                         "agent_id": item.agent_id,
@@ -283,13 +303,7 @@ def show_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                         "payload": json.loads(item.payload_json),
                     }
                     for item in memories
-                ],
-                "seed": {
-                    "seed_id": world.seed_id,
-                    "version": world.seed_version,
-                    "content_hash": world.seed_content_hash,
-                },
-                "database_path": str(paths.database),
-            }
+                ]
+            return receipt
     finally:
         engine.dispose()

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
 import re
+import socket
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, runtime_checkable
@@ -78,6 +78,10 @@ class ModelTransportError(RuntimeError):
 
 class ModelRequestRejectedError(RuntimeError):
     """A non-retryable provider response."""
+
+
+class ModelRequestCancelledError(RuntimeError):
+    """A Provider request cancelled by the Runtime."""
 
 
 class ModelOutputInvalidError(ValueError):
@@ -160,6 +164,18 @@ class ModelGateway(Protocol):
 
     def generate(
         self, request: ModelRequest, response_type: type[ResponseT]
+    ) -> ModelGeneration[ResponseT]: ...
+
+
+@runtime_checkable
+class CancellableModelGateway(Protocol):
+    """Optional model-call seam for adapters that can abort active transport."""
+
+    def generate_cancellable(
+        self,
+        request: ModelRequest,
+        response_type: type[ResponseT],
+        cancellation_event: threading.Event,
     ) -> ModelGeneration[ResponseT]: ...
 
 
@@ -468,6 +484,18 @@ class OpenAICompatibleGateway:
     def generate(
         self, request: ModelRequest, response_type: type[ResponseT]
     ) -> ModelGeneration[ResponseT]:
+        return self.generate_cancellable(request, response_type, threading.Event())
+
+    def generate_cancellable(
+        self,
+        request: ModelRequest,
+        response_type: type[ResponseT],
+        cancellation_event: threading.Event,
+    ) -> ModelGeneration[ResponseT]:
+        """Run one request while allowing Runtime cancellation to close its socket."""
+
+        if cancellation_event.is_set():
+            raise ModelRequestCancelledError("Provider request was cancelled")
         if request.model_id != self.model_id:
             raise ModelRequestRejectedError(
                 "ModelRequest must use the globally configured Provider model"
@@ -476,6 +504,7 @@ class OpenAICompatibleGateway:
             raise ModelRequestRejectedError(
                 "ModelRequest must use the globally configured model parameters"
             )
+
         schema_instruction = ""
         if self.structured_output_mode == "json_text":
             schema_instruction = (
@@ -495,10 +524,7 @@ class OpenAICompatibleGateway:
                         f"{schema_instruction}"
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": canonical_json(request.input_payload),
-                },
+                {"role": "user", "content": canonical_json(request.input_payload)},
             ],
         }
         if self.structured_output_mode == "json_schema":
@@ -510,37 +536,80 @@ class OpenAICompatibleGateway:
                     "schema": response_type.model_json_schema(),
                 },
             }
-        http_request = urllib.request.Request(
-            f"{self._base_url}/chat/completions",
-            data=canonical_json(body).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+
+        parsed = urllib.parse.urlsplit(self._base_url)
+        connection_type = (
+            http.client.HTTPSConnection
+            if parsed.scheme == "https"
+            else http.client.HTTPConnection
         )
+        connection = connection_type(
+            parsed.hostname,
+            parsed.port,
+            timeout=self._timeout_seconds,
+        )
+        done = threading.Event()
+
+        def close_on_cancel() -> None:
+            while not done.wait(0.02):
+                if not cancellation_event.is_set():
+                    continue
+                active_socket = connection.sock
+                if active_socket is None:
+                    continue
+                try:
+                    active_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                connection.close()
+                return
+
+        watcher = threading.Thread(
+            target=close_on_cancel,
+            name="mygo-provider-cancellation",
+            daemon=True,
+        )
+        watcher.start()
         with self._counter_lock:
             self.network_request_count += 1
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(
-                http_request, timeout=self._timeout_seconds
-            ) as response:
-                provider_body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            # Never include request headers or the API key in diagnostics.
-            error_type = (
-                ModelTransportError
-                if exc.code in {408, 429} or 500 <= exc.code < 600
-                else ModelRequestRejectedError
+            base_path = parsed.path.rstrip("/")
+            connection.request(
+                "POST",
+                f"{base_path}/chat/completions",
+                body=canonical_json(body).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
             )
-            raise error_type(f"Provider request failed with HTTP {exc.code}") from exc
-        except (TimeoutError, urllib.error.URLError, OSError) as exc:
-            # Never include request headers or the API key in diagnostics.
+            with connection.getresponse() as response:
+                if response.status >= 400:
+                    error_type = (
+                        ModelTransportError
+                        if response.status in {408, 429} or response.status >= 500
+                        else ModelRequestRejectedError
+                    )
+                    raise error_type(
+                        f"Provider request failed with HTTP {response.status}"
+                    )
+                provider_body = response.read().decode("utf-8")
+        except (OSError, http.client.HTTPException) as exc:
+            if cancellation_event.is_set():
+                raise ModelRequestCancelledError(
+                    "Provider request was cancelled"
+                ) from exc
             raise ModelTransportError(
                 f"Provider request failed: {type(exc).__name__}"
             ) from exc
+        finally:
+            done.set()
+            connection.close()
+            watcher.join(timeout=0.1)
 
+        if cancellation_event.is_set():
+            raise ModelRequestCancelledError("Provider request was cancelled")
         latency_ms = (time.perf_counter() - started) * 1000
         try:
             decoded = json.loads(provider_body)

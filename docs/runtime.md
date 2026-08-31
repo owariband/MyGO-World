@@ -18,6 +18,17 @@ uv run mygo-world show --world-id first-meeting --json
 uv run pytest
 ```
 
+`show` 默认只返回客观 World Snapshot 与 World Event，不返回任何 Agent 的私有
+Memory。需要诊断单个 Agent 时，必须同时限定身份和 namespace：
+
+```bash
+uv run mygo-world show \
+  --world-id first-meeting \
+  --memory-agent-id character-anon \
+  --memory-namespace default \
+  --json
+```
+
 ## World 数据与生命周期
 
 World 数据库默认位于 `.mygo/worlds/<world_id>/world.sqlite3`。可使用

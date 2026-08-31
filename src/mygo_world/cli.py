@@ -32,6 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser = subparsers.add_parser("show", help="read a durable World Snapshot")
     show_parser.add_argument("--world-id", required=True)
     show_parser.add_argument("--worlds-dir", type=Path, default=Path(".mygo/worlds"))
+    show_parser.add_argument("--memory-agent-id")
+    show_parser.add_argument("--memory-namespace")
     show_parser.add_argument("--json", action="store_true", dest="as_json")
 
     advance_parser = subparsers.add_parser(
@@ -197,7 +199,12 @@ def run(argv: Sequence[str] | None = None) -> int:
                 skills_dir=args.skills_dir,
             )
         elif args.command == "show":
-            receipt = show_world(args.world_id, args.worlds_dir)
+            receipt = show_world(
+                args.world_id,
+                args.worlds_dir,
+                memory_agent_id=args.memory_agent_id,
+                memory_namespace=args.memory_namespace,
+            )
         elif args.command == "advance":
             receipt = advance_world(
                 args.world_id,

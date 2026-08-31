@@ -5,7 +5,7 @@ import signal
 import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -43,11 +43,13 @@ from mygo_world.db.models import (
 )
 from mygo_world.errors import WorldError, WorldNotFoundError
 from mygo_world.gateways import (
+    CancellableModelGateway,
     FixtureGateway,
     ModelGateway,
     ModelGeneration,
     ModelOutputInvalidError,
     ModelRequest,
+    ModelRequestCancelledError,
     ModelRequestRejectedError,
     ModelTransportError,
     OpenAICompatibleGateway,
@@ -326,24 +328,27 @@ def _call_gateway[ResponseT: BaseModel](
         if cancellation_event.is_set():
             raise WorldError("BATCH_CANCELLED", "Generation Batch was cancelled")
         try:
-            if semaphore is None:
-                budget.consume()
-                with model_call_span(request, attempt + 1) as span:
-                    generation = gateway.generate(request, response_type)
-                    record_generation(span, generation)
-                    return replace(generation, transport_attempts=attempt + 1)
-            with semaphore:
+            call_slot = semaphore if semaphore is not None else nullcontext()
+            with call_slot:
                 if cancellation_event.is_set():
                     raise WorldError(
                         "BATCH_CANCELLED", "Generation Batch was cancelled"
                     )
                 budget.consume()
                 with model_call_span(request, attempt + 1) as span:
-                    generation = gateway.generate(request, response_type)
+                    generation = (
+                        gateway.generate_cancellable(
+                            request, response_type, cancellation_event
+                        )
+                        if isinstance(gateway, CancellableModelGateway)
+                        else gateway.generate(request, response_type)
+                    )
                     record_generation(span, generation)
                     return replace(generation, transport_attempts=attempt + 1)
         except ModelRequestRejectedError as exc:
             raise WorldError("MODEL_REQUEST_REJECTED", str(exc)) from exc
+        except ModelRequestCancelledError as exc:
+            raise WorldError("BATCH_CANCELLED", str(exc)) from exc
         except (ModelTransportError, TimeoutError, ConnectionError, OSError) as exc:
             last_error = exc
             if attempt == retries:

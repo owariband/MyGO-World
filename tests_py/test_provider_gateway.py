@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import http.client
 import json
 import threading
-import urllib.request
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +17,7 @@ from mygo_world.errors import WorldError
 from mygo_world.gateways import (
     ModelOutputInvalidError,
     ModelRequest,
+    ModelRequestCancelledError,
     ModelRequestRejectedError,
     ModelTransportError,
     OpenAICompatibleGateway,
@@ -184,7 +186,7 @@ def test_provider_timeout_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
     def timeout(*_args: Any, **_kwargs: Any) -> Any:
         raise TimeoutError("super-secret")
 
-    monkeypatch.setattr(urllib.request, "urlopen", timeout)
+    monkeypatch.setattr(http.client.HTTPSConnection, "request", timeout)
     gateway = OpenAICompatibleGateway(
         base_url="https://example.invalid/v1",
         api_key="super-secret",
@@ -194,6 +196,59 @@ def test_provider_timeout_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ModelTransportError) as caught:
         gateway.generate(_request(), ActionProposal)
     assert str(caught.value) == "Provider request failed: TimeoutError"
+
+
+def test_provider_cancels_an_in_flight_request() -> None:
+    request_started = threading.Event()
+    release_response = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers["Content-Length"])
+            self.rfile.read(length)
+            request_started.set()
+            release_response.wait(timeout=5)
+
+        def log_message(self, _format: str, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    cancel = threading.Event()
+    gateway = OpenAICompatibleGateway(
+        base_url=f"http://127.0.0.1:{server.server_port}/v1",
+        api_key="super-secret",
+        model_id="test-model",
+        model_parameters={"temperature": 0.2},
+        timeout_seconds=120,
+    )
+    outcome: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            gateway.generate_cancellable(_request(), ActionProposal, cancel)
+        except ModelRequestCancelledError as exc:
+            outcome.append(exc)
+
+    worker = threading.Thread(target=call)
+    worker.start()
+    try:
+        assert request_started.wait(timeout=2)
+        started = time.monotonic()
+        cancel.set()
+        worker.join(timeout=1)
+        elapsed = time.monotonic() - started
+        assert not worker.is_alive(), "cancelled Provider request remained blocked"
+        assert elapsed < 1
+        assert isinstance(outcome[0], ModelRequestCancelledError)
+    finally:
+        release_response.set()
+        worker.join(timeout=5)
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def test_provider_rejects_per_request_model_override_before_network() -> None:

@@ -356,6 +356,18 @@ def test_advance_commits_one_atomic_version_with_multiple_events(
     initialize_world(MINIMAL_SEED, "wave", worlds_dir)
     receipt = advance_world("wave", worlds_dir)
     shown = show_world("wave", worlds_dir)
+    anon_memory = show_world(
+        "wave",
+        worlds_dir,
+        memory_agent_id="character-anon",
+        memory_namespace="default",
+    )
+    soyo_memory = show_world(
+        "wave",
+        worlds_dir,
+        memory_agent_id="character-soyo",
+        memory_namespace="default",
+    )
     database = worlds_dir / "wave" / "world.sqlite3"
 
     assert receipt["start_world_version"] == 1
@@ -373,9 +385,10 @@ def test_advance_commits_one_atomic_version_with_multiple_events(
     assert external["payload"]["actor_id"] is None
     assert external["payload"]["source_kind"] == "director"
     assert external["payload"]["source_ref"]
+    observations = [*anon_memory["observations"], *soyo_memory["observations"]]
     assert {
         item["agent_id"]
-        for item in shown["observations"]
+        for item in observations
         if item["world_version"] == 2
         and item["payload"].get("source_event_id") == external["event_id"]
     } == {"character-anon", "character-soyo"}
@@ -467,6 +480,10 @@ def test_new_process_reads_wave_events_observations_and_checksum(
         "process-wave",
         "--worlds-dir",
         str(worlds_dir),
+        "--memory-agent-id",
+        "character-anon",
+        "--memory-namespace",
+        "default",
         "--json",
     )
     advance_receipt = json_output(advanced)

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from conftest import MINIMAL_SEED, json_output, run_cli
+from conftest import MINIMAL_SEED, REPOSITORY_ROOT, json_output, run_cli
 from sqlalchemy.orm import Session
 
 from mygo_world.db.engine import create_world_engine
@@ -469,6 +474,81 @@ def test_pre_cancelled_batch_is_durable_and_does_not_call_provider(
     assert captured.value.receipt["status"] == "cancelled"
     assert captured.value.receipt["wave_count"] == 0
     assert gateway.calls == []
+
+
+def test_sigterm_cancels_in_flight_provider_requests(worlds_dir: Path) -> None:
+    initialize_world(MINIMAL_SEED, "signal-cancel", worlds_dir)
+    requests_started = threading.Event()
+    release_responses = threading.Event()
+    request_count = 0
+    request_lock = threading.Lock()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            nonlocal request_count
+            length = int(self.headers["Content-Length"])
+            self.rfile.read(length)
+            with request_lock:
+                request_count += 1
+                if request_count == 2:
+                    requests_started.set()
+            release_responses.wait(timeout=5)
+
+        def log_message(self, _format: str, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    environment = {
+        **os.environ,
+        "MYGO_MODEL_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
+        "MYGO_MODEL_API_KEY": "test-secret",
+        "MYGO_MODEL_ID": "test-model",
+        "MYGO_MODEL_PARAMETERS_JSON": "{}",
+        "MYGO_MODEL_TIMEOUT_SECONDS": "120",
+    }
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "mygo_world",
+            "advance",
+            "--world-id",
+            "signal-cancel",
+            "--worlds-dir",
+            str(worlds_dir),
+            "--gateway",
+            "provider",
+            "--json",
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert requests_started.wait(timeout=3)
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=2)
+        elapsed = time.monotonic() - started
+        receipt = json.loads(stdout)
+
+        assert process.returncode != 0, stderr
+        assert elapsed < 2
+        assert receipt["status"] == "cancelled"
+        assert receipt["error"]["code"] == "BATCH_CANCELLED"
+    finally:
+        release_responses.set()
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+        server.shutdown()
+        server_thread.join(timeout=5)
+        server.server_close()
 
 
 def test_next_batch_marks_stale_running_batch_interrupted(worlds_dir: Path) -> None:

@@ -294,6 +294,57 @@ def test_human_receipts_are_concise(worlds_dir: Path) -> None:
     assert shown.stdout.startswith("World human is at version 1")
 
 
+def test_show_cli_requires_agent_and_namespace_to_read_private_memory(
+    worlds_dir: Path,
+) -> None:
+    initialize_world(MINIMAL_SEED, "private-show", worlds_dir)
+
+    public = run_cli(
+        "show",
+        "--world-id",
+        "private-show",
+        "--worlds-dir",
+        str(worlds_dir),
+        "--json",
+    )
+    public_receipt = json_output(public)
+    assert public.returncode == 0
+    assert "memories" not in public_receipt
+    assert "observations" not in public_receipt
+
+    private = run_cli(
+        "show",
+        "--world-id",
+        "private-show",
+        "--worlds-dir",
+        str(worlds_dir),
+        "--memory-agent-id",
+        "character-anon",
+        "--memory-namespace",
+        "default",
+        "--json",
+    )
+    private_receipt = json_output(private)
+    assert private.returncode == 0
+    assert {item["agent_id"] for item in private_receipt["memories"]} == {
+        "character-anon"
+    }
+    assert {item["namespace"] for item in private_receipt["memories"]} == {"default"}
+
+    incomplete_scope = run_cli(
+        "show",
+        "--world-id",
+        "private-show",
+        "--worlds-dir",
+        str(worlds_dir),
+        "--memory-agent-id",
+        "character-anon",
+        "--json",
+    )
+    assert incomplete_scope.returncode != 0
+    assert json_output(incomplete_scope)["error"]["code"] == "MEMORY_SCOPE_INVALID"
+
+
 def test_service_reopens_without_the_seed_file(worlds_dir: Path) -> None:
     initialize_world(MINIMAL_SEED, "service-open", worlds_dir)
     shown = show_world("service-open", worlds_dir)

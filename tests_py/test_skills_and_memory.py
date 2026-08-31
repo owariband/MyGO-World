@@ -137,11 +137,19 @@ def test_seed_memory_round_trips_and_repository_enforces_owner_namespace(
     seed.write_text(yaml.safe_dump(raw), encoding="utf-8")
     initialize_world(seed, "memory", worlds_dir)
 
-    shown = show_world("memory", worlds_dir)
+    public = show_world("memory", worlds_dir)
+    assert "memories" not in public
+    assert "observations" not in public
+
+    shown = show_world(
+        "memory",
+        worlds_dir,
+        memory_agent_id="character-anon",
+        memory_namespace="private",
+    )
     assert {item["memory_id"] for item in shown["memories"]} == {
         "anon-belief",
         "anon-commitment",
-        "soyo-observation",
     }
     commitment = next(
         item for item in shown["memories"] if item["memory_id"] == "anon-commitment"
@@ -261,7 +269,12 @@ def test_belief_and_commitment_changes_append_successor_records(
         gateway=FixtureGateway(responses),
         max_waves=1,
     )
-    memories = show_world("successors", worlds_dir)["memories"]
+    memories = show_world(
+        "successors",
+        worlds_dir,
+        memory_agent_id="character-anon",
+        memory_namespace="default",
+    )["memories"]
     old_belief = next(item for item in memories if item["memory_id"] == "belief-old")
     old_commitment = next(
         item for item in memories if item["memory_id"] == "commitment-old"
