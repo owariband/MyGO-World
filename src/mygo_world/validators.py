@@ -297,8 +297,16 @@ class SegmentValidator:
                 diagnostics.append(
                     _diagnostic(
                         "SEGMENT_INTENT_MISMATCH",
-                        f"proposal_events.{index}.source_ref",
-                        "A proposal event must preserve its Action Proposal source",
+                        (
+                            f"proposal_events.{index}.source_kind"
+                            if event.source_kind != "action_proposal"
+                            else f"proposal_events.{index}.source_ref"
+                        ),
+                        (
+                            "A proposal event must use source_kind 'action_proposal'"
+                            if event.source_kind != "action_proposal"
+                            else "A proposal event must reference an input proposal_id"
+                        ),
                     )
                 )
                 continue

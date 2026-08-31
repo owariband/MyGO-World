@@ -462,6 +462,33 @@ class CandidateEvent(StrictModel):
         return self
 
 
+class ProposalEventCandidate(CandidateEvent):
+    """An objective event preserving one Character Action Proposal."""
+
+    source_kind: Literal["action_proposal"]
+    source_ref: str = Field(
+        min_length=1,
+        description="The exact proposal_id of the represented Action Proposal.",
+    )
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Must include intent_summary copied exactly from the represented "
+            "Action Proposal, plus the action-specific objective fields."
+        ),
+    )
+
+    @field_validator("payload")
+    @classmethod
+    def payload_has_intent_summary(cls, value: dict[str, Any]) -> dict[str, Any]:
+        intent_summary = value.get("intent_summary")
+        if not isinstance(intent_summary, str) or not intent_summary.strip():
+            raise ValueError(
+                "proposal event payload must include a non-empty intent_summary"
+            )
+        return value
+
+
 class ExternalEventCandidate(CandidateEvent):
     """A Director-owned candidate which may have no Character actor."""
 
@@ -474,7 +501,7 @@ class SegmentDraft(StrictModel):
     session_id: str = Field(min_length=1)
     wave_started_at_ms: int = Field(ge=0)
     wave_ended_at_ms: int = Field(ge=0)
-    proposal_events: list[CandidateEvent]
+    proposal_events: list[ProposalEventCandidate]
     external_events: list[ExternalEventCandidate] = Field(default_factory=list)
     entity_changes: list[EntityStateChange] = Field(default_factory=list)
     session_intent: Literal["keep_open", "resolved"] = "keep_open"
@@ -497,7 +524,7 @@ class ValidatedCommitPlan(StrictModel):
     session_id: str = Field(min_length=1)
     wave_started_at_ms: int = Field(ge=0)
     wave_ended_at_ms: int = Field(ge=0)
-    events: list[CandidateEvent | ExternalEventCandidate]
+    events: list[ProposalEventCandidate | ExternalEventCandidate]
     entity_changes: list[EntityStateChange] = Field(default_factory=list)
     accepted_memory_changes: list[MemoryChangeCandidate] = Field(default_factory=list)
     session_intent: Literal["keep_open", "partitioned", "resolved", "limit_reached"] = (

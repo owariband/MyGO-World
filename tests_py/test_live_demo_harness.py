@@ -216,6 +216,16 @@ MYGO_MODEL_PARAMETERS_JSON={{"temperature":0}}
     assert receipt["provider_request_count"] == request_count == 7
     assert all(item["model"] == "offline-test-model" for item in request_bodies)
     assert all(item["temperature"] == 0 for item in request_bodies)
+    director_request = next(
+        item
+        for item in request_bodies
+        if "mygo.director.live" in item["messages"][0]["content"]
+    )
+    director_schema = json.dumps(director_request["response_format"])
+    assert '"const": "action_proposal"' in director_schema
+    director_prompt = director_request["messages"][0]["content"]
+    assert "source_kind` exactly to `action_proposal" in director_prompt
+    assert "copy `actor_id` and `intent_summary` exactly" in director_prompt
     assert receipt["session_closure_reason"] == "resolved"
     serialized = (output_dir / "generation-traces.json").read_text(encoding="utf-8")
     assert "offline-test-secret" not in serialized

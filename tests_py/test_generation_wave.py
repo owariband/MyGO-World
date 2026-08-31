@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from conftest import MINIMAL_SEED, json_output, run_cli
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -275,6 +276,28 @@ def test_segment_validator_returns_stable_diagnostics(
         source_trace_id="trace-director",
     )
     assert code in _codes(outcome)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda event: event.update(source_kind="proposal"),
+        lambda event: event.update(
+            source_ref=None,
+            evidence_refs=["unrelated-evidence"],
+        ),
+        lambda event: event["payload"].pop("intent_summary"),
+    ],
+)
+def test_segment_draft_rejects_incomplete_action_proposal_sources(
+    worlds_dir: Path, mutation: object
+) -> None:
+    frame = _load_frame(worlds_dir, "segment-proposal-source-contract")
+    raw = _valid_draft(frame).model_dump(mode="json")
+    mutation(raw["proposal_events"][0])  # type: ignore[operator]
+
+    with pytest.raises(ValidationError):
+        SegmentDraft.model_validate(raw)
 
 
 def test_segment_validator_rejects_external_character_agency(
