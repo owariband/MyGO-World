@@ -93,3 +93,5 @@
 - 将 `perceive -> retrieve -> plan -> ActionProposal -> Director / Validator / Committer -> Committed WorldEvent` 提升为项目最高优先级不变量，明确 Proposal 是角色意图而不是执行结果。
 - 正式将 Creator Manifest、Compiler、Persona State/Memory/Cognition、Action Contract、权限校验与 Trace 定位为项目自研的 `Generative Go World NPC ADK`；LangChain Core 只提供内部编排与模型接入基础设施。
 - Python 环境管理统一使用 uv：`.python-version` 固定解释器，`pyproject.toml` 声明依赖，`uv.lock` 锁定解析结果，安装与工具执行统一走 `uv sync --frozen` / `uv run`。
+- 曾尝试把 `agent/personact/` 泛化为 `agent/character/`，并另建空的通用 loop/adk package 代表共享生命周期；用户指出这既隐藏 PersonAct，也没有让真实 loop 在目录中显式可见，因此该方案被否决。
+- 将已实现的 PersonAct 代码按真实职责拆成 `personact/agent.py + personact/loop.py`：前者保留并发、replay 与 snapshot 事务门面，后者承载 typed RunnableSequence 和五个认知阶段；算法与公开 `PersonActAgent.decide` 不变。另新增 `agent/director/`、`agent/broadcast/`、`event/` 与 `rendergateway/` 所有权目录。

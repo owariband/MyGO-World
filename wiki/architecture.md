@@ -214,7 +214,7 @@ MyGO / WebGAL Render Backend
 
 ### 三类 Agent 的共用基座
 
-Persona、Director、Broadcast 共享 Python strict Pydantic 契约策略、LangChain Core Runnable/`RunnableConfig` 调用约定和模型适配基础设施，但不共用 Persona 的具体认知模块或顶层循环。Character 的公共边界是外部 Scheduler 调用一次 `PersonActAgent.decide`，得到一个 strict/frozen `ActionProposal`；跨 wire 时再显式序列化 JSON：
+Persona、Director、Broadcast 共享 AgentLoop 生命周期、Python strict Pydantic 契约、Memory/Model 基础设施和 `RunnableConfig` 约定，但不共用具体节点、State、Strategy、Prompt、namespace 或 Proposal 类型。当前真实 Character loop 位于 `agent/personact/loop.py`，由 `PersonActAgent.decide` 调用；外部 Event Scheduler 不属于 AgentLoop。Character 的公共边界是 Scheduler 调用一次 `decide`，得到一个 strict/frozen `ActionProposal`：
 
 ```text
 observe/perceive -> retrieve -> plan -> propose
@@ -231,7 +231,8 @@ observe/perceive -> retrieve -> plan -> propose
 - Runnable 只是 Agent 的内部实现，不是 World Runtime 的顶层抽象。`Proposal -> Director -> validate -> commit -> outcome` 仍由 Event/World Runtime 显式编排；
 - `agent/memory/` 提供通用 Record/Store/Retriever，但每个 Agent 使用独立 namespace；
 - 模型、Prompt、Tool 与调用级观测优先复用 LangChain Core 接口；所有不受信输入/输出显式经过 strict/frozen Pydantic Model，静态接线由 pyright strict 检查；
-- Persona、Director、Broadcast 各自保留具体 cognitive strategy、prompt templates、触发频率和输出类型；
+- `agent/personact/loop.py` 显式承载当前真实 loop，`agent.py` 只保留 PersonActAgent 门面与 snapshot 事务；`agent/personact/`、`agent/director/`、`agent/broadcast/` 各自保留 typed input、state、strategy、prompt、namespace 和 proposal。跨 Agent 公共 runner 等第二个真实实现出现后再提取；
+- Anon、Soyo 等是 Character Agent 类型的配置实例，不为每个 NPC 建独立源码目录；
 - `execute` 不属于通用 Agent 能力。三类 Agent 只输出 Proposal/Plan，副作用由 World Committer 或 Render Gateway 完成。`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation；任何未来框架 checkpoint 也不能替代 World Snapshot、Ledger 或 commit protocol。
 
 当前仓库已实现 NPC DIY Manifest Compiler、Persona Memory/State 与检索基础、新的 World proposal contract，以及 `PersonActAgent.decide` 的单次认知 Slice。Reflection/commit feedback、Director、World Commit、Event Scheduler/Runtime 和 Broadcast 尚未落地。

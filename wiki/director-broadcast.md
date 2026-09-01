@@ -34,7 +34,7 @@ Director Agent  导演层：世界应该获得什么叙事压力与机会？
 Broadcast Agent 导播层：已经发生的世界应该怎样被玩家看见？
 ```
 
-三类 Agent 共享认知阶段协议，但不共享 Persona 的具体实现：
+三类 Agent 共享 AgentLoop 生命周期，但不共享 PersonAct 的具体实现：
 
 ```text
 observe/perceive -> retrieve -> plan -> propose
@@ -46,7 +46,7 @@ observe/perceive -> retrieve -> plan -> propose
           observe_outcome -> reflect
 ```
 
-Persona、Director、Broadcast 共享 strict/frozen Pydantic 契约策略、LangChain Core Runnable/`RunnableConfig` 调用约定与模型适配基础设施；Character 的公共入口是 `PersonActAgent.decide`，其内部 typed sequence 只组织 prepare/perceive/retrieve/plan/propose，不拥有 Event Scheduler 循环。三类 Agent 的阶段输入、内部 strategy、Prompt、输出类型、触发频率和 Memory namespace 分别隔离，不要求 Director/Broadcast 机械复制 PersonAct 流程。`execute` 不属于通用 Agent 能力：Agent 只提案，World Committer 或 Render Gateway 才产生副作用。`with_types()` 不做 runtime validation，当前不使用 LangGraph。
+Persona、Director、Broadcast 共享 `perceive -> retrieve -> plan -> propose`、提交后 `observe_outcome -> reflect` 的生命周期，以及 strict/frozen Pydantic、Memory/Model 与 `RunnableConfig` 基础设施；各自的 typed input、State、Strategy、Prompt、Proposal、触发频率和 Memory namespace 隔离。当前 Character loop 明确位于 `agent/personact/loop.py`，由 `agent.py` 的 `PersonActAgent.decide` 调用；跨 Agent 公共 runner 等 Director Fixture 出现后再提取。外部 Event Scheduler 不属于 AgentLoop，`execute` 也不属于通用 Agent 能力。
 
 实现状态上，当前已落地 `PersonActAgent.decide` 的单次认知 Slice；reflection/commit feedback、Director、Broadcast 及其与 World Commit 的完整链路仍是本页描述的研究/实现目标。
 

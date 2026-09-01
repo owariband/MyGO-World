@@ -78,7 +78,8 @@ perceive -> retrieve -> plan -> ActionProposal
 - [统一 StrictModel](../agent_runtime/model.py)：strict、frozen、拒绝未知字段的运行时契约策略。
 - [NPC Manifest Compiler](../agent_runtime/agent/personact/compiler.py)：不受信配置到受信运行规格的能力收敛。
 - [World-owned Contracts](../agent_runtime/world/contracts.py)：固定 ActionProposal envelope、六类 action union 与 typed target。
-- [PersonAct Agent](../agent_runtime/agent/personact/agent.py)：`decide`、Persona 私有认知阶段、state/memory 原子更新与 DecisionTrace。
+- [PersonAct Agent](../agent_runtime/agent/personact/agent.py)：`decide` 门面、并发串行化、proposal replay 与 private snapshot 原子替换。
+- [PersonAct Loop](../agent_runtime/agent/personact/loop.py)：typed RunnableSequence 与 prepare/perceive/retrieve/plan/propose 真实认知阶段。
 - [Proposal Authority Boundary](../agent_runtime/agent/personact/proposal.py)：最终 Proposal 构造、actor 注入与 capability/affordance/evidence 校验。
 - [NPC DIY 契约测试](../agent_runtime/tests/test_personact.py)：类型、权限、namespace、affordance 和 evidence 拒绝路径。
 - [PersonAct 认知测试](../agent_runtime/tests/test_personact_agent.py)：attention、novelty、Memory retrieval、state 原子更新和单 Proposal 边界。

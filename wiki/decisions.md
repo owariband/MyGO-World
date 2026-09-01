@@ -243,20 +243,20 @@
 - **状态：领域分层继续有效；技术实现由 D-038 更新**
 - **日期：2026-08-21**
 - **原决策与历史修正：**一期最初计划纯 Python + 手写 AgentLoop，2026-08-22 曾切换到 Go + Eino；D-038 又将执行层迁回 Python 3.12 + LangChain Core。两次技术栈变化都不改变 `agent / event / world` 的领域所有权：Persona、Director、Broadcast 和通用 Memory 归入 `agent/`；EventSession、WorldEvent 和 Scheduler 归入 `event/`；语义环境、Ledger 和 PerceptionProjector 归入 `world/`。
-- **当前映射：**Python `agent/personact/` 的公共边界收敛为 `PersonActAgent.decide`；内部可按需使用 LangChain Runnable 承载模型/策略接线，但不对外暴露 Pipeline 或拥有循环。原 `associative_memory` 的领域语义提炼到 `agent/memory/`，Persona 私有 state 留在 PersonAct；不迁移 `Persona.move()`、Maze、`path_finder.py` 或 `execute.py`。
+- **当前映射：**Python `agent/personact/loop.py` 通过 typed `RunnableSequence` 实现 Character 的真实认知 loop，`agent.py` 只保留 `PersonActAgent.decide` 的并发、replay 与 snapshot 事务门面；Anon、Soyo 等由 Manifest 形成不同实例。`agent/memory/` 提供隔离数据的共享机制。不迁移 `Persona.move()`、Maze、`path_finder.py` 或 `execute.py`。
 - **新增边界：**Runtime 装配入口和 `rendergateway` 保持装配/出站职责；不提前建立游戏设计层、素材层、播放器层或通用企业分层。
 - **Memory 边界：**共用 Memory 实现不等于共享 Memory 内容。每个 Persona、Director、Broadcast 使用独立 `agent_id + namespace`；Director 全局记忆和 Broadcast 覆盖历史不得被 Persona 检索。
 - **后果：**目录直接表达“Agent 是决策主体，Memory 是 Agent 通用能力，Event 是互动容器，World 是事实环境”；Reflection、Prompt 和复杂检索算法可逐步替换，WebGAL 相关代码继续隔离在 `extensions/dynamic-render/`。
 
-## D-032｜三类 Agent 共享类型与调用约定，不共享 Persona 具体实现
+## D-032｜三类 Agent 共享 AgentLoop 生命周期，隔离具体实现
 
 - **状态：基础边界已确认，具体 strategy 待 Fixture 验证**
 - **日期：2026-08-21**
-- **问题：**Persona、Director、Broadcast 应共享哪些基础设施，才不会把 Persona 的认知语义和外部 Runtime 循环强塞给其它 Agent？
-- **决策：**三类 Agent 共享 strict Pydantic 契约策略、LangChain Runnable/`RunnableConfig` 调用约定与模型基础设施；不共享一条 Persona Pipeline，也不共享顶层 Loop。
+- **问题：**Persona、Director、Broadcast 如何共享同一个 AgentLoop 生命周期，同时避免把 PersonAct 的具体认知拓扑和外部 Event Scheduler 强塞给其它 Agent？
+- **决策：**三类 Agent 共享 `perceive -> retrieve -> plan -> propose` 与提交后 `observe_outcome -> reflect` 生命周期，以及 Memory/Model、strict Pydantic 和 `RunnableConfig` 基础设施；各自保留具体输入、State、Strategy、Prompt、namespace 和 Proposal，外部 Event Scheduler 也不属于 AgentLoop。
 - **执行边界：**Persona 的一次 `decide` 输出一个 strict/frozen ActionProposal；跨 wire 时再显式序列化 JSON。Director 输出 SegmentDraft/DirectorProposal，Broadcast 输出 BroadcastPlan；确定性 Render Planner 再把 BroadcastPlan 编译为 RenderJob。`execute` 和 Scheduler loop 都不进入 Agent Runnable，副作用由 World Committer 或 Render Gateway 完成。
-- **目录边界：**Memory Store/Retriever 提升为 `agent/memory/`；具体领域策略与 prompt templates 保留在 `personact / director / broadcast` 各自目录。
-- **实现方式：**Character 公开 `PersonActAgent.decide`；内部可使用领域函数或 Runnable。Director/Broadcast 可分别使用独立 Runnable 或规则实现，不建立万能 BaseAgent，也不为了形式统一引入 LangGraph。
+- **目录边界：**具体 Agent 分别位于 `agent/personact`、`agent/director`、`agent/broadcast`，共享 Memory 位于 `agent/memory`。Anon、Soyo 等是 PersonAct 实例，不建立独立源码目录。
+- **实现方式：**当前 Character 的真实 loop 显式位于 `agent/personact/loop.py`，`agent.py` 是稳定门面；Director Fixture 成为第二个真实实现后，再从实际重复中提取跨 Agent 公共 runner，避免提前制造万能 BaseAgent。
 - **待验证：**三类 Fixture Agent 都返回各自 strict Pydantic Model，且 Memory、Prompt、权限和副作用完全隔离。
 
 ## D-033｜Memory 是 Agent 通用能力，但记忆内容按 namespace 隔离

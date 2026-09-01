@@ -25,6 +25,7 @@
 - `Runnable.with_types()` 只提供类型/Schema 元数据，不做运行时校验；外部输入、模型输出和持久化边界必须显式经过 strict/frozen Pydantic Model，内部类型由 pyright strict 检查。
 - 不把 World/Event 权威放进 Agent Runnable、Dynamic Render 或 WebGAL 状态。
 - 外部 Event Scheduler 独占循环；`PersonActAgent.decide` 每次只返回当前角色的一个 `ActionProposal`，不实现 `Persona.move()`、Maze、寻路或逐 tile movement。
+- 当前真实 PersonAct Loop 位于 `agent/personact/loop.py`；`agent.py` 只负责 `PersonActAgent` 的并发、replay 和 private snapshot 事务门面。Character、Director、Broadcast 共享 AgentLoop 生命周期，但三者各自保留输入、State、Strategy、Prompt、Memory namespace 和 Proposal。Anon、Soyo 等是 `PersonActAgent` 配置实例，不创建独立源码 package。
 - 默认先用可注入时钟、ID、随机源和 Fixture Agent 跑通可重放 Golden Trace，再接真实模型。
 - Python Runtime 改动依次运行 `uv run ruff format --check agent_runtime`、`uv run ruff check agent_runtime`、`uv run pyright` 和 `uv run pytest`；Node 改动运行 `npm test`。
 

@@ -7,6 +7,16 @@ generative_go_world/
 ├── AGENT.md
 ├── wiki/
 ├── agent_runtime/          # Python 3.12 + LangChain Core；当前为 PersonAct Slice
+│   ├── agent/
+│   │   ├── personact/
+│   │   │   ├── agent.py    # PersonActAgent 门面与 snapshot 事务
+│   │   │   └── loop.py     # typed prepare/perceive/retrieve/plan/propose
+│   │   ├── memory/         # scoped Agent Memory
+│   │   ├── director/       # Director 边界；实现待补
+│   │   └── broadcast/      # Broadcast 边界；实现待补
+│   ├── event/              # 外部 Scheduler/Event 生命周期（边界已建，实现待补）
+│   ├── world/              # 客观事实与 Commit 权威
+│   └── rendergateway/      # RenderJob 出站边界
 ├── extensions/
 │   └── dynamic-render/     # RenderJob 到 WebGAL 的外置 Adapter
 ├── index.html              # 从外部加载 WebGAL Bundle 的自研页面壳
@@ -45,7 +55,7 @@ npm test
 npm run dynamic -- --project rain-after
 ```
 
-Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice。LangChain Core 是内部编排依赖，不是 ADK 本身；外部 Scheduler 与 World 提交链仍待实现。Python 环境、依赖和工具统一使用 uv：
+Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice。`agent_runtime/agent/personact/loop.py` 是显式认知循环，`agent.py` 是串行化、replay 与 private snapshot 原子替换的门面；LangChain Core 是内部编排依赖，不是 ADK 本身。外部 Scheduler 与 World 提交链仍待实现。Python 环境、依赖和工具统一使用 uv：
 
 ```bash
 uv sync --frozen

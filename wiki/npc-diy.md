@@ -258,8 +258,9 @@ Event Scheduler 选择 agent + committed frame
 - `agent_runtime/model.py`：统一 strict/frozen Pydantic policy；
 - `agent_runtime/agent/personact/manifest.py`：不受信配置模型与 loader；
 - `agent_runtime/agent/personact/compiler.py`：Catalog 解析、权限收敛与 digest；
-- `agent_runtime/agent/memory/` 与 `agent_runtime/agent/personact/state.py`：Persona 私有 Memory/State 的部分 strict 基础能力；
-- `agent_runtime/agent/personact/agent.py`：`PersonActAgent.decide` 与真实 prepare/perceive/retrieve/plan/propose；同一 Agent 的调用串行化，并一次替换 immutable private snapshot；
+- `agent_runtime/agent/memory/` 与 `agent_runtime/agent/personact/state.py`：共享 Memory 机制与 Persona 私有 State；
+- `agent_runtime/agent/personact/agent.py`：`PersonActAgent.decide` 门面、调用串行化、replay 与 immutable private snapshot 原子替换；
+- `agent_runtime/agent/personact/loop.py`：真实 typed prepare/perceive/retrieve/plan/propose 认知循环；
 - `agent_runtime/world/contracts.py`：固定 Proposal envelope、action union 与 typed target；它不是完整 World 实现；
 - `agent_runtime/agent/personact/proposal.py`：最终 Proposal 构造、actor 注入与 capability/affordance/evidence 校验。
 

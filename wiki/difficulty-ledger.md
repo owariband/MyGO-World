@@ -59,8 +59,8 @@
 | H-025 | 2026-08-21 | OPEN | Director 自己的补完调用也消耗时间时，如何避免为解释自身 latency 而无限递归？ | 若再次调用去解释这段耗时会形成递归；若忽略又违反“Agent 响应时间可计时” | 提交器先记录未解释的 Director latency；是否下一波闭合、两阶段补完或只交给 Broadcast 省略，待实验 |
 | H-026 | 2026-08-21 | PARTIAL | 去掉 Maze 后，`decide` 内部 perceive 如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？ | 必须新增语义场景、感知通道、字段裁剪、注意力与 provenance；认知链比扫描附近 tile 更显式 | `Committed WorldSegment -> PerceptionProjector -> PerceptionFrame -> decide/perceive -> Observation/Memory`；阶段已实现，待咖啡与对话 Trace 验证 |
 | H-027 | 2026-08-21 | DECIDED | 一期如何调度 Persona，既先把流程串起来，又允许角色知道何时回应或选择什么都不做？ | 同一 Event 吞吐受串行限制；跨 Event 并行必须识别共享角色、对象和因果依赖 | 同一 Event 内稳定串行并逐步提交；隔离 Event 并行；Scheduler 给决策机会，Frame 给待回应信号，Agent 可 `no_op` |
-| H-028 | 2026-08-21 | DECIDED | 纯 Agent Runtime 的目录怎样表达 Agent、Memory、Event 与 World 的真实所有权，而不是把所有模块扁平堆在一起？ | 需要约束 Python package 依赖、namespace 与双向导入，目录比简单平铺多一层 | `agent/{memory,personact,director,broadcast}` 与 `event/`、`world/` 平级；Memory 共用实现但隔离数据 |
-| H-029 | 2026-08-21 | DECIDED | Persona、Director、Broadcast 是否应共享同一套认知流程，从而让 cognitive_modules、memory_structures、prompt_template 成为通用基座？ | 共享过少会重复调用设施；共享一条 Pipeline 或 Loop 又会把 Persona 语义强塞给导演导播 | 共享 strict Pydantic policy、RunnableConfig 与模型适配，各 Agent 保留专属 strategy、Prompt、namespace 和 Proposal；Scheduler loop 不共享给 Agent |
+| H-028 | 2026-08-21 | DECIDED | 纯 Agent Runtime 的目录怎样表达具体 PersonAct、Agent 共享能力以及 Event/World 所有权？ | 需要区分真实实现、未来 Agent 类型和配置实例，目录比扁平结构多一层 | `agent/{memory,personact,director,broadcast}` 与 `event/`、`world/` 平级；Anon/Soyo 是 PersonAct 实例 |
+| H-029 | 2026-08-21 | DECIDED | Persona、Director、Broadcast 是否应共享同一套认知流程，从而让 cognitive_modules、memory_structures、prompt_template 成为通用基座？ | 共享过少会重复基础设施；过早抽跨 Agent runner 又会增加理解和 CR 成本 | 共享 AgentLoop 生命周期与 Memory/Model 基础设施；PersonAct loop 显式位于 `personact/loop.py`，跨 Agent runner 待第二个实现后再抽 |
 | H-030 | 2026-08-22 | DECIDED | Generative Agents 自造的 Loop、模型调用、Prompt、解析、重试和存储，哪些应继续自研，哪些应交给成熟库？ | 引入 LangChain Core、Pydantic 及 adapter 会增加依赖、类型边界和升级成本 | LangChain 接管 Runnable/模型调用 plumbing，Pydantic + pyright 守类型边界；MyGO 自研认知语义与 World/Event 治理 |
 | H-031 | 2026-08-22 | DECIDED | 地点事实、地点关联信息和发生于该地点的 Event 如何持久化，才能防止 Agent 杜撰或前后口径漂移？ | 需要增加版本化 Location 模型、Fact/Info CAS、地点索引和额外查询成本 | Location 是 World 层一等模型；Fact/Info append-only，Event 只挂 Ledger 引用，只有 Committer 可修改 |
 | H-032 | 2026-08-22 | PARTIAL | 角色前往某地点时，Director 如何利用地点已有 Info 决定其获知方式，又不把全局知识直接灌进角色 Memory？ | 每次到访多一次候选查询；有歧义时增加 Director 调用，并需验证披露与时空条件 | Runtime 查询 LocationView 并先确定性过滤；Director 返回 NoOp/DiscoveryPlan，已有信息由 Projector 投影，新传播行为先提交 Event，最终由 Persona 决定实际获知 |
@@ -331,7 +331,7 @@ agent_runtime/
 └── testdata/
 ```
 
-`agent/` 表示 Agent 体系：`personact / director / broadcast` 是决策主体，`memory/` 是它们共同依赖的基础能力；`event/` 表示互动容器、轮次和事件生命周期，并独占 Scheduler loop；`world/` 表示不依赖任何具体 Agent 的客观状态、感知投影、校验与提交。`agent/personact/` 公开一次性 `decide`，内部才按需使用 LangChain Runnable。
+`agent/` 表示 Agent 体系：`personact` 是当前已经落地的具体 Character Agent，`memory` 是三类 Agent 可复用但按 namespace 隔离的能力，`director / broadcast` 是待实现的具体 Agent 类型。`event/` 表示互动容器、轮次和生命周期，并独占 Scheduler loop；`world/` 表示客观状态、感知投影、校验与提交。Anon、Soyo 等只是在作品配置与私有状态中实例化 `PersonActAgent`，不进入源码 package 树。此前把 `personact` 泛化为 `character`、或另造空的通用 loop/adk 包来“代表”已有实现的方案已被否决；最终把已实现的认知 sequence 显式放入 `personact/loop.py`，并保留 `personact/agent.py` 作为稳定门面。
 
 共用 Memory 模块不能演变成全员共享知识库。每个 Agent 都有独立 namespace：Persona 保存观察、情节与反思；Director 保存 Narrative Thread、补完历史与失败诊断；Broadcast 保存已覆盖区间和连续性状态。跨 namespace 读取必须通过显式授权或公开 WorldEvent，不能因为共用一个 Store 就越权。
 
@@ -339,17 +339,18 @@ agent_runtime/
 
 ### H-029｜Persona、Director、Broadcast 是否应共享同一套认知流程？
 
-答案是“共享类型策略与调用基础设施，不共享一条 Persona Pipeline 或顶层 Loop”。三类 Agent 的输入、决策频率、权限与输出完全不同；Event Scheduler 负责何时调用它们。
+答案是“共享 AgentLoop 生命周期，不共享 PersonAct 的具体节点实现，也不共享外部 Event Scheduler”。三类 Agent 使用同一组阶段语义，但输入、频率、权限、输出和具体拓扑不同。
 
 ```text
 共用：
+  AgentLoop lifecycle
   strict/frozen Pydantic Model policy
   LangChain Runnable / RunnableConfig / callback / tracing 约定
   MemoryRecord / Store / Retriever
   LangChain Core ChatModel、Prompt、Tool adapter 与有界技术重试
 
 专属：
-  PersonAct / Director / Broadcast 的一次性入口与 strategy
+  PersonAct / Director / Broadcast 的 typed input、state 与 strategy
   各自 prompt_template
   各自 Memory namespace
   各自 Proposal 类型
@@ -365,7 +366,7 @@ Runtime validate/commit
 observe_outcome -> reflect
 ```
 
-PersonAct 的 Decision Run 在一个 Proposal 后结束。`PersonActAgent.decide` 已实现 prepare/perceive/retrieve/plan/propose；World 提交完成后的 feedback/reflection 仍需用独立入口和完整 Fixture 验证，不能在 `decide` 中假跑。
+PersonAct 的 Decision Run 在一个 Proposal 后结束。`personact/loop.py` 中的 typed `RunnableSequence` 已实现 prepare/perceive/retrieve/plan/propose，由 `PersonActAgent.decide` 以不可变 private snapshot 调用；World 提交完成后的 outcome/reflect 仍需补齐。跨 Agent 公共 runner 等 Director Fixture 提供第二个真实消费者后再从重复代码中提取。
 
 ### H-030｜如何避免重写 Generative Agents 已经有成熟替代品的基础设施？
 

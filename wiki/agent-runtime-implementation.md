@@ -116,16 +116,21 @@ agent_runtime/
 ├── __init__.py
 ├── model.py                         # 全局 StrictModel 策略
 ├── agent/
-│   ├── memory/                       # Persona 私有 Memory 的 strict 基础能力
-│   └── personact/
+│   ├── memory/                       # 共享机制，数据按 namespace 隔离
+│   ├── director/                     # Director Agent 类型边界；实现待补
+│   ├── broadcast/                    # Broadcast Agent 类型边界；实现待补
+│   └── personact/                    # 具体 Character Agent；Anon/Soyo 是实例
 │       ├── manifest.py               # 不受信 agents.json 的严格模型与 loader
 │       ├── compiler.py               # Manifest -> CompiledPersonActSpec
 │       ├── state.py                  # Persona 私有 state；不是 World State
-│       ├── agent.py                  # PersonActAgent.decide 与真实认知阶段
+│       ├── agent.py                  # decide 门面、锁、replay、snapshot 事务
+│       ├── loop.py                   # typed PersonAct 认知循环与五个阶段
 │       ├── errors.py
 │       └── proposal.py               # 最终 Proposal 构造与权限校验
 ├── world/
 │   └── contracts.py                 # World-owned 边界；不是完整 World 实现
+├── event/                            # Scheduler/EventSession 类型边界
+├── rendergateway/                    # RenderJob 出站类型边界
 ├── testdata/npc_diy/agents.json
 └── tests/
     ├── test_personact.py
@@ -138,7 +143,7 @@ agent_runtime/
 
 ### 2.2 一期目标目录
 
-在实际职责出现时，沿以下方向增量扩展；不要预先创建空 package：
+领域边界 package 已按以下方向创建；只有真实职责出现时才新增具体 Model、Runner 或 Service，不用空实现伪装进度：
 
 ```text
 agent_runtime/
@@ -148,7 +153,8 @@ agent_runtime/
 │   │   ├── manifest.py
 │   │   ├── compiler.py
 │   │   ├── state.py
-│   │   ├── agent.py                 # 一次决策；不拥有 Scheduler loop
+│   │   ├── agent.py                 # 一次决策门面；不拥有 Scheduler loop
+│   │   ├── loop.py                  # prepare/perceive/retrieve/plan/propose
 │   │   └── proposal.py              # Proposal authority boundary
 │   ├── director/                    # SegmentDraft；待实现
 │   ├── broadcast/                   # BroadcastPlan；待实现
@@ -162,7 +168,7 @@ agent_runtime/
 
 目录按所有权表达边界：
 
-- `agent/personact/` 消费本人 `PerceptionFrame`、Persona 私有 state 与 scoped Memory，通过 `PersonActAgent.decide` 只返回一个 `ActionProposal` 对象；
+- `agent/personact/loop.py` 显式实现 typed `prepare -> perceive -> retrieve -> plan -> propose`；`agent.py` 的 `PersonActAgent.decide` 负责串行化、proposal-id replay 与成功后的 private snapshot 原子替换。它消费本人 `PerceptionFrame`、Persona 私有 state 与 scoped Memory，只返回一个 `ActionProposal`。Anon、Soyo 等由 Manifest 编译成该类型的不同实例；
 - `agent/director/` 只读取 Snapshot、Proposal 与时间证据，返回待校验 `SegmentDraft`；
 - `agent/broadcast/` 只读取已提交 Event，返回 `BroadcastPlan`；
 - `agent/memory/` 提供共用机制，但每次访问都绑定 `agent_id + namespace`，共用实现不等于共享数据；
@@ -307,9 +313,9 @@ load committed snapshot
 -> RenderGateway 投递 Dynamic Render Plugin
 ```
 
-### 4.1 三类 Agent 的共享边界
+### 4.1 三类 Agent 的共享 AgentLoop 生命周期
 
-三类 Agent 可以借鉴以下认知阶段语言，但这不是公共 Loop 接口，也不要求共享一条 Pipeline：
+三类 Agent 共享以下生命周期语义；当前唯一真实实现是 `agent/personact/loop.py` 中的 `PersonActLoop`，由 `PersonActAgent.decide` 调用。外部 Event Scheduler 不属于 AgentLoop：
 
 ```text
 observe/perceive -> retrieve -> plan -> propose
@@ -317,7 +323,7 @@ Runtime validate/commit
 observe_outcome -> conditional reflect
 ```
 
-但三类 Agent 的 typed 输入、输出、Prompt、Memory namespace 与内部步骤必须分开：
+三类 Agent 共享生命周期和通用 Memory/Model plumbing；typed 输入、输出、State、Strategy、Prompt、Memory namespace、触发方式和具体节点必须分开：
 
 | Agent | 输入 | 输出 | 副作用权限 |
 |---|---|---|---|
@@ -325,7 +331,7 @@ observe_outcome -> conditional reflect
 | Director | Snapshot、Proposal、latency、Narrative Thread | `SegmentDraft` / `DiscoveryPlan` | 无 |
 | Broadcast | committed Event range、Viewer/Buffer 状态 | `BroadcastPlan` | 无 |
 
-PersonAct 的公共边界固定为 `decide -> one ActionProposal`；内部认知实现使用领域函数与 typed Runnable。Director/Broadcast 在真实复杂度出现前可用独立 Runnable 或确定性策略，不建立万能 BaseAgent，也不为了形式统一复制 PersonAct 拓扑。
+Character 的公共边界固定为 `decide -> one ActionProposal`。`agent.py` 保持 Agent 门面，`loop.py` 明确承载真实 sequence；Director/Broadcast 后续沿用相同生命周期，但分别实现自己的入口、Strategy、State、Prompt、namespace 和 Proposal 类型。只有第二个真实实现产生稳定重复代码后，才提取跨 Agent 的公共 runner。
 
 Decision Run 在一个 Proposal 后结束。World 完成校验与提交后，再以独立输入触发 `observe_outcome -> reflect`；不得让 `decide` 悬挂等待 World Commit，也不得在其中直接产生世界副作用。
 
