@@ -33,6 +33,8 @@
 - **Agent 权限：**Character、Director 和 Broadcast 只产生 Proposal 或 Plan。
 - **外部请求：**未来的玩家自然语言输入只是绑定 `based_on_world_version` 的 Player Event Request；Director 可以将其解释为带来源证据的 External Event Candidate，但不能提交事实。没有对应 ActionProposal 时，外部事件不得替持久 Character 作出重要选择、生成台词或改变动机。
 - **Agent 工具：**首期模型不主动调用工具；后端先按权限投影结构化上下文，再一次性传给对应 Agent。
+- **Prompt 职责分层：**模型输入在职责上分为后端 Agent Contract、版本化 Runtime Skill、场景或 Session 策略及当前 Runtime Context。Agent Contract 负责技术约束，Runtime Skill 只负责跨场景稳定的创作倾向，场景策略负责当前目标与节奏，Runtime Context 提供当前事实与私有记忆；当前 MVP 尚未实现独立 Scenario Policy 时，只组合其余三层。
+- **契约执行：**输入裁剪、私有数据隔离、输出 Schema、稳定 ID、来源证明和权限校验由后端负责；自然语言只解释语义，不能作为安全或正确性的唯一保证。当前 MVP 仍要求模型回传部分上下文字段以保留完整 Trace，但 Runtime 将其视为不可信副本并逐项校验。
 - **提案表达：**ActionProposal 只包含简短 `intent_summary`，不请求思维链；`utterance` 显式列出接收者，为空时对 Session 公开。
 - **行动目标：**`move` 只能选择 PerceptionFrame 中的可达地点；`interact` 引用既有对象或角色时只能选择当前可见实体，但交互意图可以使用自然语言，由 Director 结算、Proposal Validator 与 Segment Validator 约束状态变更。
 - **偶发道具：**自然语言可以包含只属于当前 Event payload 的普通 Incidental Prop；它保存 Event 内唯一 `prop_key`、类型和描述，但没有全局 Entity ID、后续状态或专属素材。MVP 不实现升格，未来 Entity 可通过 `origin_event_id + origin_prop_key` 追溯来源。
@@ -94,6 +96,7 @@
 - **失败规则：**重试后仍失败会回滚当前 Wave、将 Generation Batch 标记为失败并让当前 CLI 命令以非零状态退出；此前已提交的 World Version 保留。
 - **空工作：**`advance` 没有 Runnable Session 或 `render` 没有新 Event 时返回成功的 `no_work`，不调用模型或生成空记录。
 - **轮数上限：**正常达到 `max_waves` 时以 `limit_reached` 关闭当前 Session，Batch 成功结束并警告；Provider 请求预算耗尽仍作为失败处理。
+- **长期演化：**长期 World 通过多个有界 Generation Batch 持续推进，而不是让单次调用无限运行。Character Skill 不按 World Version 编排固定动作；持续目标、承诺和认知变化进入 Agent Memory，客观后果进入 World Ledger。多人 Session 依靠 `utterance` 的待回应关系、`wait`/`no_op` 和 Session 生命周期控制发言与收束。
 - **展示规则：**首期只生成并校验 WebGAL 演出脚本，不自动启动播放器。
 - **发布规则：**Render 先在 `.mygo/renders/<render_id>/` 生成并校验规范产物，Render Gateway 再把脚本写入 WebGAL 目标目录内的临时文件并原子重命名为不可变 hash 路径，最后用短 SQLite 事务写 Render 元数据和 Broadcast Disposition。若进程在文件发布后、数据库提交前中断，重试必须校验已有文件 hash：相同则复用并补全记录，不同则安全失败；其他失败不得留下被视为已完成的可变目标。
 - **编译 seam：**Python Runtime 提供窄 `RenderCompiler` 接口，仅将首期八种结构化 Beat 确定性编译为 WebGAL DSL；它负责文本转义、Manifest/真实文件/Live2D 能力校验和内容哈希，不依赖 Node，也不实现通用 DSL Parser。现有 Node 输出仅作为兼容性 Golden 样例。
@@ -113,7 +116,9 @@
 - **初始化提交：**WorldInitializer 负责 Seed 校验、临时数据库迁移与原子文件发布；它构造 `GenesisCommitPlan` 并调用同一个 World Committer。Committer 使用可注入 Clock 与 ID Generator 分配领域时间和 ID，临时文件名不属于领域重放数据。
 - **初始化安全：**目标 `world_id` 已存在时 `init` 失败且不覆盖或合并；World 只保存 `seed_id`、声明版本和内容哈希，不复制完整 YAML。
 - **版本化内容：**Runtime Skill 使用 `content/skills/**/*.md`，Asset Manifest 使用 `content/assets/manifest.yaml`；Scenario 只引用稳定内容 ID，不保存美术文件路径。
-- **Skill 格式：**Runtime Skill 使用 YAML frontmatter 保存 ID、版本和 Agent kind，Markdown 正文保存人物或创作风格；模型、密钥、权限和工具不属于 Skill 内容。
+- **Skill 格式：**Runtime Skill 使用 YAML frontmatter 保存 ID、版本和 Agent kind，Markdown 正文保存人物或创作风格；模型、密钥、权限、工具、具体 World Version、固定实体 ID、输出字段复制规则和 Session 结束脚本不属于正式 Skill 内容。
+- **正式与验收 Skill：**无 `-live` 后缀的正式 Character/Director/Broadcast Skill 必须保持场景无关，可供长期 World 重用。显式 Live 验收可以绑定 `-live` Acceptance Skill，以固定动作和收束条件换取稳定覆盖；该例外不得进入正式 World。
+- **Scenario Policy：**当前故事前提、软目标、节奏和自然收束条件属于 Scenario Policy，不属于 Character Skill。MVP 尚未提供独立持久化的 Scenario Policy Schema；现阶段正式世界通过 Scenario 初始状态与 Agent Memory 表达当前动机，Acceptance Skill 仅作为测试专用过渡方案。
 - **人格版本：**MVP 不实现 Character Profile Revision 或自动 Reflection；运行中的经历变化由 Agent Memory 承载。人工调整通过创建新的不可变 Character Skill 版本并显式重绑单个 World 完成，从下一 Batch 生效，Trace 记录实际版本和内容哈希。
 - **Skill 绑定记录：**`skill-bind` 追加独立配置记录且不推进 World Version；World 独占锁保证它只能在两个 Batch 之间生效。
 - **素材清单：**Asset Manifest 是人工确认的白名单，使用相对 WebGAL 分类根的路径；外部 `game` 目录由运行配置提供，未列出的素材不得进入 BroadcastPlan。

@@ -12,6 +12,10 @@ _Avoid_: Process、Generation Batch、Scenario Seed
 由人编写并纳入版本控制的初始世界条件，定义首批角色、地点、事实和 Event Session；它只在 `init` 时被物化为持久世界，之后不再是实体状态的权威来源，文件变更也不会修改既有 World。
 _Avoid_: Fixture、Prompt、Snapshot
 
+**Scenario Policy**:
+与某个 Scenario 或 Event Session 绑定的创作策略，描述故事前提、软目标、节奏和自然收束条件；它不是角色人格，不能授予权限或绕过 Validator。MVP 尚未将其实现为独立持久模型。
+_Avoid_: Scenario Seed、Runtime Skill、Agent Contract
+
 **Event Session**:
 一段具有持久身份和生命周期的互动执行容器；其固定参与者集合与 Interaction Scope 共同构成互动边界。一个 Event Session 可以跨越多轮 Generation Wave 并产生多个 World Event；参与者集合发生分区时，当前 Session 结束并产生新的后继 Session。
 _Avoid_: Event、World Event、Event Channel、Interaction Group
@@ -105,16 +109,20 @@ _Avoid_: World Ledger、Snapshot、Generation Trace
 _Avoid_: World Event、Belief、Attention Candidate
 
 **Runtime Skill**:
-Character、Director 或 Broadcast 使用的版本化创作配置，以自然语言表达人格、动机或创作风格；Runtime 显式选择并加载它，但它不能授予数据或工具权限。
+Character、Director 或 Broadcast 使用的版本化、场景无关创作配置，以自然语言表达稳定的人格、动机、关系倾向或创作风格；具体轮次、实体 ID、输入输出字段和结束条件不属于 Runtime Skill。
 _Avoid_: Codex Skill、Prompt、Agent Contract
 
 **Character Skill**:
-属于单个角色的不可变 Runtime Skill，以自然语言描述人格、动机、关系、说话方式、形象和表演倾向；具体美术文件由 Asset Manifest 映射，MVP 中的运行期变化由 Agent Memory 承载。
+属于单个角色的不可变 Runtime Skill，以自然语言描述跨场景稳定的人格、长期驱动力、关系倾向、判断方式和表达风格；具体任务由 Scenario Policy 或运行上下文提供，经历造成的变化由 Agent Memory 承载。
 _Avoid_: Character Memory、Asset Manifest、Codex Skill
 
 **Agent Contract**:
-后端为一种 Agent 角色强制执行的输入投影、工具白名单、结构化输出类型和校验规则；它不描述角色人格或创作风格。
+后端为一种 Agent 角色拥有并强制执行的接口，包括输入投影、工具白名单、结构化输出 Schema、确定性字段及校验规则；后端可以把契约说明组装成模型指令，但自然语言提示本身不构成权限或正确性保证。
 _Avoid_: Runtime Skill、Prompt
+
+**Acceptance Skill**:
+只服务于显式 Fixture 或 Live 验收的 Runtime Skill，可以为覆盖验收路径而指定轮次、动作和结束条件；它必须以用途明确的 ID 与正式 Character Skill 分离，不用于长期 World。
+_Avoid_: Character Skill、Scenario Policy
 
 **Asset Manifest**:
 仓库中经过人工确认的素材白名单，以稳定领域 ID 将角色、地点、表情和动作映射到 WebGAL 分类根下的相对路径；它不描述人格或决定剧情，未列出的文件不能由 Broadcast 使用。

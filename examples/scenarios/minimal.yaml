@@ -1,47 +1,47 @@
 schema_version: 1
 seed_id: mygo-minimal
-version: 1.0.0
-name: Minimal MyGO World
+version: 2.0.0
+name: MyGO 最小世界
 world_time_ms: 0
 calendar_anchor: "2026-08-31T09:00:00+08:00"
 skill_bindings:
   characters:
     character-anon:
       skill_id: mygo.character.anon
-      version: 1.0.0
+      version: 3.0.0
     character-soyo:
       skill_id: mygo.character.soyo
-      version: 1.0.0
+      version: 2.0.0
   director:
     skill_id: mygo.director.default
-    version: 1.0.0
+    version: 2.0.0
   broadcast:
     skill_id: mygo.broadcast.default
-    version: 1.0.0
+    version: 2.0.0
 entities:
   - entity_type: location
     entity_id: location-live-house
-    name: Live House RiNG
+    name: RiNG Live House
     scopes:
       - scope_key: lounge
-        name: Lounge
+        name: 休息室
         reachable_destinations: []
     state:
-      description: A quiet lounge before rehearsal.
+      description: 排练开始前安静的休息室。
   - entity_type: character
     entity_id: character-anon
-    name: Anon
+    name: 千早爱音
     location_id: location-live-house
     scope_key: lounge
     state:
-      mood: curious
+      mood: 好奇
   - entity_type: character
     entity_id: character-soyo
-    name: Soyo
+    name: 长崎素世
     location_id: location-live-house
     scope_key: lounge
     state:
-      mood: guarded
+      mood: 克制
 sessions:
   - session_id: session-first-meeting
     location_id: location-live-house
@@ -53,7 +53,7 @@ memories:
   - memory_id: memory-anon-arrival
     agent_id: character-anon
     memory_type: observation
-    content: Anon has just arrived at RiNG for rehearsal.
+    content: 爱音刚刚抵达 RiNG，准备参加排练。
     location_tags:
       - location-live-house
     importance: 2

@@ -1,0 +1,80 @@
+schema_version: 1
+manifest_id: mygo-five-character-assets
+version: 1.0.0
+backgrounds:
+  - asset_id: background-ring-lounge
+    path: 演出、排练/其他演出场地/演出厅休息室.png
+bgms:
+  - asset_id: bgm-mygo-title
+    path: s_Title.mp3
+live2d_models:
+  - asset_id: model-anon-live
+    character_id: character-anon
+    display_name: 千早爱音
+    path: anon/live_default/model.json
+    motions:
+      - anon/idle01
+      - anon/smile01
+      - anon/thinking01
+    expressions:
+      - anon/default
+      - anon/smile01
+      - anon/thinking01
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-soyo-live
+    character_id: character-soyo
+    display_name: 长崎素世
+    path: soyo/live_default/model.json
+    motions:
+      - soyo/idle01
+      - soyo/smile01
+      - soyo/serious01
+    expressions:
+      - soyo/default
+      - soyo/smile01
+      - soyo/serious01
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-tomori-live
+    character_id: character-tomori
+    display_name: 高松灯
+    path: tomori/live_default/model.json
+    motions:
+      - tomori/idle01
+      - tomori/sing01
+      - tomori/thinking01
+    expressions:
+      - tomori/default
+      - tomori/smile01
+      - tomori/serious01
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-rana-live
+    character_id: character-rana
+    display_name: 要乐奈
+    path: rana/live_default/model.json
+    motions:
+      - rana/idle01
+      - rana/niya01
+      - rana/thinking01
+    expressions:
+      - rana/default
+      - rana/smile01
+      - rana/thinking01
+    entrance_effects:
+      - fadeIn
+  - asset_id: model-taki-live
+    character_id: character-taki
+    display_name: 椎名立希
+    path: taki/live_default/model.json
+    motions:
+      - taki/idle01
+      - taki/serious01
+      - taki/thinking01
+    expressions:
+      - taki/default
+      - taki/serious01
+      - taki/smile01
+    entrance_effects:
+      - fadeIn

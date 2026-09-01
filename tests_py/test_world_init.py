@@ -185,7 +185,7 @@ def test_new_process_reopens_same_snapshot_after_seed_changes(
     shown = json_output(show_result)
 
     assert init_result.returncode == show_result.returncode == 0
-    assert shown["world_name"] == "Minimal MyGO World"
+    assert shown["world_name"] == "MyGO 最小世界"
     assert shown["snapshot_checksum"] == init_receipt["snapshot_checksum"]
     assert shown["seed"] == init_receipt["seed"]
     anon = next(
@@ -193,7 +193,7 @@ def test_new_process_reopens_same_snapshot_after_seed_changes(
         for entity in shown["snapshot"]["entities"]
         if entity["entity_id"] == "character-anon"
     )
-    assert anon["payload"]["state"]["mood"] == "curious"
+    assert anon["payload"]["state"]["mood"] == "好奇"
 
 
 def test_invalid_seed_does_not_publish_a_database(

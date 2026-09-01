@@ -1,0 +1,205 @@
+schema_version: 1
+seed_id: mygo-five-character-rehearsal
+version: 1.0.0
+name: MyGO 五人排练编排讨论
+world_time_ms: 0
+calendar_anchor: "2026-09-01T17:00:00+08:00"
+skill_bindings:
+  characters:
+    character-anon:
+      skill_id: mygo.character.anon
+      version: 3.0.0
+    character-soyo:
+      skill_id: mygo.character.soyo
+      version: 2.0.0
+    character-tomori:
+      skill_id: mygo.character.tomori
+      version: 1.0.0
+    character-rana:
+      skill_id: mygo.character.rana
+      version: 1.0.0
+    character-taki:
+      skill_id: mygo.character.taki
+      version: 1.0.0
+  director:
+    skill_id: mygo.director.default
+    version: 2.0.0
+  broadcast:
+    skill_id: mygo.broadcast.default
+    version: 2.0.0
+entities:
+  - entity_type: location
+    entity_id: location-ring-lounge
+    name: RiNG 休息室
+    scopes:
+      - scope_key: lounge
+        name: 排练前的休息室
+        reachable_destinations: []
+    state:
+      description: 晚间排练开始前，五人围在休息室的桌边讨论今天的编排。
+      shared_issue: 需要在有限排练时间内决定新曲的进入方式、段落衔接和结束处理。
+  - entity_type: object
+    entity_id: object-arrangement-board
+    name: 编排白板
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      opening: 未决定由人声、吉他或全员共同进入
+      transition: 主歌到副歌的动态层次尚未确定
+      ending: 最后一个音的收束方式待确认
+  - entity_type: object
+    entity_id: object-rehearsal-recording
+    name: 上次排练录音
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      status: 已标记待复听
+      observations:
+        - 第二段进入时各声部没有对齐
+        - 结尾拖长后情绪完整但节奏略松
+  - entity_type: character
+    entity_id: character-anon
+    name: 千早爱音
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: 想推动讨论
+  - entity_type: character
+    entity_id: character-soyo
+    name: 长崎素世
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: 留意整体平衡
+  - entity_type: character
+    entity_id: character-tomori
+    name: 高松灯
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: 认真寻找表达方式
+  - entity_type: character
+    entity_id: character-rana
+    name: 要乐奈
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: 对新的声音组合感兴趣
+  - entity_type: character
+    entity_id: character-taki
+    name: 椎名立希
+    location_id: location-ring-lounge
+    scope_key: lounge
+    state:
+      mood: 希望尽快开始有效排练
+sessions:
+  - session_id: session-ring-arrangement
+    location_id: location-ring-lounge
+    scope_key: lounge
+    participant_ids:
+      - character-anon
+      - character-soyo
+      - character-tomori
+      - character-rana
+      - character-taki
+memories:
+  - memory_id: memory-five-anon-observation
+    agent_id: character-anon
+    memory_type: observation
+    content: "PRIVATE_ANON：爱音看见编排白板上仍有三个空缺，所有人都已经来到休息室。"
+    entity_tags:
+      - object-arrangement-board
+      - character-soyo
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-anon-belief
+    agent_id: character-anon
+    memory_type: belief
+    content: "PRIVATE_ANON：爱音觉得先让每个人说出最在意的一处，讨论会比较容易开始。"
+    entity_tags:
+      - object-arrangement-board
+      - character-tomori
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-soyo-observation
+    agent_id: character-soyo
+    memory_type: observation
+    content: "PRIVATE_SOYO：素世听过上次录音，注意到第二段进入不齐，但结尾的情绪仍然完整。"
+    entity_tags:
+      - object-rehearsal-recording
+      - character-taki
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-soyo-belief
+    agent_id: character-soyo
+    memory_type: belief
+    content: "PRIVATE_SOYO：素世认为先保留各方都能接受的骨架，再调整细节，可能减少无谓对立。"
+    entity_tags:
+      - object-arrangement-board
+      - character-anon
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-tomori-observation
+    agent_id: character-tomori
+    memory_type: observation
+    content: "PRIVATE_TOMORI：灯复听时感到拖长的结尾能留下想说的话，但第二段的错位让词意断开。"
+    entity_tags:
+      - object-rehearsal-recording
+      - character-rana
+    location_tags:
+      - location-ring-lounge
+    importance: 4
+  - memory_id: memory-five-tomori-belief
+    agent_id: character-tomori
+    memory_type: belief
+    content: "PRIVATE_TOMORI：灯觉得开头若留出一点呼吸，再让声音逐渐靠近，歌词可能更容易被听见。"
+    entity_tags:
+      - object-arrangement-board
+      - character-anon
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-rana-observation
+    agent_id: character-rana
+    memory_type: observation
+    content: "PRIVATE_RANA：乐奈听见录音里的第二段吉他和鼓没有咬合，那里也可能产生新的变化。"
+    entity_tags:
+      - object-rehearsal-recording
+      - character-taki
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-rana-belief
+    agent_id: character-rana
+    memory_type: belief
+    content: "PRIVATE_RANA：乐奈觉得亲手试几种进入方式，比继续抽象讨论更容易找到有趣的答案。"
+    entity_tags:
+      - object-arrangement-board
+      - character-tomori
+    location_tags:
+      - location-ring-lounge
+    importance: 3
+  - memory_id: memory-five-taki-observation
+    agent_id: character-taki
+    memory_type: observation
+    content: "PRIVATE_TAKI：立希确认今晚可用的排练时间有限，白板上的三个问题都还没有决定。"
+    entity_tags:
+      - object-arrangement-board
+      - character-soyo
+    location_tags:
+      - location-ring-lounge
+    importance: 4
+  - memory_id: memory-five-taki-belief
+    agent_id: character-taki
+    memory_type: belief
+    content: "PRIVATE_TAKI：立希认为先确定节拍和进入信号，再试结尾，最能避免重复浪费时间。"
+    entity_tags:
+      - object-rehearsal-recording
+      - character-rana
+    location_tags:
+      - location-ring-lounge
+    importance: 3

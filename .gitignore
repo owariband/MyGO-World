@@ -8,3 +8,4 @@ node_modules/
 __pycache__/
 .pytest_cache/
 *.py[cod]
+skills-lock.json

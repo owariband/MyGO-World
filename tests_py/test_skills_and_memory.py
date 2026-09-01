@@ -10,13 +10,14 @@ import yaml
 from conftest import MINIMAL_SEED, REPOSITORY_ROOT
 from sqlalchemy.orm import Session
 
+from mygo_world.contracts import load_seed
 from mygo_world.db.engine import create_world_engine
 from mygo_world.errors import SeedInvalidError, WorldError
 from mygo_world.gateways import FixtureGateway
 from mygo_world.memory import AgentMemoryRepository
 from mygo_world.runtime import _default_fixture_responses, advance_world
-from mygo_world.skill_bindings import bind_character_skill
-from mygo_world.skills import load_runtime_skill
+from mygo_world.skill_bindings import bind_character_skill, resolve_seed_skills
+from mygo_world.skills import RuntimeSkillCatalog, load_runtime_skill
 from mygo_world.worlds import initialize_world, show_world
 
 SKILLS_DIR = REPOSITORY_ROOT / "content" / "skills"
@@ -41,6 +42,32 @@ def test_runtime_skill_frontmatter_is_strict_and_body_is_loaded(tmp_path: Path) 
     with pytest.raises(WorldError, match="model") as error:
         load_runtime_skill(skill_path)
     assert error.value.code == "SKILL_INVALID"
+
+
+def test_minimal_scenario_uses_layered_chinese_skills() -> None:
+    loaded = load_seed(MINIMAL_SEED)
+    bindings = resolve_seed_skills(loaded.seed, RuntimeSkillCatalog.load(SKILLS_DIR))
+    skills = {item.skill_id: item for item in bindings}
+
+    assert skills["mygo.character.anon"].version == "3.0.0"
+    assert skills["mygo.character.soyo"].version == "2.0.0"
+    assert skills["mygo.director.default"].version == "2.0.0"
+    assert skills["mygo.broadcast.default"].version == "2.0.0"
+    assert "核心驱动力" in skills["mygo.character.anon"].body
+    assert "核心驱动力" in skills["mygo.character.soyo"].body
+    assert "群像叙事" in skills["mygo.director.default"].body
+    assert "视觉小说" in skills["mygo.broadcast.default"].body
+
+    formal_bodies = "\n".join(item.body for item in skills.values())
+    for misplaced_instruction in (
+        "World Version",
+        "world_version",
+        "session_id",
+        "actor_id",
+        "source_kind",
+        "object-set-list",
+    ):
+        assert misplaced_instruction not in formal_bodies
 
 
 def test_init_persists_exact_bindings_and_advance_uses_skill_body(
@@ -77,7 +104,7 @@ def test_unchanged_version_with_changed_content_fails_before_model_call(
     copied = tmp_path / "skills"
     shutil.copytree(SKILLS_DIR, copied)
     initialize_world(MINIMAL_SEED, "tampered-skill", worlds_dir, skills_dir=copied)
-    path = copied / "characters" / "anon-1.0.0.md"
+    path = copied / "characters" / "anon-3.0.0.md"
     path.write_text(path.read_text(encoding="utf-8") + "Changed.\n", encoding="utf-8")
 
     with pytest.raises(WorldError) as error:
@@ -191,7 +218,7 @@ def test_skill_bind_is_audited_without_advancing_world_and_survives_restart(
         reason="exercise a calmer voice",
     )
     assert receipt["world_version"] == before
-    assert receipt["previous_skill"]["version"] == "1.0.0"
+    assert receipt["previous_skill"]["version"] == "3.0.0"
     assert receipt["new_skill"]["version"] == "2.0.0"
 
     advance_world("binding", worlds_dir)
@@ -206,11 +233,11 @@ def test_skill_bind_is_audited_without_advancing_world_and_survives_restart(
             "FROM skill_bindings WHERE agent_id='character-anon' "
             "ORDER BY binding_order"
         ).fetchall()
-    assert {item[0] for item in versions} == {"1.0.0", "2.0.0"}
+    assert {item[0] for item in versions} == {"2.0.0", "3.0.0"}
     assert audit[-1] == (
         "test-operator",
         "exercise a calmer voice",
-        "1.0.0",
+        "3.0.0",
         "2.0.0",
     )
 

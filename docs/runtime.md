@@ -119,6 +119,43 @@ uv run pytest -m live tests_py/test_live_provider_demo.py
 普通的 `uv run pytest` 会排除 `live` marker，因此不会读取缺失的凭据或外部素材，也
 不会访问 Provider。
 
+## MyGO 五人 Provider 试跑
+
+实现与离线五人测试完成后，可先显式预检独立 Asset Manifest。此命令不调用模型：
+
+```bash
+uv run python -c \
+  'from pathlib import Path; from mygo_world.rendering import load_asset_manifest, validate_asset_manifest_files; manifest = load_asset_manifest(Path("examples/assets/mygo-five/manifest.yaml")); validate_asset_manifest_files(manifest, Path("/Users/yyu03/project/dev/MyGO_v3.1.1")); print("asset preflight passed")'
+```
+
+真实 Provider 试跑必须使用从未初始化过的新 World ID，并显式读取被 Git 忽略的环境
+文件。以下三个命令依次初始化 Seed、以现有并发和请求预算推进最多六个 Wave，再把
+已提交 Event 编排为 WebGAL 场景：
+
+```bash
+uv run mygo-world init \
+  --world-id mygo-five-provider-001 \
+  --seed examples/scenarios/mygo-five-character.yaml
+uv run mygo-world advance \
+  --world-id mygo-five-provider-001 \
+  --gateway provider \
+  --env-file .env.local \
+  --max-waves 6 \
+  --request-budget 40 \
+  --json
+uv run mygo-world render \
+  --world-id mygo-five-provider-001 \
+  --asset-manifest examples/assets/mygo-five/manifest.yaml \
+  --webgal-root /Users/yyu03/project/dev/MyGO_v3.1.1 \
+  --gateway provider \
+  --env-file .env.local \
+  --request-budget 6 \
+  --json
+```
+
+每次试跑都应替换 `mygo-five-provider-001`，避免复用已有 World。该流程会访问真实
+Provider 并产生费用，不属于默认测试；它也不会启动 WebGAL 或修改入口场景。
+
 ## Provider 质量评测
 
 以下入口使用固定、已脱敏的 Pydantic Evals 样例，报告每个样例的质量结果、延迟、
