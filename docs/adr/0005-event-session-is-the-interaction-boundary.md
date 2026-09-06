@@ -1,5 +1,7 @@
 # Event Session 本身构成互动边界
 
+> Session lineage 的物理持久化部分由 ADR 0025 取代；互动边界、固定成员及分裂/合并规则保持不变。
+
 MVP 不建立独立的 Interaction Group 实体；Event Session 的固定参与者集合与 Interaction Scope 共同定义互动边界。Runtime 根据待提交的角色位置或互动关系变化计算成员分区：若边界改变，则在同一提交中以 `partitioned` 关闭原 Session，并为每个分区创建带父 Session 引用的后继 Session，单人分区同样有效。
 
 Location 是具有稳定 ID 和 Entity Revision 的持久 Entity；它可以拥有多个带稳定 `scope_key` 的 Interaction Scope，并以显式边定义 Scope 之间的可达关系，MVP 不实现坐标或寻路。Character 的当前位置由 `location_id + scope_key` 表示，Interaction Scope 本身只是 Location 拥有的值对象。

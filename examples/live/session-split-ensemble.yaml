@@ -1,0 +1,92 @@
+schema_version: 1
+seed_id: mygo-ensemble-session-split-live
+version: 1.1.0
+name: MyGO 五人 Session 分裂与舞台续演
+world_time_ms: 0
+calendar_anchor: "2026-09-06T17:00:00+08:00"
+skill_bindings:
+  characters:
+    character-anon:
+      skill_id: mygo.character.anon-session-split-acceptance
+      version: 1.0.0
+    character-soyo:
+      skill_id: mygo.character.soyo-session-split-acceptance
+      version: 1.0.0
+    character-tomori:
+      skill_id: mygo.character.tomori-session-split-acceptance
+      version: 1.0.0
+    character-rana:
+      skill_id: mygo.character.rana-session-split-acceptance
+      version: 1.0.0
+    character-taki:
+      skill_id: mygo.character.taki-session-split-acceptance
+      version: 1.0.0
+  director:
+    skill_id: mygo.director.session-split-performance
+    version: 1.0.0
+  broadcast:
+    skill_id: mygo.broadcast.session-split-performance
+    version: 1.0.0
+entities:
+  - entity_type: location
+    entity_id: location-ring
+    name: RiNG
+    scopes:
+      - scope_key: lounge
+        name: 休息室
+        reachable_destinations:
+          - location_id: location-ring
+            scope_key: stage
+      - scope_key: stage
+        name: 舞台
+        reachable_destinations:
+          - location_id: location-ring
+            scope_key: lounge
+    state:
+      description: 五人排练开始前，爱音准备先去舞台确认设备，其余成员留在休息室做最后安排。
+  - entity_type: character
+    entity_id: character-anon
+    name: 千早爱音
+    location_id: location-ring
+    scope_key: lounge
+    state:
+      mood: 干劲十足
+  - entity_type: character
+    entity_id: character-soyo
+    name: 长崎素世
+    location_id: location-ring
+    scope_key: lounge
+    state:
+      mood: 从容
+  - entity_type: character
+    entity_id: character-tomori
+    name: 高松灯
+    location_id: location-ring
+    scope_key: lounge
+    state:
+      mood: 期待
+  - entity_type: character
+    entity_id: character-rana
+    name: 要乐奈
+    location_id: location-ring
+    scope_key: lounge
+    state:
+      mood: 好奇
+  - entity_type: character
+    entity_id: character-taki
+    name: 椎名立希
+    location_id: location-ring
+    scope_key: lounge
+    state:
+      mood: 专注
+sessions:
+  - session_id: session-live-ensemble-split
+    location_id: location-ring
+    scope_key: lounge
+    participant_ids:
+      - character-anon
+      - character-soyo
+      - character-tomori
+      - character-rana
+      - character-taki
+memories: []

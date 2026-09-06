@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
@@ -9,6 +10,8 @@ import {
   compileProject,
   renderGameConfig,
   renderPlayerConfig,
+  renderPreviewStart,
+  resolvePreviewScene,
   validateProject,
 } from '../tools/mygo-project.mjs';
 
@@ -68,6 +71,19 @@ test('projects own isolated game configuration and save namespaces', async () =>
   assert.equal(renderPlayerConfig(secondProject.manifest).storageKey, 'generative-mygo.second-story');
   assert.match(renderGameConfig(rainProject.manifest), /Game_name:雨声之后;/);
   assert.match(renderGameConfig(secondProject.manifest), /Game_name:第二个故事;/);
+});
+
+test('generated renders can be previewed without replacing WebGAL start.txt', async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mygo-preview-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const generated = path.join(root, 'game', 'scene', 'generated', 'world-one');
+  await mkdir(generated, { recursive: true });
+  await writeFile(path.join(generated, 'render-one.txt'), ':preview;\n', 'utf8');
+
+  const scene = await resolvePreviewScene(root, 'generated/world-one/render-one.txt');
+  assert.equal(scene, 'generated/world-one/render-one.txt');
+  assert.equal(renderPreviewStart(scene), 'changeScene:generated/world-one/render-one.txt;\n');
+  await assert.rejects(resolvePreviewScene(root, '../config.txt'), /under game\/scene\/generated/);
 });
 
 test('project builds are separate while using the same shared asset library', async () => {

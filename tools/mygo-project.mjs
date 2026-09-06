@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { compileStory, loadStory, validateStory } from './mygo-author-lib.mjs';
 
@@ -29,6 +29,39 @@ export function resolveProjectPaths(devRoot, projectId) {
     configOutputPath: path.join(buildDir, 'config.txt'),
     playerOutputPath: path.join(buildDir, 'player.json'),
   };
+}
+
+export async function resolvePreviewScene(webgalRoot, sceneRef) {
+  if (typeof sceneRef !== 'string' || sceneRef.length === 0 || sceneRef.includes('\\')) {
+    throw new Error('Preview scene must be a non-empty POSIX path under game/scene/generated');
+  }
+  const normalized = path.posix.normalize(sceneRef).replace(/^\.\//, '');
+  if (!normalized.startsWith('generated/') || !normalized.endsWith('.txt')) {
+    throw new Error('Preview scene must be a .txt file under game/scene/generated');
+  }
+  const sceneRoot = path.resolve(webgalRoot, 'game', 'scene');
+  const candidate = path.resolve(sceneRoot, ...normalized.split('/'));
+  if (!isWithinDirectory(candidate, sceneRoot)) {
+    throw new Error('Preview scene must stay within game/scene/generated');
+  }
+  let resolved;
+  let resolvedGeneratedRoot;
+  try {
+    [resolved, resolvedGeneratedRoot] = await Promise.all([
+      realpath(candidate),
+      realpath(path.resolve(sceneRoot, 'generated')),
+    ]);
+  } catch (error) {
+    throw new Error(`Preview scene does not exist: ${candidate}`);
+  }
+  if (!isWithinDirectory(resolved, resolvedGeneratedRoot)) {
+    throw new Error('Preview scene must stay within game/scene/generated');
+  }
+  return normalized;
+}
+
+export function renderPreviewStart(sceneRef) {
+  return `changeScene:${sceneRef};\n`;
 }
 
 export async function loadProject(devRoot, projectId) {
@@ -272,6 +305,15 @@ function assertProjectId(projectId) {
   if (!PROJECT_ID.test(projectId ?? '')) {
     throw new Error('Project id must start with a lowercase letter and contain only lowercase letters, numbers, or "-"');
   }
+}
+
+function isWithinDirectory(filePath, directory) {
+  const relativePath = path.relative(directory, filePath);
+  return relativePath === '' || (
+    !relativePath.startsWith(`..${path.sep}`)
+    && relativePath !== '..'
+    && !path.isAbsolute(relativePath)
+  );
 }
 
 function requireString(value, label, diagnostics) {

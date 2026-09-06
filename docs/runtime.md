@@ -60,6 +60,20 @@ Python 编译器会将规范化本地产物写入 `.mygo/renders`，并将不可
 Runtime 不会修改 `start.txt`，不会创建 `latest.txt` 别名，也不会启动 WebGAL
 播放器。仓库内的最小 Manifest 和模拟素材树用于无需凭据的 Fixture 测试。
 
+要预览一个已经发布的不可变 Render，可让本地 Authoring Server 在 HTTP 层提供临时
+入口；`--scene` 接受相对于 `<webgal-root>/game/scene/` 的 `generated/...txt` 路径，
+不会改写 WebGAL 工程里的 `start.txt`：
+
+```bash
+WEBGAL_ROOT=/Users/yyu03/project/dev/MyGO_v3.1.1 \
+npm run serve -- \
+  --project rain-after \
+  --scene generated/<world-id>/<render-id>-<content-hash>.txt \
+  --port 4175
+```
+
+打开 `http://127.0.0.1:4175` 后即可从标题页播放该 Render。
+
 ## 真实 Provider 配置
 
 真实适配器与 Fixture 使用同一个 `ModelGateway` 契约。必须显式指定

@@ -9,6 +9,7 @@ import pytest
 import yaml
 from conftest import MINIMAL_SEED
 
+from mygo_world.canonical_export import export_world
 from mygo_world.contracts import ActionProposal, SegmentDraft
 from mygo_world.gateways import ModelGeneration, ModelRequest
 from mygo_world.runtime import advance_world
@@ -414,16 +415,8 @@ def test_split_is_atomic_fifo_and_scope_isolated(
     database = worlds_dir / "split" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         sessions = connection.execute(
-            "SELECT session_id, status, closure_reason FROM event_sessions "
-            "ORDER BY created_world_version, session_id"
-        ).fetchall()
-        parents = connection.execute(
-            "SELECT session_id, parent_session_id FROM event_session_parents "
-            "ORDER BY session_id"
-        ).fetchall()
-        queue = connection.execute(
-            "SELECT queue_order, session_id, dequeued_world_version "
-            "FROM runnable_session_queue ORDER BY queue_order"
+            "SELECT session_id, status, closure_reason, queue_order, "
+            "closed_world_version FROM event_sessions ORDER BY queue_order"
         ).fetchall()
         old_scope_observers = {
             row[0]
@@ -432,14 +425,30 @@ def test_split_is_atomic_fifo_and_scope_isolated(
                 "WHERE payload_json LIKE '%A door closes in the lounge.%'"
             )
         }
+    exported_sessions = export_world("split", worlds_dir)["sessions"]
+    snapshot = show_world("split", worlds_dir)["snapshot"]
+    parents = exported_sessions["parents"]
+    queue = exported_sessions["queue"]
     successors = [item for item in sessions if item[0] != "session-1"]
-    assert sessions[0] == ("session-1", "closed", "partitioned")
+    assert sessions[0][:3] == ("session-1", "closed", "partitioned")
     assert [item[2] for item in successors] == ["limit_reached", None]
     assert len(parents) == 2
-    assert {item[1] for item in parents} == {"session-1"}
-    assert [item[0] for item in queue] == [1, 2, 3]
-    assert queue[1][2] == 3
-    assert queue[2][2] is None
+    assert {item["parent_session_id"] for item in parents} == {"session-1"}
+    assert [item["queue_order"] for item in queue] == [1, 2, 3]
+    assert queue[1]["dequeued_world_version"] == 3
+    assert queue[2]["dequeued_world_version"] is None
+    snapshot_successors = [
+        item for item in snapshot["sessions"] if item["session_id"] != "session-1"
+    ]
+    assert all(
+        item["parent_session_ids"] == ["session-1"] for item in snapshot_successors
+    )
+    assert snapshot["runnable_session_queue"] == [
+        {
+            "queue_order": queue[2]["queue_order"],
+            "session_id": queue[2]["session_id"],
+        }
+    ]
     assert old_scope_observers == {"character-b", "character-c"}
 
     second_wave_a = next(
@@ -454,7 +463,7 @@ def test_split_is_atomic_fifo_and_scope_isolated(
 
     next_gateway = SplitGateway()
     next_receipt = advance_world("split", worlds_dir, gateway=next_gateway, max_waves=1)
-    assert next_receipt["session_id"] == queue[2][1]
+    assert next_receipt["session_id"] == queue[2]["session_id"]
     assert {frame["character_id"] for frame in next_gateway.frames} == {
         "character-b",
         "character-c",
@@ -527,11 +536,13 @@ def test_direct_interaction_merges_sessions_but_colocation_alone_does_not(
             "ORDER BY agent_id",
             successor,
         ).fetchall()
-        parents = connection.execute(
-            "SELECT parent_session_id FROM event_session_parents WHERE session_id=? "
-            "ORDER BY parent_session_id",
-            successor,
-        ).fetchall()
+    assert successor is not None
+    successor_id = successor[0]
+    parents = [
+        item["parent_session_id"]
+        for item in export_world("merge", worlds_dir)["sessions"]["parents"]
+        if item["session_id"] == successor_id
+    ]
     assert closed == [
         ("session-1", "partitioned"),
         ("session-2", "partitioned"),
@@ -542,7 +553,7 @@ def test_direct_interaction_merges_sessions_but_colocation_alone_does_not(
         ("character-c",),
         ("character-d",),
     ]
-    assert parents == [("session-1",), ("session-2",)]
+    assert parents == ["session-1", "session-2"]
 
 
 def test_resolved_requires_an_earlier_completed_wave() -> None:
@@ -936,6 +947,7 @@ def test_split_failure_rolls_back_position_sessions_parents_and_queue(
         add_stage=True,
     )
     initialize_world(seed, "split-rollback", worlds_dir)
+    before = show_world("split-rollback", worlds_dir)["snapshot"]
 
     def fail(stage: str) -> None:
         if stage == "session":
@@ -956,20 +968,25 @@ def test_split_failure_rolls_back_position_sessions_parents_and_queue(
             1,
         )
         assert connection.execute(
-            "SELECT session_id, status, closure_reason FROM event_sessions"
-        ).fetchall() == [("session-1", "runnable", None)]
+            "SELECT session_id, status, closure_reason, queue_order FROM event_sessions"
+        ).fetchall() == [("session-1", "runnable", None, 1)]
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "event_session_parents" not in tables
+        assert "runnable_session_queue" not in tables
         assert connection.execute(
-            "SELECT count(*) FROM event_session_parents"
+            "SELECT count(*) FROM event_session_pending_responses"
         ).fetchone() == (0,)
-        assert connection.execute(
-            "SELECT queue_order, session_id, dequeued_world_version "
-            "FROM runnable_session_queue"
-        ).fetchall() == [(1, "session-1", None)]
         position = connection.execute(
             "SELECT location_id, scope_key FROM entity_revisions "
             "WHERE entity_id='character-a' ORDER BY revision_order DESC LIMIT 1"
         ).fetchone()
     assert position == ("location-live-house", "lounge")
+    assert show_world("split-rollback", worlds_dir)["snapshot"] == before
 
 
 def test_no_work_does_not_persist_empty_batch(worlds_dir: Path) -> None:
@@ -1008,4 +1025,17 @@ def test_database_rejects_session_boundary_and_member_mutation(
             connection.execute(
                 "INSERT INTO event_session_members(session_id, agent_id) "
                 "VALUES ('session-first-meeting', 'late-character')"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="INVALID_TRANSITION"):
+            connection.execute(
+                "UPDATE event_sessions SET queue_order=2 "
+                "WHERE session_id='session-first-meeting'"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="INVALID_INITIAL_STATE"):
+            connection.execute(
+                "INSERT INTO event_sessions "
+                "(session_id, status, location_id, scope_key, "
+                "created_world_version) VALUES "
+                "('missing-order', 'runnable', 'location-live-house', "
+                "'lounge', 1)"
             )

@@ -35,9 +35,9 @@ from mygo_world.db.models import (
     AgentMemoryRow,
     EventSessionMemberRow,
     EventSessionPendingResponseRow,
+    EventSessionRow,
     GenerationBatchRow,
     GenerationWaveRow,
-    RunnableSessionQueueRow,
     SnapshotRow,
     WorldRow,
 )
@@ -160,9 +160,7 @@ def _default_fixture_responses(
                     "text": primary["action"]["text"],
                     "addressee_ids": primary["action"]["addressee_ids"],
                     "expects_response": primary["action"]["expects_response"],
-                    "response_to_event_id": primary["action"][
-                        "response_to_event_id"
-                    ],
+                    "response_to_event_id": primary["action"]["response_to_event_id"],
                 },
             }
         ],
@@ -811,9 +809,9 @@ def _find_queue_head(engine: Any) -> tuple[str | None, int]:
         if world is None:
             raise WorldError("WORLD_NOT_FOUND", "World record is missing")
         queue = session.scalar(
-            select(RunnableSessionQueueRow)
-            .where(RunnableSessionQueueRow.dequeued_world_version.is_(None))
-            .order_by(RunnableSessionQueueRow.queue_order)
+            select(EventSessionRow)
+            .where(EventSessionRow.status == "runnable")
+            .order_by(EventSessionRow.queue_order)
         )
         return (queue.session_id if queue is not None else None, world.current_version)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -111,8 +112,14 @@ class SnapshotRow(Base):
 
 class EventSessionRow(Base):
     __tablename__ = "event_sessions"
+    __table_args__ = (
+        Index("uq_event_sessions_queue_order", "queue_order", unique=True),
+    )
 
     session_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    queue_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     location_id: Mapped[str] = mapped_column(String(200), nullable=False)
     scope_key: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -134,17 +141,6 @@ class EventSessionMemberRow(Base):
     agent_id: Mapped[str] = mapped_column(String(200), primary_key=True)
 
 
-class EventSessionParentRow(Base):
-    __tablename__ = "event_session_parents"
-
-    session_id: Mapped[str] = mapped_column(
-        ForeignKey("event_sessions.session_id"), primary_key=True
-    )
-    parent_session_id: Mapped[str] = mapped_column(
-        ForeignKey("event_sessions.session_id"), primary_key=True
-    )
-
-
 class EventSessionPendingResponseRow(Base):
     __tablename__ = "event_session_pending_responses"
 
@@ -152,21 +148,6 @@ class EventSessionPendingResponseRow(Base):
         ForeignKey("event_sessions.session_id"), primary_key=True
     )
     responder_id: Mapped[str] = mapped_column(String(200), primary_key=True)
-
-
-class RunnableSessionQueueRow(Base):
-    __tablename__ = "runnable_session_queue"
-
-    queue_order: Mapped[int] = mapped_column(Integer, primary_key=True)
-    session_id: Mapped[str] = mapped_column(
-        ForeignKey("event_sessions.session_id"), nullable=False, unique=True
-    )
-    enqueued_world_version: Mapped[int] = mapped_column(
-        ForeignKey("world_versions.version"), nullable=False
-    )
-    dequeued_world_version: Mapped[int | None] = mapped_column(
-        ForeignKey("world_versions.version")
-    )
 
 
 class AgentMemoryRow(Base):

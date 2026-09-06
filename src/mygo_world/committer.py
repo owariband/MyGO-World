@@ -23,11 +23,9 @@ from mygo_world.db.models import (
     AgentMemoryRow,
     EntityRevisionRow,
     EventSessionMemberRow,
-    EventSessionParentRow,
     EventSessionPendingResponseRow,
     EventSessionRow,
     GenerationTraceRow,
-    RunnableSessionQueueRow,
     SkillBindingRow,
     SnapshotRow,
     WorldEventRow,
@@ -187,18 +185,17 @@ class WorldCommitter:
         seed = plan.loaded_seed.seed
 
         with Session(self._engine) as session, session.begin():
-            session.add(
-                WorldRow(
-                    world_id=plan.world_id,
-                    name=seed.name,
-                    seed_id=seed.seed_id,
-                    seed_version=seed.version,
-                    seed_content_hash=plan.loaded_seed.content_hash,
-                    current_version=1,
-                    calendar_anchor=seed.calendar_anchor,
-                    created_at=created_at,
-                )
+            world = WorldRow(
+                world_id=plan.world_id,
+                name=seed.name,
+                seed_id=seed.seed_id,
+                seed_version=seed.version,
+                seed_content_hash=plan.loaded_seed.content_hash,
+                current_version=0,
+                calendar_anchor=seed.calendar_anchor,
+                created_at=created_at,
             )
+            session.add(world)
             ledger = LedgerRepository(session)
             ledger.append_segment(
                 WorldSegmentRow(
@@ -244,6 +241,7 @@ class WorldCommitter:
                 session.add(
                     EventSessionRow(
                         session_id=event_session.session_id,
+                        queue_order=queue_order,
                         status="runnable",
                         location_id=event_session.location_id,
                         scope_key=event_session.scope_key,
@@ -260,15 +258,6 @@ class WorldCommitter:
                             agent_id=participant_id,
                         )
                     )
-                session.flush()
-                session.add(
-                    RunnableSessionQueueRow(
-                        queue_order=queue_order,
-                        session_id=event_session.session_id,
-                        enqueued_world_version=1,
-                        dequeued_world_version=None,
-                    )
-                )
 
             remaining_memories = {item.memory_id: item for item in seed.memories}
             inserted_memory_ids: set[str] = set()
@@ -343,6 +332,7 @@ class WorldCommitter:
                     created_at=created_at,
                 )
             )
+            world.current_version = 1
             event_count = session.scalar(
                 select(func.count()).select_from(WorldEventRow)
             )
@@ -620,17 +610,6 @@ class WorldCommitter:
             event_session.status = "closed"
             event_session.closed_world_version = plan.new_world_version
             event_session.closure_reason = closure_reason
-            queue_entry = session.scalar(
-                select(RunnableSessionQueueRow).where(
-                    RunnableSessionQueueRow.session_id == closed_id,
-                    RunnableSessionQueueRow.dequeued_world_version.is_(None),
-                )
-            )
-            if queue_entry is None:
-                raise ValueError(
-                    f"Runnable Event Session '{closed_id}' has no active queue entry"
-                )
-            queue_entry.dequeued_world_version = plan.new_world_version
             snapshot_session = snapshot_sessions.get(closed_id)
             if snapshot_session is None:
                 raise ValueError(
@@ -655,12 +634,7 @@ class WorldCommitter:
 
         if plan.successor_sessions:
             next_queue_order = (
-                int(
-                    session.scalar(
-                        select(func.max(RunnableSessionQueueRow.queue_order))
-                    )
-                    or 0
-                )
+                int(session.scalar(select(func.max(EventSessionRow.queue_order))) or 0)
                 + 1
             )
             for offset, successor in enumerate(plan.successor_sessions):
@@ -671,6 +645,7 @@ class WorldCommitter:
                 session.add(
                     EventSessionRow(
                         session_id=successor.session_id,
+                        queue_order=next_queue_order + offset,
                         status="runnable",
                         location_id=successor.location_id,
                         scope_key=successor.scope_key,
@@ -687,14 +662,6 @@ class WorldCommitter:
                             agent_id=participant_id,
                         )
                     )
-                for parent_session_id in successor.parent_session_ids:
-                    session.add(
-                        EventSessionParentRow(
-                            session_id=successor.session_id,
-                            parent_session_id=parent_session_id,
-                        )
-                    )
-                session.flush()
                 for responder_id in successor.pending_response_ids:
                     session.add(
                         EventSessionPendingResponseRow(
@@ -703,14 +670,6 @@ class WorldCommitter:
                         )
                     )
                 queue_order = next_queue_order + offset
-                session.add(
-                    RunnableSessionQueueRow(
-                        queue_order=queue_order,
-                        session_id=successor.session_id,
-                        enqueued_world_version=plan.new_world_version,
-                        dequeued_world_version=None,
-                    )
-                )
                 snapshot_session = {
                     "session_id": successor.session_id,
                     "status": "runnable",

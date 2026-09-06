@@ -17,13 +17,11 @@ from mygo_world.db.models import (
     BroadcastRunRow,
     EntityRevisionRow,
     EventSessionMemberRow,
-    EventSessionParentRow,
     EventSessionRow,
     GenerationBatchRow,
     GenerationTraceRow,
     GenerationWaveRow,
     RenderRow,
-    RunnableSessionQueueRow,
     SkillBindingRow,
     SnapshotRow,
     WorldEventRow,
@@ -48,6 +46,39 @@ def _stable_render_path(path: str, *, marker: tuple[str, ...]) -> str:
         if tuple(parts[index : index + len(marker)]) == marker:
             return Path(*parts[index:]).as_posix()
     return Path(path).name
+
+
+def _derived_session_parents(
+    segments: list[WorldSegmentRow],
+    *,
+    committed_segment_ids: set[str],
+) -> list[dict[str, str]]:
+    edges: set[tuple[str, str]] = set()
+    for segment in segments:
+        if segment.segment_id not in committed_segment_ids:
+            continue
+        payload = json.loads(segment.payload_json)
+        for successor in payload.get("successor_sessions", []):
+            for parent_session_id in successor.get("parent_session_ids", []):
+                edges.add((successor["session_id"], parent_session_id))
+    return [
+        {"session_id": session_id, "parent_session_id": parent_session_id}
+        for session_id, parent_session_id in sorted(edges)
+    ]
+
+
+def _derived_session_queue(
+    sessions: list[EventSessionRow],
+) -> list[dict[str, int | str | None]]:
+    return [
+        {
+            "queue_order": item.queue_order,
+            "session_id": item.session_id,
+            "enqueued_world_version": item.created_world_version,
+            "dequeued_world_version": item.closed_world_version,
+        }
+        for item in sorted(sessions, key=lambda item: item.queue_order)
+    ]
 
 
 def export_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
@@ -122,21 +153,11 @@ def export_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                     )
                 )
             )
-            parents = list(
-                session.scalars(
-                    select(EventSessionParentRow).order_by(
-                        EventSessionParentRow.session_id,
-                        EventSessionParentRow.parent_session_id,
-                    )
-                )
+            parents = _derived_session_parents(
+                segments,
+                committed_segment_ids={item.segment_id for item in versions},
             )
-            queue = list(
-                session.scalars(
-                    select(RunnableSessionQueueRow).order_by(
-                        RunnableSessionQueueRow.queue_order
-                    )
-                )
-            )
+            queue = _derived_session_queue(sessions)
             bindings = list(
                 session.scalars(
                     select(SkillBindingRow).order_by(SkillBindingRow.binding_order)
@@ -237,8 +258,8 @@ def export_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                 "sessions": {
                     "items": [_row(item) for item in sessions],
                     "members": [_row(item) for item in members],
-                    "parents": [_row(item) for item in parents],
-                    "queue": [_row(item) for item in queue],
+                    "parents": parents,
+                    "queue": queue,
                 },
                 "skills": [_row(item) for item in bindings],
                 "generation": {

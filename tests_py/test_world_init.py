@@ -41,11 +41,19 @@ def test_init_atomically_materializes_genesis_world(worlds_dir: Path) -> None:
                 "world_events",
                 "event_sessions",
                 "event_session_members",
-                "runnable_session_queue",
                 "snapshots",
                 "agent_memory_records",
             )
         }
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        session_order = connection.execute(
+            "SELECT session_id, queue_order FROM event_sessions ORDER BY queue_order"
+        ).fetchall()
         segment_type = connection.execute(
             "SELECT segment_type FROM world_segments"
         ).fetchone()[0]
@@ -61,12 +69,14 @@ def test_init_atomically_materializes_genesis_world(worlds_dir: Path) -> None:
         "world_events": 0,
         "event_sessions": 1,
         "event_session_members": 2,
-        "runnable_session_queue": 1,
         "snapshots": 1,
         "agent_memory_records": 1,
     }
+    assert "event_session_parents" not in tables
+    assert "runnable_session_queue" not in tables
+    assert session_order == [("session-first-meeting", 1)]
     assert segment_type == "genesis"
-    assert schema_revision == "0007_recoverable_rendering"
+    assert schema_revision == "0008_simplify_sessions"
 
 
 def test_init_uses_injected_clock_and_domain_ids(worlds_dir: Path) -> None:

@@ -57,7 +57,7 @@ _Avoid_: Fixed-duration Tick、Event Session、World Event
 _Avoid_: World、Process、Generation Wave、Render
 
 **Runnable Session Queue**:
-World 中按显式单调序号持久化的待推进 Event Session FIFO 队列；Runtime 而非模型决定入队和出队顺序，一个 Generation Batch 只消费队首 lineage。
+World 中所有 Runnable Event Session 按各自不可变单调序号形成的逻辑 FIFO 集合；它由 Session 生命周期派生而非独立持久实体，Runtime 而非模型决定顺序，一个 Generation Batch 只消费队首 lineage。
 _Avoid_: Focus Character、Presentation Order、Model Priority
 
 **World Version**:

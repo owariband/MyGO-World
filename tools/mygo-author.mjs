@@ -12,6 +12,8 @@ import {
   createProject,
   listProjects,
   ProjectValidationError,
+  renderPreviewStart,
+  resolvePreviewScene,
   resolveProjectPaths,
   validateProject,
 } from './mygo-project.mjs';
@@ -82,13 +84,16 @@ async function compile() {
 
 async function serve() {
   const project = await ensureBuiltProject();
+  const previewScene = options.scene
+    ? await resolvePreviewScene(webgalRoot, options.scene)
+    : null;
   const staticRoots = await Promise.all(
     [...new Set([devRoot, webgalRoot])].map(async (root) => ({ path: root, realPath: await realpath(root) })),
   );
   const port = parsePort(options.port ?? process.env.PORT ?? '4173');
   const server = http.createServer((request, response) => {
     if (dynamicRender?.handleHttp(request, response)) return;
-    handleRequest(request, response, project, staticRoots).catch((error) => {
+    handleRequest(request, response, project, staticRoots, previewScene).catch((error) => {
       console.error(error);
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       response.end('Internal server error');
@@ -107,6 +112,7 @@ async function serve() {
   const address = server.address();
   const host = typeof address === 'object' && address?.address === '::' ? '127.0.0.1' : options.host ?? '127.0.0.1';
   console.log(`▶ ${project.manifest.name} (${projectId}) is running at http://${host}:${port}`);
+  if (previewScene) console.log(`  Preview scene: ${previewScene}`);
   if (dynamicMode) console.log('  Dynamic timeline: enabled');
   console.log(`  Save namespace: ${project.manifest.gameKey}`);
   console.log('  Press Ctrl+C to stop.');
@@ -132,12 +138,23 @@ function watchStory() {
   console.log(`◌ watching projects/${projectId}/{project.json,story.json}`);
 }
 
-async function handleRequest(request, response, project, staticRoots) {
+async function handleRequest(request, response, project, staticRoots, previewScene = null) {
   const requestTarget = request.url ?? '/';
   const queryIndex = requestTarget.indexOf('?');
   const rawPath = queryIndex === -1 ? requestTarget : requestTarget.slice(0, queryIndex);
   const decodedPath = decodeURIComponent(rawPath);
   const relativePath = decodedPath === '/' ? 'index.html' : decodedPath.replace(/^\/+/, '');
+  if (previewScene && relativePath === 'game/scene/start.txt') {
+    const body = Buffer.from(renderPreviewStart(previewScene));
+    response.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Length': String(body.length),
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Generative-MyGO-Preview': previewScene,
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
   const virtualPath = resolveVirtualProjectPath(relativePath, project.paths);
   const roots = virtualPath ? staticRoots.slice(0, 1) : staticRoots;
   const candidates = virtualPath
@@ -328,6 +345,9 @@ Usage:
   node tools/mygo-author.mjs dev --project <id> [--port 4173]
   node tools/mygo-author.mjs dynamic --project <id> [--port 4173]
   node tools/mygo-author.mjs serve --project <id> [--port 4173]
+
+Preview one immutable generated Render without changing WebGAL's start.txt:
+  node tools/mygo-author.mjs serve --project <id> --scene generated/<world>/<render>.txt
 
 Projects are isolated under projects/<id>. Each project owns its story, game
 configuration, save namespace, player settings, and build output while sharing
