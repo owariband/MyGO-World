@@ -177,6 +177,7 @@ def test_perception_frame_is_scope_and_memory_owner_limited(worlds_dir: Path) ->
 
     assert frame.world_version == 1
     assert frame.session_id == "session-first-meeting"
+    assert frame.pending_response_ids == []
     assert {item.entity_id for item in frame.visible_entities} == {
         "character-anon",
         "character-soyo",
@@ -223,6 +224,42 @@ def test_proposal_validator_returns_stable_diagnostics(
     invalid = ActionProposal.model_validate(raw)
 
     assert code in _codes(ProposalValidator().validate(frame, invalid))
+
+
+def test_proposal_rejects_visible_non_character_utterance_addressee(
+    worlds_dir: Path,
+) -> None:
+    frame = _load_frame(worlds_dir, "proposal-visible-object-addressee")
+    frame_raw = frame.model_dump(mode="json")
+    frame_raw["visible_entities"].append(
+        {
+            "entity_id": "object-set-list",
+            "entity_type": "object",
+            "name": "Set list",
+            "location_id": frame.location_id,
+            "scope_key": frame.scope_key,
+            "state": {},
+        }
+    )
+    frame_with_object = PerceptionFrame.model_validate(frame_raw)
+    proposal_raw = _valid_proposal(frame_with_object).model_dump(mode="json")
+    proposal_raw["action"]["addressee_ids"] = ["object-set-list"]
+    proposal = ActionProposal.model_validate(proposal_raw)
+
+    outcome = ProposalValidator().validate(frame_with_object, proposal)
+
+    assert _codes(outcome) == {"PROPOSAL_ADDRESSEE_NOT_CHARACTER"}
+
+
+def test_proposal_response_must_reference_a_perceived_event(worlds_dir: Path) -> None:
+    frame = _load_frame(worlds_dir, "proposal-unperceived-response")
+    proposal_raw = _valid_proposal(frame).model_dump(mode="json")
+    proposal_raw["action"]["response_to_event_id"] = "event-not-perceived"
+    proposal = ActionProposal.model_validate(proposal_raw)
+
+    outcome = ProposalValidator().validate(frame, proposal)
+
+    assert _codes(outcome) == {"PROPOSAL_RESPONSE_EVENT_NOT_PERCEIVED"}
 
 
 @pytest.mark.parametrize(

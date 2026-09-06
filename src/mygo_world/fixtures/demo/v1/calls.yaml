@@ -5,28 +5,28 @@ calls:
     generation_batch_id: demo-batch-001
     generation_wave: 1
     call_kind: action_proposal
-    expected_input_sha256: fbcad28baff2f89374a4b5780aab982a432f036ec519b0d66e40b67479500ef0
+    expected_input_sha256: 21d41b7e7102e047c0de521643771dade0afa5bed05c3a65aac213caa188e36c
     response: responses/batch-001-wave-1-anon.json
   - agent_type: character
     agent_id: character-soyo
     generation_batch_id: demo-batch-001
     generation_wave: 1
     call_kind: action_proposal
-    expected_input_sha256: 4822214ec88901955bdbee798ce2417ca2cc9bcd143fa0e3c6936c33ce79146e
+    expected_input_sha256: c917029dd00df784280d414d76a6ca1e62d8fd6ca16a22c621cc9f4b1bc2a54a
     response: responses/batch-001-wave-1-soyo.json
   - agent_type: director
     agent_id: global-director
     generation_batch_id: demo-batch-001
     generation_wave: 1
     call_kind: segment_draft
-    expected_input_sha256: feae7ba206758e5fffd9cc8ea51039799dcb593b9f608019476826317b61dd00
+    expected_input_sha256: b85bf2a86a56d44904e5539b40baeb354c0bd1739846d45e9de2f00302aad64b
     response: responses/batch-001-wave-1-director.json
   - agent_type: character
     agent_id: character-anon
     generation_batch_id: demo-batch-001
     generation_wave: 2
     call_kind: action_proposal
-    expected_input_sha256: 551fb1d468e8f718c46e9f2c1ee83b96e61c560806754304bb2154187c9fa6d5
+    expected_input_sha256: e173f94eb27685f45b9c8ac30db7c86aab813f1b94b02ffd5b0bfd1b281311a6
     response: responses/batch-001-wave-2-anon.json
   - agent_type: director
     agent_id: global-director
@@ -40,14 +40,14 @@ calls:
     generation_batch_id: broadcast-v3
     generation_wave: 0
     call_kind: broadcast_plan
-    expected_input_sha256: f1e638b978ede600b04c2492d726db260132c686ef03574a1f24239072dd738c
+    expected_input_sha256: 911130353cbe62d91989b2b218fc9b05557bb700abfa02efd1476033d4d0261d
     response: responses/render-v3.json
   - agent_type: character
     agent_id: character-soyo
     generation_batch_id: demo-batch-002
     generation_wave: 1
     call_kind: action_proposal
-    expected_input_sha256: 829351b85cd381cc885f62c0b725f022432aba54b7137765a4a16c2cfe4c3428
+    expected_input_sha256: a0f1137a4540dd5c4d831415771ff4e5034638e817acbb44c69db2d4f787b85b
     response: responses/batch-002-wave-1-soyo.json
   - agent_type: director
     agent_id: global-director
@@ -61,5 +61,5 @@ calls:
     generation_batch_id: broadcast-v4
     generation_wave: 0
     call_kind: broadcast_plan
-    expected_input_sha256: 77dfdee8385f84b7a030a53b0bb5b5a5dca5eaa814aa9465c8970fe94dadd1b9
+    expected_input_sha256: 7daf0413a02a6bf10d620ee807bc7f83f7fe2cf5566a2cf1f52e4a4a34ac88d0
     response: responses/render-v4.json

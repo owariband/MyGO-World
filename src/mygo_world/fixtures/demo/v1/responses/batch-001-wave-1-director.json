@@ -38,7 +38,9 @@
       "payload": {
         "intent_summary": "Asks Anon to wait before leaving.",
         "text": "爱音，先等一下。",
-        "addressee_ids": ["character-anon"]
+        "addressee_ids": ["character-anon"],
+        "expects_response": true,
+        "response_to_event_id": null
       }
     }
   ],

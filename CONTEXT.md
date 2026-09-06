@@ -73,7 +73,7 @@ _Avoid_: World Ledger、Scenario Seed、Entity Revision
 _Avoid_: Wall-clock Time、Model Latency、Presentation Time
 
 **Action Proposal**:
-Character Agent 在一次 Generation Wave 中提出的唯一原子候选行动，包含简短意图摘要，类型限于 `utterance`、`move`、`interact`、`wait` 或 `no_op`；只有经过 Director 补全和 Runtime 校验提交后才成为世界事实。`wait` 是有意等待并可推进 World Time，`no_op` 不产生行动或独立事件。
+Character Agent 在一次 Generation Wave 中提出的唯一原子候选行动，包含简短意图摘要，类型限于 `utterance`、`move`、`interact`、`wait` 或 `no_op`；只有经过 Director 补全和 Runtime 校验提交后才成为世界事实。`utterance` 以 `expects_response` 显式声明是否要求收件人回应，并以 `response_to_event_id` 引用本次正在回应的已感知 World Event；`wait` 是有意等待并可推进 World Time，`no_op` 不产生行动或独立事件。
 _Avoid_: World Event、World Segment
 
 **Player Event Request**:

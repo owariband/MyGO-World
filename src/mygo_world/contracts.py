@@ -348,6 +348,7 @@ class PerceptionFrame(StrictModel):
     location_id: str = Field(min_length=1)
     scope_key: str = Field(min_length=1)
     participant_ids: list[str]
+    pending_response_ids: list[str] = Field(default_factory=list)
     visible_entities: list[PerceivedEntity]
     reachable_destinations: list[ReachableDestination]
     memories: list[PerceivedMemory]
@@ -357,6 +358,18 @@ class UtteranceAction(StrictModel):
     kind: Literal["utterance"]
     text: str = Field(min_length=1, max_length=2000)
     addressee_ids: list[str] = Field(default_factory=list)
+    expects_response: bool = Field(
+        description=(
+            "Whether this utterance creates a response obligation for every "
+            "Character in addressee_ids."
+        )
+    )
+    response_to_event_id: str | None = Field(
+        description=(
+            "The perceived World Event answered by this utterance, or null when "
+            "this utterance is not a response."
+        )
+    )
 
 
 class MoveAction(StrictModel):
@@ -474,7 +487,9 @@ class ProposalEventCandidate(CandidateEvent):
         default_factory=dict,
         description=(
             "Must include intent_summary copied exactly from the represented "
-            "Action Proposal, plus the action-specific objective fields."
+            "Action Proposal, plus the action-specific objective fields. For an "
+            "utterance, copy text, addressee_ids, expects_response, and "
+            "response_to_event_id exactly."
         ),
     )
 

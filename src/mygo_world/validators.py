@@ -62,7 +62,10 @@ class ProposalValidator:
                 )
             )
 
-        visible_ids = {entity.entity_id for entity in frame.visible_entities}
+        visible_entities = {
+            entity.entity_id: entity for entity in frame.visible_entities
+        }
+        visible_ids = set(visible_entities)
         if proposal.action.kind == "utterance":
             for index, target_id in enumerate(proposal.action.addressee_ids):
                 if target_id not in visible_ids:
@@ -71,6 +74,39 @@ class ProposalValidator:
                             "PROPOSAL_TARGET_NOT_VISIBLE",
                             f"action.addressee_ids.{index}",
                             f"Target '{target_id}' is not visible",
+                        )
+                    )
+                elif visible_entities[target_id].entity_type != "character":
+                    diagnostics.append(
+                        _diagnostic(
+                            "PROPOSAL_ADDRESSEE_NOT_CHARACTER",
+                            f"action.addressee_ids.{index}",
+                            f"Addressee '{target_id}' is not a Character",
+                        )
+                    )
+            if proposal.action.expects_response and not proposal.action.addressee_ids:
+                diagnostics.append(
+                    _diagnostic(
+                        "PROPOSAL_RESPONSE_ADDRESSEE_REQUIRED",
+                        "action.expects_response",
+                        "An utterance expecting a response requires a Character addressee",
+                    )
+                )
+            if proposal.action.response_to_event_id is not None:
+                perceived_event_ids = {
+                    event_id
+                    for memory in frame.memories
+                    if memory.memory_type == "observation"
+                    and isinstance(
+                        event_id := memory.payload.get("source_event_id"), str
+                    )
+                }
+                if proposal.action.response_to_event_id not in perceived_event_ids:
+                    diagnostics.append(
+                        _diagnostic(
+                            "PROPOSAL_RESPONSE_EVENT_NOT_PERCEIVED",
+                            "action.response_to_event_id",
+                            "A response must reference a perceived World Event",
                         )
                     )
         elif proposal.action.kind == "interact":
@@ -462,7 +498,7 @@ class SegmentValidator:
         for proposal in proposals:
             is_direct_response = (
                 proposal.action.kind == "utterance"
-                and bool(proposal.action.addressee_ids)
+                and proposal.action.response_to_event_id is not None
             ) or (
                 proposal.action.kind == "interact"
                 and proposal.action.target_id in character_ids
@@ -470,8 +506,10 @@ class SegmentValidator:
             if is_direct_response:
                 next_pending_responses.discard(proposal.actor_id)
         for proposal in proposals:
-            if proposal.action.kind == "utterance":
-                next_pending_responses.update(proposal.action.addressee_ids)
+            if proposal.action.kind == "utterance" and proposal.action.expects_response:
+                next_pending_responses.update(
+                    set(proposal.action.addressee_ids) & character_ids
+                )
 
         closed_session_ids: list[str] = []
         successor_sessions: list[SuccessorSession] = []
@@ -579,7 +617,9 @@ class SegmentValidator:
         direct_targets: set[str] = set()
         for proposal in proposals:
             if proposal.action.kind == "utterance":
-                direct_targets.update(proposal.action.addressee_ids)
+                direct_targets.update(
+                    set(proposal.action.addressee_ids) & character_ids
+                )
             elif (
                 proposal.action.kind == "interact"
                 and proposal.action.target_id in character_ids
@@ -709,6 +749,15 @@ class SegmentValidator:
             mismatch = mismatch or sorted(
                 event.payload.get("addressee_ids", [])
             ) != sorted(action.addressee_ids)
+            mismatch = (
+                mismatch
+                or event.payload.get("expects_response") != action.expects_response
+            )
+            mismatch = (
+                mismatch
+                or event.payload.get("response_to_event_id")
+                != action.response_to_event_id
+            )
         elif action.kind == "interact":
             mismatch = mismatch or event.payload.get("target_id") != action.target_id
         elif action.kind == "move":

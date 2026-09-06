@@ -107,6 +107,8 @@ def _default_fixture_responses(
                     "kind": "utterance",
                     "text": "早上好，今天也一起加油吧。",
                     "addressee_ids": target_ids[:1],
+                    "expects_response": bool(target_ids),
+                    "response_to_event_id": None,
                 },
                 "memory_changes": [
                     {
@@ -157,6 +159,10 @@ def _default_fixture_responses(
                     "intent_summary": primary["intent_summary"],
                     "text": primary["action"]["text"],
                     "addressee_ids": primary["action"]["addressee_ids"],
+                    "expects_response": primary["action"]["expects_response"],
+                    "response_to_event_id": primary["action"][
+                        "response_to_event_id"
+                    ],
                 },
             }
         ],

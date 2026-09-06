@@ -307,6 +307,95 @@ class ResolvingNoOpGateway:
         )
 
 
+class DialogueResolutionGateway:
+    model_id = "dialogue-resolution-fixture"
+    network_request_count = 0
+
+    def generate(self, request: ModelRequest, response_type: type[Any]) -> Any:
+        wave_number = request.input_payload["wave_number"]
+        if request.agent_type == "character":
+            frame = request.input_payload["perception_frame"]
+            if wave_number == 1 and request.agent_id == "character-anon":
+                action = {
+                    "kind": "utterance",
+                    "text": "素世，你觉得这样可以吗？",
+                    "addressee_ids": ["character-soyo"],
+                    "expects_response": True,
+                    "response_to_event_id": None,
+                }
+                summary = "Asks Soyo a direct question."
+            elif wave_number == 2 and request.agent_id == "character-soyo":
+                response_to_event_id = next(
+                    memory["payload"]["source_event_id"]
+                    for memory in frame["memories"]
+                    if memory["payload"].get("event_type") == "utterance"
+                )
+                action = {
+                    "kind": "utterance",
+                    "text": "嗯，这样就可以了。",
+                    "addressee_ids": [],
+                    "expects_response": False,
+                    "response_to_event_id": response_to_event_id,
+                }
+                summary = "Answers Anon and closes the exchange."
+            else:
+                action = {"kind": "no_op", "reason": "Listens."}
+                summary = "Listens."
+            raw = {
+                "schema_version": 1,
+                "proposal_id": f"dialogue-{request.agent_id}-wave-{wave_number}",
+                "world_version": frame["world_version"],
+                "session_id": frame["session_id"],
+                "actor_id": request.agent_id,
+                "intent_summary": summary,
+                "action": action,
+                "memory_changes": [],
+            }
+        else:
+            snapshot = request.input_payload["snapshot"]
+            proposals = request.input_payload["proposals"]
+            spoken = next(
+                proposal
+                for proposal in proposals
+                if proposal["action"]["kind"] == "utterance"
+            )
+            action = spoken["action"]
+            raw = {
+                "schema_version": 1,
+                "world_version": snapshot["world_version"],
+                "session_id": spoken["session_id"],
+                "wave_started_at_ms": snapshot["world_time_ms"],
+                "wave_ended_at_ms": snapshot["world_time_ms"] + 100,
+                "proposal_events": [
+                    {
+                        "event_key": f"dialogue-event-wave-{wave_number}",
+                        "event_type": "utterance",
+                        "actor_id": spoken["actor_id"],
+                        "start_time_ms": snapshot["world_time_ms"],
+                        "end_time_ms": snapshot["world_time_ms"] + 100,
+                        "source_kind": "action_proposal",
+                        "source_ref": spoken["proposal_id"],
+                        "location_id": "location-live-house",
+                        "scope_key": "lounge",
+                        "payload": {
+                            "intent_summary": spoken["intent_summary"],
+                            "text": action["text"],
+                            "addressee_ids": action["addressee_ids"],
+                            "expects_response": action["expects_response"],
+                            "response_to_event_id": action["response_to_event_id"],
+                        },
+                    }
+                ],
+                "session_intent": "resolved" if wave_number == 2 else "keep_open",
+            }
+        structured = response_type.model_validate(raw)
+        return ModelGeneration(
+            request=request,
+            raw_response=json.dumps(raw),
+            structured=structured,
+        )
+
+
 def test_split_is_atomic_fifo_and_scope_isolated(
     worlds_dir: Path, tmp_path: Path
 ) -> None:
@@ -595,6 +684,195 @@ def test_resolved_rejects_pending_response_and_key_commitment() -> None:
     }
 
 
+@pytest.mark.parametrize("addressee_ids", [[], ["character-a"]])
+def test_explicit_final_response_clears_pending_without_creating_another(
+    addressee_ids: list[str],
+) -> None:
+    snapshot: dict[str, Any] = {
+        "world_version": 2,
+        "world_time_ms": 100,
+        "entities": [
+            {
+                "entity_id": "location",
+                "entity_type": "location",
+                "location_id": None,
+                "scope_key": None,
+                "payload": {"scopes": [{"scope_key": "room"}]},
+            },
+            *[
+                {
+                    "entity_id": character_id,
+                    "entity_type": "character",
+                    "location_id": "location",
+                    "scope_key": "room",
+                    "payload": {},
+                }
+                for character_id in ("character-a", "character-b")
+            ],
+        ],
+        "sessions": [
+            {
+                "session_id": "session-1",
+                "status": "runnable",
+                "location_id": "location",
+                "scope_key": "room",
+                "participant_ids": ["character-a", "character-b"],
+            }
+        ],
+    }
+    response = ActionProposal.model_validate(
+        {
+            "proposal_id": "response-b",
+            "world_version": 2,
+            "session_id": "session-1",
+            "actor_id": "character-b",
+            "intent_summary": "Answers without requesting another response.",
+            "action": {
+                "kind": "utterance",
+                "text": "知道了。",
+                "addressee_ids": addressee_ids,
+                "expects_response": False,
+                "response_to_event_id": "event-question",
+            },
+        }
+    )
+    draft = SegmentDraft.model_validate(
+        {
+            "world_version": 2,
+            "session_id": "session-1",
+            "wave_started_at_ms": 100,
+            "wave_ended_at_ms": 200,
+            "proposal_events": [
+                {
+                    "event_key": "event-response",
+                    "event_type": "utterance",
+                    "actor_id": "character-b",
+                    "start_time_ms": 100,
+                    "end_time_ms": 200,
+                    "source_kind": "action_proposal",
+                    "source_ref": "response-b",
+                    "location_id": "location",
+                    "scope_key": "room",
+                    "payload": {
+                        "intent_summary": response.intent_summary,
+                        "text": "知道了。",
+                        "addressee_ids": addressee_ids,
+                        "expects_response": False,
+                        "response_to_event_id": "event-question",
+                    },
+                }
+            ],
+            "session_intent": "resolved",
+        }
+    )
+
+    outcome = SegmentValidator().validate(
+        world_id="world",
+        snapshot=snapshot,
+        proposals=[response],
+        draft=draft,
+        source_trace_id="trace-response",
+        completed_wave_count=1,
+        pending_response_ids=("character-b",),
+    )
+
+    assert outcome.ok
+    assert outcome.value is not None
+    assert outcome.value.pending_response_ids == []
+
+
+def test_explicit_question_creates_pending_response() -> None:
+    snapshot: dict[str, Any] = {
+        "world_version": 1,
+        "world_time_ms": 0,
+        "entities": [
+            {
+                "entity_id": "location",
+                "entity_type": "location",
+                "location_id": None,
+                "scope_key": None,
+                "payload": {"scopes": [{"scope_key": "room"}]},
+            },
+            *[
+                {
+                    "entity_id": character_id,
+                    "entity_type": "character",
+                    "location_id": "location",
+                    "scope_key": "room",
+                    "payload": {},
+                }
+                for character_id in ("character-a", "character-b")
+            ],
+        ],
+        "sessions": [
+            {
+                "session_id": "session-1",
+                "status": "runnable",
+                "location_id": "location",
+                "scope_key": "room",
+                "participant_ids": ["character-a", "character-b"],
+            }
+        ],
+    }
+    question = ActionProposal.model_validate(
+        {
+            "proposal_id": "question-a",
+            "world_version": 1,
+            "session_id": "session-1",
+            "actor_id": "character-a",
+            "intent_summary": "Asks B a direct question.",
+            "action": {
+                "kind": "utterance",
+                "text": "你觉得呢？",
+                "addressee_ids": ["character-b"],
+                "expects_response": True,
+                "response_to_event_id": None,
+            },
+        }
+    )
+    draft = SegmentDraft.model_validate(
+        {
+            "world_version": 1,
+            "session_id": "session-1",
+            "wave_started_at_ms": 0,
+            "wave_ended_at_ms": 100,
+            "proposal_events": [
+                {
+                    "event_key": "event-question",
+                    "event_type": "utterance",
+                    "actor_id": "character-a",
+                    "start_time_ms": 0,
+                    "end_time_ms": 100,
+                    "source_kind": "action_proposal",
+                    "source_ref": "question-a",
+                    "location_id": "location",
+                    "scope_key": "room",
+                    "payload": {
+                        "intent_summary": question.intent_summary,
+                        "text": "你觉得呢？",
+                        "addressee_ids": ["character-b"],
+                        "expects_response": True,
+                        "response_to_event_id": None,
+                    },
+                }
+            ],
+            "session_intent": "keep_open",
+        }
+    )
+
+    outcome = SegmentValidator().validate(
+        world_id="world",
+        snapshot=snapshot,
+        proposals=[question],
+        draft=draft,
+        source_trace_id="trace-question",
+    )
+
+    assert outcome.ok
+    assert outcome.value is not None
+    assert outcome.value.pending_response_ids == ["character-b"]
+
+
 def test_no_op_then_resolved_uses_one_event_free_control_segment(
     worlds_dir: Path,
 ) -> None:
@@ -625,6 +903,28 @@ def test_no_op_then_resolved_uses_one_event_free_control_segment(
         assert connection.execute("SELECT count(*) FROM world_events").fetchone() == (
             0,
         )
+
+
+def test_dialogue_response_converges_and_resolves_session(worlds_dir: Path) -> None:
+    initialize_world(MINIMAL_SEED, "dialogue-resolved", worlds_dir)
+
+    receipt = advance_world(
+        "dialogue-resolved",
+        worlds_dir,
+        gateway=DialogueResolutionGateway(),
+        max_waves=2,
+    )
+
+    assert receipt["status"] == "completed"
+    assert receipt["wave_count"] == 2
+    database = worlds_dir / "dialogue-resolved" / "world.sqlite3"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT status, closure_reason FROM event_sessions"
+        ).fetchone() == ("closed", "resolved")
+        assert connection.execute(
+            "SELECT count(*) FROM event_session_pending_responses"
+        ).fetchone() == (0,)
 
 
 def test_split_failure_rolls_back_position_sessions_parents_and_queue(

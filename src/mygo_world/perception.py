@@ -139,6 +139,7 @@ class PerceptionProjector:
             location_id=location_id,
             scope_key=scope_key,
             participant_ids=sorted(session["participant_ids"]),
+            pending_response_ids=sorted(session.get("pending_response_ids", [])),
             visible_entities=sorted(visible, key=lambda item: item.entity_id),
             reachable_destinations=[
                 ReachableDestination.model_validate(item)

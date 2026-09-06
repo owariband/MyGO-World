@@ -51,6 +51,8 @@ def _offline_wave_responses() -> dict[str, dict[str, object]]:
                 "kind": "utterance",
                 "text": text,
                 "addressee_ids": [],
+                "expects_response": False,
+                "response_to_event_id": None,
             },
             "memory_changes": [],
         }
@@ -72,6 +74,8 @@ def _offline_wave_responses() -> dict[str, dict[str, object]]:
                     "intent_summary": proposal["intent_summary"],
                     "text": text,
                     "addressee_ids": [],
+                    "expects_response": False,
+                    "response_to_event_id": None,
                 },
             }
         )
