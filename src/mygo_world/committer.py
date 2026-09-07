@@ -21,6 +21,7 @@ from mygo_world.contracts import (
 )
 from mygo_world.db.models import (
     AgentMemoryRow,
+    DecisionTurnRecordRow,
     EntityRevisionRow,
     EventSessionMemberRow,
     EventSessionPendingResponseRow,
@@ -102,6 +103,10 @@ def _entity_payload(
             scope.model_dump(mode="json")
             for scope in sorted(entity.scopes, key=lambda value: value.scope_key)
         ]
+    elif isinstance(entity, CharacterSeed) and entity.presentation is not None:
+        payload["presentation"] = entity.presentation.model_dump(
+            mode="json", exclude_none=True
+        )
     return payload
 
 
@@ -376,6 +381,7 @@ class WorldCommitter:
         self,
         plan: ValidatedCommitPlan,
         *,
+        decision_id: str | None = None,
         failure_injector: Callable[[str], None] | None = None,
     ) -> WaveCommitResult:
         """Atomically publish every authoritative product of one validated Wave."""
@@ -573,6 +579,25 @@ class WorldCommitter:
                 )
             )
             world.current_version = plan.new_world_version
+            if decision_id is not None:
+                decision = session.get(DecisionTurnRecordRow, decision_id)
+                if decision is None:
+                    raise ValueError(f"Decision Turn '{decision_id}' does not exist")
+                if decision.status != "selected":
+                    raise ValueError(
+                        f"Decision Turn '{decision_id}' is not awaiting commit"
+                    )
+                if (
+                    decision.session_id != plan.session_id
+                    or decision.base_world_version != plan.base_world_version
+                ):
+                    raise ValueError(
+                        f"Decision Turn '{decision_id}' does not match Commit Plan"
+                    )
+                decision.status = "committed"
+                decision.resulting_world_version = plan.new_world_version
+                decision.error_code = None
+                decision.updated_at = committed_at
             session.flush()
             inject("snapshot")
 

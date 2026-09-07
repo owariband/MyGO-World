@@ -25,15 +25,11 @@ def _response(body: dict[str, Any]) -> dict[str, Any]:
         frame = payload["perception_frame"]
         version = frame["world_version"]
         actor = frame["character_id"]
-        action = (
-            {
-                "kind": "interact",
-                "target_id": "object-set-list",
-                "description": "Reviews the opening song on the set list.",
-            }
-            if version == 1
-            else {"kind": "no_op", "reason": "The set list is settled."}
-        )
+        action = {
+            "kind": "interact",
+            "target_id": "object-set-list",
+            "description": "Reviews the opening song on the set list.",
+        }
         return {
             "schema_version": 1,
             "proposal_id": f"proposal-{actor}-v{version}",
@@ -46,19 +42,16 @@ def _response(body: dict[str, Any]) -> dict[str, Any]:
         }
     if "mygo.director.live" in system:
         version = payload["world_version"]
-        proposals = payload["proposals"]
-        if version > 1:
+        if "candidate_ids" in payload:
+            candidates = sorted(payload["candidate_ids"])
             return {
                 "schema_version": 1,
                 "world_version": version,
-                "session_id": proposals[0]["session_id"],
-                "wave_started_at_ms": payload["world_time_ms"],
-                "wave_ended_at_ms": payload["world_time_ms"],
-                "proposal_events": [],
-                "external_events": [],
-                "entity_changes": [],
-                "session_intent": "resolved",
+                "session_id": payload["session_id"],
+                "actor_id": candidates[(version - 1) % len(candidates)],
+                "reason": "Deterministic test turn selection.",
             }
+        proposals = payload["proposals"]
         events = []
         for index, proposal in enumerate(proposals):
             start = payload["world_time_ms"] + index * 1000
@@ -91,7 +84,7 @@ def _response(body: dict[str, Any]) -> dict[str, Any]:
             "proposal_events": events,
             "external_events": [],
             "entity_changes": [],
-            "session_intent": "keep_open",
+            "session_intent": "resolved" if version > 1 else "keep_open",
         }
     events = payload["events"]
     frontier = set(payload["frontier_event_ids"])
@@ -220,6 +213,7 @@ MYGO_MODEL_PARAMETERS_JSON={{"temperature":0}}
         item
         for item in request_bodies
         if "mygo.director.live" in item["messages"][0]["content"]
+        and "proposals" in json.loads(item["messages"][1]["content"])
     )
     director_schema = json.dumps(director_request["response_format"])
     assert '"const": "action_proposal"' in director_schema

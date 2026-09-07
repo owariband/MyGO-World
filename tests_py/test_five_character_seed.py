@@ -35,35 +35,41 @@ PRIVATE_MARKERS = {
 
 
 def _offline_wave_responses() -> dict[str, dict[str, object]]:
-    responses: dict[str, dict[str, object]] = {}
-    proposal_events: list[dict[str, object]] = []
-    for index, character_id in enumerate(CHARACTER_IDS, start=1):
-        proposal_id = f"proposal-{character_id}-wave-1"
-        text = f"{character_id} 提出了自己的编排意见。"
-        proposal = {
-            "schema_version": 1,
-            "proposal_id": proposal_id,
-            "world_version": 1,
-            "session_id": "session-ring-arrangement",
-            "actor_id": character_id,
-            "intent_summary": "就共同的排练编排给出明确意见。",
-            "action": {
-                "kind": "utterance",
-                "text": text,
-                "addressee_ids": [],
-                "expects_response": False,
-                "response_to_event_id": None,
-            },
-            "memory_changes": [],
-        }
-        responses[f"character:{character_id}:action_proposal"] = proposal
-        proposal_events.append(
+    character_id = "character-anon"
+    proposal_id = f"proposal-{character_id}-wave-1"
+    text = f"{character_id} 提出了自己的编排意见。"
+    proposal = {
+        "schema_version": 1,
+        "proposal_id": proposal_id,
+        "world_version": 1,
+        "session_id": "session-ring-arrangement",
+        "actor_id": character_id,
+        "intent_summary": "就共同的排练编排给出明确意见。",
+        "action": {
+            "kind": "utterance",
+            "text": text,
+            "addressee_ids": [],
+            "expects_response": False,
+            "response_to_event_id": None,
+        },
+        "memory_changes": [],
+    }
+    responses: dict[str, dict[str, object]] = {
+        f"character:{character_id}:action_proposal": proposal
+    }
+    responses["director:global-director:segment_draft"] = {
+        "schema_version": 1,
+        "world_version": 1,
+        "session_id": "session-ring-arrangement",
+        "wave_started_at_ms": 0,
+        "wave_ended_at_ms": 600,
+        "proposal_events": [
             {
                 "event_key": f"event-{character_id}-opinion",
                 "event_type": "utterance",
                 "actor_id": character_id,
-                "start_time_ms": index * 100,
-                "end_time_ms": index * 100 + 50,
+                "start_time_ms": 100,
+                "end_time_ms": 150,
                 "cause_event_keys": [],
                 "source_kind": "action_proposal",
                 "source_ref": proposal_id,
@@ -78,14 +84,7 @@ def _offline_wave_responses() -> dict[str, dict[str, object]]:
                     "response_to_event_id": None,
                 },
             }
-        )
-    responses["director:global-director:segment_draft"] = {
-        "schema_version": 1,
-        "world_version": 1,
-        "session_id": "session-ring-arrangement",
-        "wave_started_at_ms": 0,
-        "wave_ended_at_ms": 600,
-        "proposal_events": proposal_events,
+        ],
         "external_events": [],
         "entity_changes": [],
         "session_intent": "keep_open",
@@ -208,7 +207,7 @@ def test_five_character_seed_initializes_and_reopens_persisted_state(
         )
 
 
-def test_offline_five_character_wave_preserves_lockstep_memory_and_provenance(
+def test_offline_five_character_wave_selects_one_actor_and_preserves_memory(
     worlds_dir: Path,
 ) -> None:
     initialize_world(FIVE_CHARACTER_SEED, "five-character-wave", worlds_dir)
@@ -223,7 +222,7 @@ def test_offline_five_character_wave_preserves_lockstep_memory_and_provenance(
     shown = show_world("five-character-wave", worlds_dir)
 
     character_calls = [call for call in gateway.calls if call.agent_type == "character"]
-    assert len(character_calls) == 5
+    assert len(character_calls) == 1
     assert {call.input_payload["world_version"] for call in character_calls} == {1}
     for call in character_calls:
         frame = call.input_payload["perception_frame"]
@@ -241,11 +240,11 @@ def test_offline_five_character_wave_preserves_lockstep_memory_and_provenance(
     assert receipt["start_world_version"] == 1
     assert receipt["end_world_version"] == 2
     assert receipt["wave_count"] == 1
-    assert receipt["model_call_count"] == 6
-    assert receipt["world_event_count"] == 5
+    assert receipt["model_call_count"] == 2
+    assert receipt["world_event_count"] == 1
     assert receipt["network_request_count"] == 0
     assert shown["world_version"] == 2
-    assert shown["world_event_count"] == 5
+    assert shown["world_event_count"] == 1
 
     database = worlds_dir / "five-character-wave" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
@@ -257,11 +256,16 @@ def test_offline_five_character_wave_preserves_lockstep_memory_and_provenance(
             "SELECT structured_result_json FROM generation_traces "
             "WHERE agent_type='character'"
         ).fetchall()
-    assert len(events) == 5
+        decision = connection.execute(
+            "SELECT selected_actor_id, selection_source, status "
+            "FROM decision_turn_records"
+        ).fetchone()
+    assert len(events) == 1
     assert len({row[0] for row in events}) == 1
     assert {json.loads(row[1])["source_ref"] for row in events} == {
-        f"proposal-{character_id}-wave-1" for character_id in CHARACTER_IDS
+        "proposal-character-anon-wave-1"
     }
     assert {json.loads(row[0])["proposal_id"] for row in character_traces} == {
-        f"proposal-{character_id}-wave-1" for character_id in CHARACTER_IDS
+        "proposal-character-anon-wave-1"
     }
+    assert decision == ("character-anon", "director", "committed")

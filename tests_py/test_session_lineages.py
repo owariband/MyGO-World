@@ -465,8 +465,7 @@ def test_split_is_atomic_fifo_and_scope_isolated(
     next_receipt = advance_world("split", worlds_dir, gateway=next_gateway, max_waves=1)
     assert next_receipt["session_id"] == queue[2]["session_id"]
     assert {frame["character_id"] for frame in next_gateway.frames} == {
-        "character-b",
-        "character-c",
+        "character-b"
     }
 
 
@@ -936,6 +935,13 @@ def test_dialogue_response_converges_and_resolves_session(worlds_dir: Path) -> N
         assert connection.execute(
             "SELECT count(*) FROM event_session_pending_responses"
         ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT selected_actor_id, selection_source, status "
+            "FROM decision_turn_records ORDER BY turn_order"
+        ).fetchall() == [
+            ("character-anon", "director", "committed"),
+            ("character-soyo", "nominated", "committed"),
+        ]
 
 
 def test_split_failure_rolls_back_position_sessions_parents_and_queue(

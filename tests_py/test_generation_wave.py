@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from mygo_world.canonical import canonical_json
 from mygo_world.contracts import (
     ActionProposal,
+    CharacterPresentation,
     PerceptionFrame,
     SegmentDraft,
 )
@@ -184,6 +185,43 @@ def test_perception_frame_is_scope_and_memory_owner_limited(worlds_dir: Path) ->
         "location-live-house",
     }
     assert {item.agent_id for item in frame.memories} == {"character-anon"}
+    soyo = next(
+        item for item in frame.visible_entities if item.entity_id == "character-soyo"
+    )
+    assert soyo.presentation is not None
+    assert soyo.presentation.demeanor is not None
+    assert "温和有礼" in soyo.presentation.demeanor
+
+
+def test_character_presentation_requires_a_perceivable_quality() -> None:
+    with pytest.raises(ValidationError):
+        CharacterPresentation()
+
+
+def test_non_character_cannot_expose_character_presentation() -> None:
+    with pytest.raises(ValidationError):
+        PerceptionFrame.model_validate(
+            {
+                "world_id": "world-1",
+                "world_version": 1,
+                "world_time_ms": 0,
+                "session_id": "session-1",
+                "character_id": "character-anon",
+                "location_id": "location-1",
+                "scope_key": "room",
+                "participant_ids": ["character-anon"],
+                "visible_entities": [
+                    {
+                        "entity_id": "object-1",
+                        "entity_type": "object",
+                        "name": "Object",
+                        "presentation": {"appearance": "Incorrectly attached"},
+                    }
+                ],
+                "reachable_destinations": [],
+                "memories": [],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -468,7 +506,7 @@ def test_advance_commits_one_atomic_version_with_multiple_events(
             "skill_id, model_id, validation_json FROM generation_traces "
             "ORDER BY agent_type"
         ).fetchall()
-    assert len(traces) == 3
+    assert len(traces) == 2
     assert all("api_key" not in canonical_json(row) for row in traces)
     assert all(json.loads(row[5])["ok"] for row in traces)
 
@@ -519,7 +557,10 @@ def test_commit_failure_rolls_back_all_authoritative_wave_records(
         # Traces intentionally survive an authoritative commit failure for diagnosis.
         assert connection.execute(
             "SELECT count(*) FROM generation_traces"
-        ).fetchone() == (3,)
+        ).fetchone() == (2,)
+        assert connection.execute(
+            "SELECT status, resulting_world_version FROM decision_turn_records"
+        ).fetchone() == ("failed", None)
 
 
 def test_new_process_reads_wave_events_observations_and_checksum(

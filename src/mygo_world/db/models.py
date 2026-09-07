@@ -316,3 +316,44 @@ class GenerationWaveRow(Base):
     error_code: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class DecisionTurnRecordRow(Base):
+    __tablename__ = "decision_turn_records"
+    __table_args__ = (
+        UniqueConstraint("wave_id"),
+        UniqueConstraint("turn_order"),
+        CheckConstraint("turn_order > 0", name="ck_decision_turn_order_positive"),
+        CheckConstraint(
+            "selection_source IN ('nominated', 'director', 'round_robin')",
+            name="ck_decision_turn_selection_source",
+        ),
+        CheckConstraint(
+            "status IN ('selected', 'no_op', 'committed', 'failed')",
+            name="ck_decision_turn_status",
+        ),
+    )
+
+    decision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    turn_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_batches.run_id"), nullable=False, index=True
+    )
+    wave_id: Mapped[str] = mapped_column(
+        ForeignKey("generation_waves.wave_id"), nullable=False
+    )
+    wave_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    base_world_version: Mapped[int] = mapped_column(
+        ForeignKey("world_versions.version"), nullable=False
+    )
+    selected_actor_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    selection_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    candidate_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    resulting_world_version: Mapped[int | None] = mapped_column(
+        ForeignKey("world_versions.version")
+    )
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)

@@ -17,7 +17,7 @@ SQLite              运行后实际发生的世界历史、角色记忆和执行
 
 ## 2. 人物
 
-人物由四部分组成，不放进一张通用 Entity 状态表。
+人物由五部分组成，不放进一张通用 Entity 状态表。Character Skill 与 Character Presentation 的详细分工见[Character Skill 当前设计](character-skill-design.md)。
 
 ### Character Definition
 
@@ -38,6 +38,21 @@ skill_ref / asset_refs
 - 源：版本化 Skill 文件。
 - SQLite 记录每次生成实际使用的 Skill 版本和 hash。
 - Skill 不是人物当前状态，也不是人物记忆。
+
+### Character Presentation
+
+人物跨场景相对稳定、可被周围角色感知的外部特征。
+
+```text
+appearance / demeanor
+voice / observable_traits
+```
+
+- 源：Scenario Seed；提交后随 Character Entity Revision 持久化。
+- PerceptionProjector 只向同一 Interaction Scope 内可感知该角色的参与者投影。
+- Presentation 提供形成第一印象的线索；具体第一印象属于观察者自己的 Belief。
+- 当前衣着、受伤和一次发言的声音变化属于版本化状态或 World Event。
+- 具体素材文件仍由 Asset Manifest 持有。
 
 ### Character World Presence
 

@@ -1,5 +1,8 @@
 # 每名角色每轮只提出一个原子行动
 
+> “每名角色都在同一 Wave 提案”的语义已由 ADR 0027 修订为：每个 Wave 只向一名
+> 获得 Decision Turn 的 Character 征集提案。本 ADR 的单个提案原子性与行动边界继续有效。
+
 每个 Generation Wave 中，每名 Character Agent 必须返回一个且仅一个 `utterance`、`move`、`interact`、`wait` 或 `no_op` Action Proposal。台词可携带不改变世界状态的表情和表演提示，但不能借此隐藏第二个世界行动；这个限制使并行提案的冲突检测和原子提交保持可判定。
 
 Proposal 只携带一句简短 `intent_summary`，不请求或保存模型思维链。`wait` 表示角色主动等待并由 Director 分配语义时长，可以推进 World Time；`no_op` 表示本轮没有角色行动，不单独产生 World Event。`utterance` 显式携带零到多个 `addressee_ids`，为空时表示对当前 Session 公开发言。

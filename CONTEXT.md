@@ -49,8 +49,20 @@ _Avoid_: Snapshot、World Event
 _Avoid_: Snapshot、Agent Memory、Generation Trace
 
 **Generation Wave**:
-一个 Event Session 的单轮 lockstep 决策周期；所有参与的 Character Agent 从同一 World Version 和共同决策时刻并行提出行动，Director 可以在该 Wave 内为这些提案安排不同执行时间，全部行动在统一结束屏障前完成并由 Runtime 原子提交。提前完成者隐式空闲，下一 Wave 只决定未来而不追写上一 Wave 的行为。
+一个 Event Session 的单轮原子决策周期；Turn Scheduler 从某个已提交 World Version 为一名 Character 授予 Decision Turn，该角色至多提出一个 Action Proposal，Director 补全结果后由 Runtime 原子提交。下一 Wave 因而能观察上一 Wave 已提交的行动。
 _Avoid_: Fixed-duration Tick、Event Session、World Event
+
+**Decision Turn**:
+Turn Scheduler 在一个 Generation Wave 中授予单个 Character 的一次决策机会；它允许该角色提出一个行动或 `no_op`，但不强制角色发言，也不是持续固定时长的模拟回合。
+_Avoid_: Generation Wave、Action Proposal、World Event
+
+**Turn Scheduler**:
+Runtime 内的确定性调度模块，不是 Agent。它先从当前 `pending_response_ids` 中选择被点名者；没有点名时接受 Director 对其余合法参与者的选择，多人 Session 默认排除上一位已完成 Decision Turn 的角色；Director 缺失或给出非法结果时，按稳定 participant ID 和持久游标 round-robin 回退。首期不实现 continuation 或 Turn Bid。
+_Avoid_: Director、Runnable Session Queue、Presentation Order
+
+**Decision Turn Record**:
+记录每次 Decision Turn 的候选角色、选中角色、选择来源及最终状态的持久运行记录；它用于审计、恢复 round-robin 游标和重放调度，但不是客观世界事实，不属于 World Ledger。
+_Avoid_: Generation Trace、World Event、World Segment
 
 **Generation Batch**:
 一次带唯一 `run_id` 的有界离线世界生成过程；Runtime 从指定 World 的当前版本取出 Runnable Session Queue 队首，并在确定性上限内只推进该 Session 的一条后继 lineage。它记录起止 World Version，但不决定 Broadcast 的增量边界。
@@ -116,6 +128,10 @@ _Avoid_: Codex Skill、Prompt、Agent Contract
 属于单个角色的不可变 Runtime Skill，以自然语言描述跨场景稳定的人格、长期驱动力、关系倾向、判断方式和表达风格；具体任务由 Scenario Policy 或运行上下文提供，经历造成的变化由 Agent Memory 承载。
 _Avoid_: Character Memory、Asset Manifest、Codex Skill
 
+**Character Presentation**:
+Character Entity 拥有的公开可感知值对象，描述跨场景相对稳定的外貌、外显气质、声音和可观察行为倾向；它提供形成印象的线索，不代表观察者已经形成的主观判断。
+_Avoid_: Character Skill、First Impression、Asset Manifest、Agent Memory
+
 **Agent Contract**:
 后端为一种 Agent 角色拥有并强制执行的接口，包括输入投影、工具白名单、结构化输出 Schema、确定性字段及校验规则；后端可以把契约说明组装成模型指令，但自然语言提示本身不构成权限或正确性保证。
 _Avoid_: Runtime Skill、Prompt
@@ -137,7 +153,7 @@ _Avoid_: World Ledger、Agent Memory
 _Avoid_: Director、World Committer、Broadcast
 
 **Director**:
-读取 Character Agent 提案并补全环境反应、对象结果、时间、因果关系与 Event Session 生命周期的 Agent；它可以提出无主体桥接事件，但不能替角色作出重要选择、发言或改变动机，也不能提交世界事实或编排演出。
+在没有待回应点名时可从 Scheduler 给出的合法候选中建议下一位行动者，并在 Character Agent 提案后补全环境反应、对象结果、时间、因果关系与 Event Session 生命周期的 Agent；它可以提出无主体桥接事件，但不能替角色作出重要选择、发言或改变动机，也不能提交世界事实或编排演出。
 _Avoid_: Broadcast、World Committer
 
 **Broadcast**:

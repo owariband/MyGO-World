@@ -4,7 +4,6 @@ import json
 import signal
 import threading
 from collections.abc import Iterator
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -28,11 +27,13 @@ from mygo_world.contracts import (
     ActionProposal,
     PerceptionFrame,
     SegmentDraft,
+    TurnSelection,
     ValidatedCommitPlan,
 )
 from mygo_world.db.engine import create_world_engine, require_current_schema
 from mygo_world.db.models import (
     AgentMemoryRow,
+    DecisionTurnRecordRow,
     EventSessionMemberRow,
     EventSessionPendingResponseRow,
     EventSessionRow,
@@ -56,6 +57,13 @@ from mygo_world.gateways import (
 )
 from mygo_world.memory import AgentMemoryRepository
 from mygo_world.perception import PerceptionProjector
+from mygo_world.scheduling import (
+    DecisionTurnRecord,
+    DeterministicDirectorFixture,
+    DirectorTurnPolicy,
+    TurnContext,
+    TurnScheduler,
+)
 from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
 from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
 from mygo_world.telemetry import (
@@ -88,53 +96,36 @@ def _default_fixture_responses(
     actor_id: str,
     participant_ids: list[str],
 ) -> dict[str, dict[str, Any]]:
-    """Build a deterministic two-Agent lockstep Wave with one explicit no-op."""
+    """Build one deterministic Character turn and its Director settlement."""
 
     world_time = snapshot["world_time_ms"]
     target_ids = [item for item in participant_ids if item != actor_id]
     responses: dict[str, dict[str, Any]] = {}
-    proposals: list[dict[str, Any]] = []
-    for participant_id in participant_ids:
-        if participant_id == actor_id:
-            proposal = {
-                "schema_version": 1,
-                "proposal_id": f"fixture-proposal-{participant_id}-v{snapshot['world_version']}",
-                "world_version": snapshot["world_version"],
-                "session_id": session_id,
-                "actor_id": participant_id,
-                "intent_summary": "Greets the other participant before rehearsal.",
-                "action": {
-                    "kind": "utterance",
-                    "text": "早上好，今天也一起加油吧。",
-                    "addressee_ids": target_ids[:1],
-                    "expects_response": bool(target_ids),
-                    "response_to_event_id": None,
-                },
-                "memory_changes": [
-                    {
-                        "agent_id": participant_id,
-                        "namespace": "default",
-                        "memory_type": "belief",
-                        "content": "The rehearsal can begin with a friendly greeting.",
-                        "importance": 2,
-                    }
-                ],
+    primary = {
+        "schema_version": 1,
+        "proposal_id": f"fixture-proposal-{actor_id}-v{snapshot['world_version']}",
+        "world_version": snapshot["world_version"],
+        "session_id": session_id,
+        "actor_id": actor_id,
+        "intent_summary": "Greets the other participant before rehearsal.",
+        "action": {
+            "kind": "utterance",
+            "text": "早上好，今天也一起加油吧。",
+            "addressee_ids": target_ids[:1],
+            "expects_response": bool(target_ids),
+            "response_to_event_id": None,
+        },
+        "memory_changes": [
+            {
+                "agent_id": actor_id,
+                "namespace": "default",
+                "memory_type": "belief",
+                "content": "The rehearsal can begin with a friendly greeting.",
+                "importance": 2,
             }
-        else:
-            proposal = {
-                "schema_version": 1,
-                "proposal_id": f"fixture-proposal-{participant_id}-v{snapshot['world_version']}",
-                "world_version": snapshot["world_version"],
-                "session_id": session_id,
-                "actor_id": participant_id,
-                "intent_summary": "Listens without taking a separate action.",
-                "action": {"kind": "no_op", "reason": "Listening"},
-                "memory_changes": [],
-            }
-        proposals.append(proposal)
-        responses[f"character:{participant_id}:action_proposal"] = proposal
-
-    primary = next(item for item in proposals if item["actor_id"] == actor_id)
+        ],
+    }
+    responses[f"character:{actor_id}:action_proposal"] = primary
     proposal_event_key = "event-character-greeting"
     responses["director:global-director:segment_draft"] = {
         "schema_version": 1,
@@ -365,6 +356,48 @@ def _call_gateway[ResponseT: BaseModel](
     ) from last_error
 
 
+@dataclass
+class _GatewayDirectorTurnPolicy:
+    gateway: ModelGateway
+    request: ModelRequest
+    budget: _RequestBudget
+    cancellation_event: threading.Event
+    retries: int
+    generation: ModelGeneration[TurnSelection] | None = None
+    invalid_output: ModelOutputInvalidError | None = None
+    failure_code: str | None = None
+
+    def select(
+        self, context: TurnContext, candidate_ids: tuple[str, ...]
+    ) -> TurnSelection | None:
+        del context
+        payload = dict(self.request.input_payload)
+        payload["candidate_ids"] = list(candidate_ids)
+        request = replace(self.request, input_payload=payload)
+        try:
+            self.generation = _call_gateway(
+                self.gateway,
+                request,
+                TurnSelection,
+                budget=self.budget,
+                cancellation_event=self.cancellation_event,
+                retries=self.retries,
+            )
+            return self.generation.structured
+        except ModelOutputInvalidError as exc:
+            self.invalid_output = exc
+            self.failure_code = "MODEL_SCHEMA_INVALID"
+            return None
+        except (ValidationError, ValueError, json.JSONDecodeError):
+            self.failure_code = "MODEL_SCHEMA_INVALID"
+            return None
+        except WorldError as exc:
+            if exc.code in {"BATCH_CANCELLED", "REQUEST_BUDGET_EXHAUSTED"}:
+                raise
+            self.failure_code = exc.code
+            return None
+
+
 def _repair_request(
     request: ModelRequest,
     *,
@@ -582,6 +615,23 @@ def _interrupt_stale_batches(engine: Any, world_id: str, clock: Clock) -> None:
                 status="interrupted", error_code="BATCH_INTERRUPTED", updated_at=now
             )
         )
+        session.execute(
+            update(DecisionTurnRecordRow)
+            .where(
+                DecisionTurnRecordRow.status == "selected",
+                DecisionTurnRecordRow.run_id.in_(
+                    select(GenerationBatchRow.run_id).where(
+                        GenerationBatchRow.world_id == world_id,
+                        GenerationBatchRow.status == "interrupted",
+                    )
+                ),
+            )
+            .values(
+                status="failed",
+                error_code="BATCH_INTERRUPTED",
+                updated_at=now,
+            )
+        )
 
 
 def _create_batch(
@@ -674,6 +724,62 @@ def _finish_wave(
     finish_wave_span(wave_id, result=status)
 
 
+def _record_decision_turn(
+    engine: Any,
+    *,
+    record: DecisionTurnRecord,
+    clock: Clock,
+) -> None:
+    now = _timestamp(clock)
+    with Session(engine) as session, session.begin():
+        turn_order = (
+            int(
+                session.scalar(
+                    select(func.max(DecisionTurnRecordRow.turn_order))
+                )
+                or 0
+            )
+            + 1
+        )
+        session.add(
+            DecisionTurnRecordRow(
+                decision_id=record.decision_id,
+                turn_order=turn_order,
+                run_id=record.run_id,
+                wave_id=record.wave_id,
+                wave_number=record.wave_number,
+                session_id=record.session_id,
+                base_world_version=record.base_world_version,
+                selected_actor_id=record.selected_actor_id,
+                selection_source=record.selection_source,
+                candidate_ids_json=canonical_json(list(record.candidate_ids)),
+                status=record.status,
+                resulting_world_version=record.resulting_world_version,
+                error_code=record.error_code,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+
+def _finish_decision_turn(
+    engine: Any,
+    *,
+    decision_id: str,
+    status: str,
+    resulting_world_version: int | None,
+    error_code: str | None,
+    clock: Clock,
+) -> None:
+    with Session(engine) as session, session.begin():
+        decision = session.get(DecisionTurnRecordRow, decision_id)
+        if decision is not None and decision.status == "selected":
+            decision.status = status
+            decision.resulting_world_version = resulting_world_version
+            decision.error_code = error_code
+            decision.updated_at = _timestamp(clock)
+
+
 def _finish_batch(
     engine: Any,
     *,
@@ -715,6 +821,7 @@ def _load_wave_context(
     int,
     tuple[str, ...],
     bool,
+    str | None,
 ]:
     with Session(engine) as session:
         world = session.get(WorldRow, world_id)
@@ -775,6 +882,15 @@ def _load_wave_context(
                 .order_by(EventSessionPendingResponseRow.responder_id)
             )
         )
+        last_selected_actor_id = session.scalar(
+            select(DecisionTurnRecordRow.selected_actor_id)
+            .where(
+                DecisionTurnRecordRow.session_id == session_id,
+                DecisionTurnRecordRow.status.in_(("no_op", "committed")),
+            )
+            .order_by(DecisionTurnRecordRow.turn_order.desc())
+            .limit(1)
+        )
     if not participants:
         raise WorldError(
             "SESSION_HAS_NO_PARTICIPANTS",
@@ -800,6 +916,7 @@ def _load_wave_context(
         completed_wave_count,
         pending_response_ids,
         has_unresolved_key_commitments,
+        last_selected_actor_id,
     )
 
 
@@ -901,6 +1018,7 @@ def advance_world(
     clock: Clock = system_clock,
     id_generator: IdGenerator = uuid4_id,
     failure_injector: Any | None = None,
+    director_turn_policy: DirectorTurnPolicy | None = None,
     skills_dir: Path = DEFAULT_SKILLS_DIR,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
@@ -939,6 +1057,7 @@ def advance_world(
     warnings: list[str] = []
     wave_count = 0
     active_wave_id: str | None = None
+    active_decision_id: str | None = None
     last_result: Any | None = None
     using_builtin_fixture = gateway is None and gateway_kind == "fixture"
 
@@ -1000,6 +1119,7 @@ def advance_world(
                         completed_wave_count,
                         pending_response_ids,
                         has_unresolved_key_commitments,
+                        last_selected_actor_id,
                     ) = _load_wave_context(engine, world_id, session_id)
                     active_wave_id = id_generator()
                     _start_wave(
@@ -1012,13 +1132,111 @@ def advance_world(
                         world_time_ms=snapshot["world_time_ms"],
                         clock=clock,
                     )
+                    director_skill = require_effective_skill(
+                        pinned_skills, "director", "global-director"
+                    )
+                    turn_context = TurnContext(
+                        run_id=batch_run_id,
+                        wave_id=active_wave_id,
+                        wave_number=wave_number,
+                        world_version=snapshot["world_version"],
+                        session_id=session_id,
+                        participant_ids=tuple(participant_ids),
+                        pending_response_ids=pending_response_ids,
+                        last_selected_actor_id=last_selected_actor_id,
+                    )
+                    if director_turn_policy is not None:
+                        turn_policy: Any = director_turn_policy
+                    elif gateway_kind == "fixture":
+                        turn_policy = DeterministicDirectorFixture()
+                    else:
+                        assert selected_gateway is not None
+                        turn_policy = _GatewayDirectorTurnPolicy(
+                            gateway=selected_gateway,
+                            request=ModelRequest(
+                                agent_type="director",
+                                agent_id="global-director",
+                                call_kind="turn_selection",
+                                model_id=getattr(
+                                    selected_gateway,
+                                    "model_id",
+                                    "provider-model",
+                                ),
+                                skill_id=director_skill.skill_id,
+                                skill_version=director_skill.version,
+                                skill_content_hash=director_skill.content_hash,
+                                input_payload={
+                                    "task": (
+                                        "Select exactly one candidate to receive the "
+                                        "next Character decision turn. Do not invent "
+                                        "an action for that Character."
+                                    ),
+                                    "world_version": snapshot["world_version"],
+                                    "world_time_ms": snapshot["world_time_ms"],
+                                    "run_id": batch_run_id,
+                                    "wave_number": wave_number,
+                                    "session_id": session_id,
+                                    "candidate_ids": participant_ids,
+                                    "snapshot": snapshot,
+                                },
+                                model_config=_gateway_model_config(selected_gateway),
+                                skill_body=director_skill.body,
+                            ),
+                            budget=budget,
+                            cancellation_event=cancel,
+                            retries=transport_retries,
+                        )
+                    decision = TurnScheduler(id_generator=id_generator).select(
+                        turn_context, turn_policy
+                    )
+                    _record_decision_turn(engine, record=decision, clock=clock)
+                    active_decision_id = decision.decision_id
+
+                    if isinstance(turn_policy, _GatewayDirectorTurnPolicy):
+                        selection_record: GenerationTraceRecord | None = None
+                        if turn_policy.invalid_output is not None:
+                            selection_record = _invalid_trace_record(
+                                trace_id=id_generator(),
+                                world_id=world_id,
+                                session_id=session_id,
+                                error=turn_policy.invalid_output,
+                                attempt=1,
+                            )
+                        elif turn_policy.generation is not None:
+                            selection_ok = decision.selection_source == "director"
+                            diagnostics = []
+                            if not selection_ok:
+                                diagnostics.append(
+                                    {
+                                        "code": "TURN_SELECTION_INVALID",
+                                        "path": "actor_id",
+                                        "message": (
+                                            "Director selection did not match this "
+                                            "World Version, Session, or candidate set"
+                                        ),
+                                    }
+                                )
+                            selection_record = _trace_record(
+                                trace_id=id_generator(),
+                                world_id=world_id,
+                                session_id=session_id,
+                                generation=turn_policy.generation,
+                                validation={
+                                    "ok": selection_ok,
+                                    "attempt": 1,
+                                    "diagnostics": diagnostics,
+                                },
+                            )
+                        if selection_record is not None:
+                            committer.record_generation_traces([selection_record])
+
                     if selected_gateway is None:
                         if gateway_kind == "fixture":
                             selected_gateway = FixtureGateway(
                                 _default_fixture_responses(
                                     snapshot=snapshot,
                                     session_id=session_id,
-                                    actor_id=participant_ids[0],
+                                    actor_id=decision.selected_actor_id,
                                     participant_ids=participant_ids,
                                 )
                             )
@@ -1027,138 +1245,95 @@ def advance_world(
                                 "GATEWAY_INVALID", f"Unknown gateway '{gateway_kind}'"
                             )
 
-                    frames = {
-                        participant_id: PerceptionProjector().project_frame(
-                            snapshot,
-                            session_id=session_id,
-                            character_id=participant_id,
-                            memories=memories_by_agent[participant_id],
+                    assert selected_gateway is not None
+                    selected_actor_id = decision.selected_actor_id
+                    frame = PerceptionProjector().project_frame(
+                        snapshot,
+                        session_id=session_id,
+                        character_id=selected_actor_id,
+                        memories=memories_by_agent[selected_actor_id],
+                    )
+                    skill = require_effective_skill(
+                        pinned_skills, "character", selected_actor_id
+                    )
+                    request = ModelRequest(
+                        agent_type="character",
+                        agent_id=selected_actor_id,
+                        call_kind="action_proposal",
+                        model_id=getattr(
+                            selected_gateway, "model_id", "fixture-model-v1"
+                        ),
+                        skill_id=skill.skill_id,
+                        skill_version=skill.version,
+                        skill_content_hash=skill.content_hash,
+                        input_payload={
+                            "world_version": snapshot["world_version"],
+                            "world_time_ms": snapshot["world_time_ms"],
+                            "run_id": batch_run_id,
+                            "wave_number": wave_number,
+                            "perception_frame": frame.model_dump(mode="json"),
+                        },
+                        model_config=_gateway_model_config(selected_gateway),
+                        skill_body=skill.body,
+                    )
+                    try:
+                        character_result = _generate_character(
+                            gateway=selected_gateway,
+                            request=request,
+                            frame=frame,
+                            budget=budget,
+                            cancellation_event=cancel,
+                            retries=transport_retries,
+                            semaphore=semaphore,
                         )
-                        for participant_id in participant_ids
-                    }
-                    futures: dict[
-                        Future[_ValidatedGeneration[ActionProposal]], str
-                    ] = {}
-                    with ThreadPoolExecutor(
-                        max_workers=len(participant_ids),
-                        thread_name_prefix="mygo-character",
-                    ) as executor:
-                        for participant_id in participant_ids:
-                            frame = frames[participant_id]
-                            skill = require_effective_skill(
-                                pinned_skills, "character", participant_id
+                    except WorldError as exc:
+                        trace_records = [
+                            _trace_record(
+                                trace_id=id_generator(),
+                                world_id=world_id,
+                                session_id=session_id,
+                                generation=generation,
+                                validation=validation,
                             )
-                            request = ModelRequest(
-                                agent_type="character",
-                                agent_id=participant_id,
-                                call_kind="action_proposal",
-                                model_id=getattr(
-                                    selected_gateway, "model_id", "fixture-model-v1"
-                                ),
-                                skill_id=skill.skill_id,
-                                skill_version=skill.version,
-                                skill_content_hash=skill.content_hash,
-                                input_payload={
-                                    "world_version": snapshot["world_version"],
-                                    "world_time_ms": snapshot["world_time_ms"],
-                                    "run_id": batch_run_id,
-                                    "wave_number": wave_number,
-                                    "perception_frame": frame.model_dump(mode="json"),
-                                },
-                                model_config=_gateway_model_config(selected_gateway),
-                                skill_body=skill.body,
+                            for generation, validation in exc.trace_attempts
+                        ]
+                        trace_records.extend(
+                            _invalid_trace_record(
+                                trace_id=id_generator(),
+                                world_id=world_id,
+                                session_id=session_id,
+                                error=error,
+                                attempt=attempt,
                             )
-                            futures[
-                                executor.submit(
-                                    _generate_character,
-                                    gateway=selected_gateway,
-                                    request=request,
-                                    frame=frame,
-                                    budget=budget,
-                                    cancellation_event=cancel,
-                                    retries=transport_retries,
-                                    semaphore=semaphore,
-                                )
-                            ] = participant_id
-
-                        character_results: dict[
-                            str, _ValidatedGeneration[ActionProposal]
-                        ] = {}
-                        character_error: BaseException | None = None
-                        failed_attempts: tuple[Any, ...] = ()
-                        failed_schema_attempts: tuple[Any, ...] = ()
-                        for future in as_completed(futures):
-                            participant_id = futures[future]
-                            try:
-                                character_results[participant_id] = future.result()
-                            except Exception as exc:  # noqa: BLE001 - collect all worker failures
-                                character_error = character_error or exc
-                                failed_attempts = failed_attempts or (
-                                    exc.trace_attempts
-                                    if isinstance(exc, WorldError)
-                                    else ()
-                                )
-                                failed_schema_attempts = failed_schema_attempts or (
-                                    exc.schema_attempts
-                                    if isinstance(exc, WorldError)
-                                    else ()
-                                )
-                        trace_records: list[GenerationTraceRecord] = []
-                        for participant_id in participant_ids:
-                            result = character_results.get(participant_id)
-                            if result is None:
-                                continue
-                            for error, attempt in result.invalid_attempts:
-                                trace_records.append(
-                                    _invalid_trace_record(
-                                        trace_id=id_generator(),
-                                        world_id=world_id,
-                                        session_id=session_id,
-                                        error=error,
-                                        attempt=attempt,
-                                    )
-                                )
-                            for generation, validation in result.attempts:
-                                trace_records.append(
-                                    _trace_record(
-                                        trace_id=id_generator(),
-                                        world_id=world_id,
-                                        session_id=session_id,
-                                        generation=generation,
-                                        validation=validation,
-                                    )
-                                )
-                        for generation, validation in failed_attempts:
-                            trace_records.append(
-                                _trace_record(
-                                    trace_id=id_generator(),
-                                    world_id=world_id,
-                                    session_id=session_id,
-                                    generation=generation,
-                                    validation=validation,
-                                )
-                            )
-                        for error, attempt in failed_schema_attempts:
-                            trace_records.append(
-                                _invalid_trace_record(
-                                    trace_id=id_generator(),
-                                    world_id=world_id,
-                                    session_id=session_id,
-                                    error=error,
-                                    attempt=attempt,
-                                )
-                            )
+                            for error, attempt in exc.schema_attempts
+                        )
                         if trace_records:
                             committer.record_generation_traces(trace_records)
-                        if character_error is not None:
-                            raise character_error
-
-                    proposals = [
-                        character_results[item].value for item in participant_ids
+                        raise
+                    trace_records = [
+                        _invalid_trace_record(
+                            trace_id=id_generator(),
+                            world_id=world_id,
+                            session_id=session_id,
+                            error=error,
+                            attempt=attempt,
+                        )
+                        for error, attempt in character_result.invalid_attempts
                     ]
-                    director_skill = require_effective_skill(
-                        pinned_skills, "director", "global-director"
+                    trace_records.extend(
+                        _trace_record(
+                            trace_id=id_generator(),
+                            world_id=world_id,
+                            session_id=session_id,
+                            generation=generation,
+                            validation=validation,
+                        )
+                        for generation, validation in character_result.attempts
                     )
+                    if trace_records:
+                        committer.record_generation_traces(trace_records)
+
+                    proposals = [character_result.value]
                     director_trace_id = id_generator()
                     director_request = ModelRequest(
                         agent_type="director",
@@ -1285,6 +1460,14 @@ def advance_world(
                         warnings.append("MAX_WAVES_REACHED")
                     all_no_op = all(item.action.kind == "no_op" for item in proposals)
                     if all_no_op and plan.session_intent == "keep_open":
+                        _finish_decision_turn(
+                            engine,
+                            decision_id=active_decision_id,
+                            status="no_op",
+                            resulting_world_version=snapshot["world_version"],
+                            error_code=None,
+                            clock=clock,
+                        )
                         _finish_wave(
                             engine,
                             wave_id=active_wave_id,
@@ -1293,6 +1476,7 @@ def advance_world(
                             error_code=None,
                             clock=clock,
                         )
+                        active_decision_id = None
                         active_wave_id = None
                         continue
 
@@ -1301,7 +1485,9 @@ def advance_world(
                             "BATCH_CANCELLED", "Generation Batch was cancelled"
                         )
                     last_result = committer.commit_wave(
-                        plan, failure_injector=failure_injector
+                        plan,
+                        decision_id=active_decision_id,
+                        failure_injector=failure_injector,
                     )
                     _finish_wave(
                         engine,
@@ -1311,6 +1497,7 @@ def advance_world(
                         error_code=None,
                         clock=clock,
                     )
+                    active_decision_id = None
                     active_wave_id = None
                     if plan.session_intent in {"resolved", "limit_reached"}:
                         break
@@ -1318,7 +1505,7 @@ def advance_world(
                         session_id = last_result.continuation_session_id
                     if using_builtin_fixture:
                         # The checked-in fixture has one Wave of responses. It still
-                        # exercises the full lockstep scheduler without closing the
+                        # exercises the full Decision Turn path without closing the
                         # Session or fabricating further responses in this Batch.
                         break
 
@@ -1360,6 +1547,15 @@ def advance_world(
                 )
                 status = "cancelled" if error_code == "BATCH_CANCELLED" else "failed"
                 end_version = _current_version(engine, world_id)
+                if active_decision_id is not None:
+                    _finish_decision_turn(
+                        engine,
+                        decision_id=active_decision_id,
+                        status="failed",
+                        resulting_world_version=None,
+                        error_code=error_code,
+                        clock=clock,
+                    )
                 if active_wave_id is not None:
                     _finish_wave(
                         engine,

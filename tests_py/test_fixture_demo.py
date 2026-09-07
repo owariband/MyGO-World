@@ -182,7 +182,11 @@ def test_demo_is_byte_deterministic_and_exercises_domain_boundaries(
         dispositions_by_run[item["run_id"]] = (
             dispositions_by_run.get(item["run_id"], 0) + 1
         )
-    assert [dispositions_by_run[item["run_id"]] for item in runs] == [4, 1]
+    assert [dispositions_by_run[item["run_id"]] for item in runs] == [3, 1]
+    assert [
+        item["selected_actor_id"]
+        for item in exported["generation"]["decision_turns"]
+    ] == ["character-anon", "character-anon", "character-soyo"]
     assert all(
         item["request"]["skill_body"]
         for item in traces

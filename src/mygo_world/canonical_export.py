@@ -15,6 +15,7 @@ from mygo_world.db.models import (
     AgentMemoryRow,
     BroadcastDispositionRow,
     BroadcastRunRow,
+    DecisionTurnRecordRow,
     EntityRevisionRow,
     EventSessionMemberRow,
     EventSessionRow,
@@ -177,6 +178,13 @@ def export_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                     )
                 )
             )
+            decision_turns = list(
+                session.scalars(
+                    select(DecisionTurnRecordRow).order_by(
+                        DecisionTurnRecordRow.turn_order
+                    )
+                )
+            )
             traces = list(
                 session.scalars(
                     select(GenerationTraceRow).order_by(
@@ -267,6 +275,10 @@ def export_world(world_id: str, worlds_dir: Path) -> dict[str, Any]:
                         _row(item, json_fields=("warnings_json",)) for item in batches
                     ],
                     "waves": [_row(item) for item in waves],
+                    "decision_turns": [
+                        _row(item, json_fields=("candidate_ids_json",))
+                        for item in decision_turns
+                    ],
                     "traces": [
                         _row(
                             item,

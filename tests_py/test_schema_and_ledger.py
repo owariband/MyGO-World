@@ -41,7 +41,7 @@ def test_alembic_cli_creates_latest_schema(tmp_path: Path) -> None:
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0008_simplify_sessions",)
+        ).fetchone() == ("0009_decision_turns",)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='worlds'"
         ).fetchone() == ("worlds",)
@@ -56,6 +56,7 @@ def test_alembic_cli_creates_latest_schema(tmp_path: Path) -> None:
             "renders",
             "generation_batches",
             "generation_waves",
+            "decision_turn_records",
         }
         assert "event_session_parents" not in {
             row[0]

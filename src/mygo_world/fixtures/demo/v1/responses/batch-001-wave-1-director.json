@@ -22,26 +22,6 @@
         "location_id": "location-live-house",
         "scope_key": "stage"
       }
-    },
-    {
-      "event_key": "soyo-asks-anon",
-      "event_type": "utterance",
-      "actor_id": "character-soyo",
-      "start_time_ms": 400,
-      "end_time_ms": 600,
-      "cause_event_keys": ["anon-moves-stage"],
-      "source_kind": "action_proposal",
-      "source_ref": "demo-proposal-soyo-speak",
-      "evidence_refs": [],
-      "location_id": "location-live-house",
-      "scope_key": "lounge",
-      "payload": {
-        "intent_summary": "Asks Anon to wait before leaving.",
-        "text": "爱音，先等一下。",
-        "addressee_ids": ["character-anon"],
-        "expects_response": true,
-        "response_to_event_id": null
-      }
     }
   ],
   "external_events": [

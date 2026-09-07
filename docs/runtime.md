@@ -40,10 +40,11 @@ World 数据库不会被覆盖。除初始化以外的命令都会检查数据�
 版本。
 
 `advance --gateway fixture` 会在当前进程内执行确定性的 Generation Wave，且不会建立
-网络连接。Runtime 会投影 Character 有权读取的 Snapshot 与私有 Memory，依次校验
-Character Proposal、Director 生成的客观结果和无主体环境候选，最后原子提交新的
-World Version。`show --json` 会输出已提交的 World Event 与 Observation，便于其他
-进程核验。
+网络连接。每个 Wave 先按“点名、确定性 Director fixture、round-robin fallback”的
+顺序授予一名 Character 一个 Decision Turn，再投影该角色有权读取的 Snapshot 与私有
+Memory，依次校验 Character Proposal、Director 生成的客观结果和无主体环境候选，最后
+原子提交新的 World Version。`show --json` 会输出已提交的 World Event 与 Observation，
+Canonical Export 另含 Decision Turn 运行记录，便于其他进程核验。
 
 ## Render 与 WebGAL 发布
 
@@ -143,7 +144,7 @@ uv run python -c \
 ```
 
 真实 Provider 试跑必须使用从未初始化过的新 World ID，并显式读取被 Git 忽略的环境
-文件。以下三个命令依次初始化 Seed、以现有并发和请求预算推进最多六个 Wave，再把
+文件。以下三个命令依次初始化 Seed、以单角色 Decision Turn 和请求预算推进最多六个 Wave，再把
 已提交 Event 编排为 WebGAL 场景：
 
 ```bash

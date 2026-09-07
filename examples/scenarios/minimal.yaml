@@ -1,6 +1,6 @@
 schema_version: 1
 seed_id: mygo-minimal
-version: 2.0.0
+version: 2.1.0
 name: MyGO 最小世界
 world_time_ms: 0
 calendar_anchor: "2026-08-31T09:00:00+08:00"
@@ -33,6 +33,12 @@ entities:
     name: 千早爱音
     location_id: location-live-house
     scope_key: lounge
+    presentation:
+      appearance: 注重搭配、整体形象明快的少女。
+      demeanor: 第一眼显得亲切、主动，习惯迅速缩短社交距离。
+      voice: 声音明亮，语速和语调富于变化。
+      observable_traits:
+        - 常主动开启话题并观察对方是否回应
     state:
       mood: 好奇
   - entity_type: character
@@ -40,6 +46,12 @@ entities:
     name: 长崎素世
     location_id: location-live-house
     scope_key: lounge
+    presentation:
+      appearance: 仪表整洁、举止从容的少女。
+      demeanor: 第一眼温和有礼，通常与他人保持恰当距离。
+      voice: 声线柔和，措辞和语速较为克制。
+      observable_traits:
+        - 常先观察场面再作出回应
     state:
       mood: 克制
 sessions:

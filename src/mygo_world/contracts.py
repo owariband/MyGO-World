@@ -41,12 +41,37 @@ class LocationSeed(StrictModel):
     state: dict[str, Any] = Field(default_factory=dict)
 
 
+class CharacterPresentation(StrictModel):
+    """Stable, outwardly perceivable qualities of a Character."""
+
+    appearance: str | None = Field(default=None, min_length=1, max_length=2000)
+    demeanor: str | None = Field(default=None, min_length=1, max_length=2000)
+    voice: str | None = Field(default=None, min_length=1, max_length=2000)
+    observable_traits: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def contains_a_perceivable_quality(self) -> CharacterPresentation:
+        if not (
+            self.appearance
+            or self.demeanor
+            or self.voice
+            or self.observable_traits
+        ):
+            raise ValueError("Character Presentation must not be empty")
+        if any(not item for item in self.observable_traits):
+            raise ValueError("observable_traits must not contain empty values")
+        return self
+
+
 class CharacterSeed(StrictModel):
     entity_type: Literal["character"]
     entity_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     location_id: str = Field(min_length=1)
     scope_key: str = Field(min_length=1)
+    presentation: CharacterPresentation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     state: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -320,7 +345,16 @@ class PerceivedEntity(StrictModel):
     name: str = Field(min_length=1)
     location_id: str | None = None
     scope_key: str | None = None
+    presentation: CharacterPresentation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     state: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def presentation_belongs_to_character(self) -> PerceivedEntity:
+        if self.entity_type != "character" and self.presentation is not None:
+            raise ValueError("presentation is only valid for a Character")
+        return self
 
 
 class PerceivedMemory(StrictModel):
@@ -352,6 +386,16 @@ class PerceptionFrame(StrictModel):
     visible_entities: list[PerceivedEntity]
     reachable_destinations: list[ReachableDestination]
     memories: list[PerceivedMemory]
+
+
+class TurnSelection(StrictModel):
+    """A Director recommendation for the next Character decision turn."""
+
+    schema_version: Literal[1] = 1
+    world_version: int = Field(ge=1)
+    session_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class UtteranceAction(StrictModel):

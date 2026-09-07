@@ -76,7 +76,7 @@ def test_init_atomically_materializes_genesis_world(worlds_dir: Path) -> None:
     assert "runnable_session_queue" not in tables
     assert session_order == [("session-first-meeting", 1)]
     assert segment_type == "genesis"
-    assert schema_revision == "0008_simplify_sessions"
+    assert schema_revision == "0009_decision_turns"
 
 
 def test_init_uses_injected_clock_and_domain_ids(worlds_dir: Path) -> None:
@@ -204,6 +204,7 @@ def test_new_process_reopens_same_snapshot_after_seed_changes(
         if entity["entity_id"] == "character-anon"
     )
     assert anon["payload"]["state"]["mood"] == "好奇"
+    assert anon["payload"]["presentation"]["voice"].startswith("声音明亮")
 
 
 def test_invalid_seed_does_not_publish_a_database(

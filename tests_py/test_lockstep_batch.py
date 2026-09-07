@@ -28,6 +28,7 @@ from mygo_world.gateways import (
     ModelTransportError,
 )
 from mygo_world.runtime import advance_world
+from mygo_world.scheduling import DeterministicDirectorFixture
 from mygo_world.worlds import initialize_world, show_world
 
 
@@ -152,7 +153,27 @@ class RetryingGateway(ObservingGateway):
         )
 
 
-def test_batch_calls_all_characters_concurrently_from_one_boundary(
+class TurnSelectingGateway(ObservingGateway):
+    def generate(self, request: ModelRequest, response_type: type[Any]) -> Any:
+        if request.call_kind != "turn_selection":
+            return super().generate(request, response_type)
+        with self.lock:
+            self.calls.append(request.call_kind)
+        raw = {
+            "schema_version": 1,
+            "world_version": request.input_payload["world_version"],
+            "session_id": request.input_payload["session_id"],
+            "actor_id": request.input_payload["candidate_ids"][-1],
+            "reason": "Select the last legal candidate for this test.",
+        }
+        return ModelGeneration(
+            request=request,
+            raw_response=json.dumps(raw),
+            structured=response_type.model_validate(raw),
+        )
+
+
+def test_batch_grants_one_character_a_persisted_decision_turn(
     worlds_dir: Path,
 ) -> None:
     initialize_world(MINIMAL_SEED, "lockstep", worlds_dir)
@@ -160,13 +181,13 @@ def test_batch_calls_all_characters_concurrently_from_one_boundary(
 
     receipt = advance_world("lockstep", worlds_dir, gateway=gateway, max_waves=1)
 
-    assert gateway.max_active == 2
-    assert gateway.character_contexts == [(1, 0), (1, 0)]
-    assert gateway.director_saw == {"character-anon", "character-soyo"}
+    assert gateway.max_active == 1
+    assert gateway.character_contexts == [(1, 0)]
+    assert gateway.director_saw == {"character-anon"}
     assert receipt["run_id"]
     assert receipt["status"] == "completed"
     assert receipt["wave_count"] == 1
-    assert receipt["model_call_count"] == 3
+    assert receipt["model_call_count"] == 2
     assert receipt["warnings"] == ["MAX_WAVES_REACHED"]
     assert receipt["error_code"] is None
 
@@ -182,11 +203,53 @@ def test_batch_calls_all_characters_concurrently_from_one_boundary(
             "FROM generation_waves WHERE run_id=?",
             (receipt["run_id"],),
         ).fetchone()
-    assert batch == ("completed", 1, 2, 1, 3)
+        decision = connection.execute(
+            "SELECT selected_actor_id, selection_source, status, "
+            "resulting_world_version, candidate_ids_json "
+            "FROM decision_turn_records WHERE run_id=?",
+            (receipt["run_id"],),
+        ).fetchone()
+    assert batch == ("completed", 1, 2, 1, 2)
     assert wave == ("committed", 1, 2, 0)
+    assert decision == (
+        "character-anon",
+        "director",
+        "committed",
+        2,
+        '["character-anon","character-soyo"]',
+    )
 
 
-def test_default_global_character_capacity_is_four(
+def test_provider_director_selects_character_and_records_trace(
+    worlds_dir: Path,
+) -> None:
+    initialize_world(MINIMAL_SEED, "provider-turn", worlds_dir)
+    gateway = TurnSelectingGateway()
+
+    receipt = advance_world(
+        "provider-turn",
+        worlds_dir,
+        gateway=gateway,
+        gateway_kind="provider",
+        max_waves=1,
+    )
+
+    assert gateway.calls == ["turn_selection", "action_proposal", "segment_draft"]
+    assert receipt["model_call_count"] == 3
+    database = worlds_dir / "provider-turn" / "world.sqlite3"
+    with sqlite3.connect(database) as connection:
+        decision = connection.execute(
+            "SELECT selected_actor_id, selection_source, status "
+            "FROM decision_turn_records"
+        ).fetchone()
+        trace_kinds = connection.execute(
+            "SELECT call_kind FROM generation_traces ORDER BY created_at, trace_id"
+        ).fetchall()
+    assert decision == ("character-soyo", "director", "committed")
+    assert ("turn_selection",) in trace_kinds
+
+
+def test_a_wave_invokes_only_the_selected_character(
     worlds_dir: Path, tmp_path: Path
 ) -> None:
     raw = yaml.safe_load(MINIMAL_SEED.read_text())
@@ -222,7 +285,8 @@ def test_default_global_character_capacity_is_four(
 
     advance_world("capacity", worlds_dir, gateway=gateway, max_waves=1)
 
-    assert gateway.max_active == 4
+    assert gateway.max_active == 1
+    assert len(gateway.character_contexts) == 1
 
 
 def test_semantic_repairs_are_limited_to_the_invalid_agent_call(
@@ -235,13 +299,13 @@ def test_semantic_repairs_are_limited_to_the_invalid_agent_call(
 
     assert Counter(gateway.calls) == Counter(
         {
-            "action_proposal": 2,
+            "action_proposal": 1,
             "action_proposal_repair": 1,
             "segment_draft": 1,
             "segment_draft_repair": 1,
         }
     )
-    assert receipt["model_call_count"] == 5
+    assert receipt["model_call_count"] == 4
     database = worlds_dir / "repair" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         validations = [
@@ -250,7 +314,7 @@ def test_semantic_repairs_are_limited_to_the_invalid_agent_call(
                 "SELECT validation_json FROM generation_traces"
             )
         ]
-    assert len(validations) == 5
+    assert len(validations) == 4
     assert sum(not item["ok"] for item in validations) == 2
 
 
@@ -296,8 +360,8 @@ def test_schema_failure_raw_response_is_traced_before_one_repair(
 
     receipt = advance_world("schema-repair", worlds_dir, gateway=gateway, max_waves=1)
 
-    assert receipt["model_call_count"] == 4
-    assert len(gateway.calls) == 4
+    assert receipt["model_call_count"] == 3
+    assert len(gateway.calls) == 3
     database = worlds_dir / "schema-repair" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         failed = connection.execute(
@@ -336,7 +400,7 @@ def test_retryable_transport_error_recovers_within_two_retries(
 
     assert gateway.attempts["character-anon"] == 3
     assert receipt["status"] == "completed"
-    assert receipt["model_call_count"] == 5
+    assert receipt["model_call_count"] == 4
 
 
 def test_later_wave_failure_preserves_prior_wait_commit(worlds_dir: Path) -> None:
@@ -345,11 +409,7 @@ def test_later_wave_failure_preserves_prior_wait_commit(worlds_dir: Path) -> Non
     class LaterWaveFailureGateway(ObservingGateway):
         def generate(self, request: ModelRequest, response_type: type[Any]) -> Any:
             wave_number = request.input_payload["wave_number"]
-            if (
-                wave_number == 2
-                and request.agent_id == "character-anon"
-                and request.agent_type == "character"
-            ):
+            if wave_number == 2 and request.agent_type == "character":
                 raise ModelTransportError("second Wave unavailable")
             if request.agent_type == "character":
                 raw = _proposal(request)
@@ -425,12 +485,12 @@ def test_request_budget_counts_calls_and_fails_before_director(
     gateway = ObservingGateway()
 
     with pytest.raises(WorldError) as captured:
-        advance_world("budget", worlds_dir, gateway=gateway, request_budget=2)
+        advance_world("budget", worlds_dir, gateway=gateway, request_budget=1)
 
     assert captured.value.code == "REQUEST_BUDGET_EXHAUSTED"
     assert captured.value.receipt is not None
-    assert captured.value.receipt["model_call_count"] == 2
-    assert gateway.calls == ["action_proposal", "action_proposal"]
+    assert captured.value.receipt["model_call_count"] == 1
+    assert gateway.calls == ["action_proposal"]
     assert show_world("budget", worlds_dir)["world_version"] == 1
 
 
@@ -444,7 +504,7 @@ def test_cli_budget_failure_returns_nonzero_batch_receipt(worlds_dir: Path) -> N
         "--worlds-dir",
         str(worlds_dir),
         "--request-budget",
-        "2",
+        "1",
         "--json",
     )
     receipt = json_output(result)
@@ -490,7 +550,7 @@ def test_sigterm_cancels_in_flight_provider_requests(worlds_dir: Path) -> None:
             self.rfile.read(length)
             with request_lock:
                 request_count += 1
-                if request_count == 2:
+                if request_count == 1:
                     requests_started.set()
             release_responses.wait(timeout=5)
 
@@ -604,7 +664,13 @@ def test_all_no_op_waves_only_commit_limit_reached_control_segment(
                 structured=structured,
             )
 
-    receipt = advance_world("no-op", worlds_dir, gateway=NoOpGateway(), max_waves=2)
+    receipt = advance_world(
+        "no-op",
+        worlds_dir,
+        gateway=NoOpGateway(),
+        max_waves=2,
+        director_turn_policy=DeterministicDirectorFixture("not-a-participant"),
+    )
     shown = show_world("no-op", worlds_dir)
 
     assert receipt["wave_count"] == 2
@@ -620,5 +686,14 @@ def test_all_no_op_waves_only_commit_limit_reached_control_segment(
         closure = connection.execute(
             "SELECT status, closure_reason FROM event_sessions"
         ).fetchone()
+        decisions = connection.execute(
+            "SELECT selected_actor_id, selection_source, status, "
+            "resulting_world_version "
+            "FROM decision_turn_records ORDER BY turn_order"
+        ).fetchall()
     assert statuses == [("no_op",), ("committed",)]
+    assert decisions == [
+        ("character-anon", "round_robin", "no_op", 1),
+        ("character-soyo", "round_robin", "committed", 2),
+    ]
     assert closure == ("closed", "limit_reached")

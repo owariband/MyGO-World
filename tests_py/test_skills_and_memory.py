@@ -70,6 +70,76 @@ def test_minimal_scenario_uses_layered_chinese_skills() -> None:
         assert misplaced_instruction not in formal_bodies
 
 
+@pytest.mark.parametrize(
+    "skill_id",
+    [
+        "mygo.character.anon",
+        "mygo.character.soyo",
+        "mygo.character.tomori",
+        "mygo.character.taki",
+        "mygo.character.rana",
+    ],
+)
+def test_v0_character_skills_follow_current_formal_structure(skill_id: str) -> None:
+    skill = RuntimeSkillCatalog.load(SKILLS_DIR).resolve(
+        skill_id, "0.0.0", agent_kind="character"
+    )
+
+    for heading in (
+        "## 核心气质",
+        "## 核心驱动力",
+        "## 核心矛盾",
+        "## 注意与判断倾向",
+        "## 行动倾向",
+        "## 关系与连续性",
+        "## 表达风格",
+    ):
+        assert heading in skill.body
+    for misplaced_content in (
+        "## 外貌",
+        "## 声音",
+        "World Version",
+        "world_version",
+        "session_id",
+        "actor_id",
+    ):
+        assert misplaced_content not in skill.body
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "agent_kind", "required_headings"),
+    [
+        (
+            "mygo.director.default",
+            "director",
+            ("## 叙事取向", "## 推进方式", "## 冲突与收束", "## 表达风格"),
+        ),
+        (
+            "mygo.broadcast.default",
+            "broadcast",
+            ("## 编排取向", "## 节奏", "## 表达风格"),
+        ),
+    ],
+)
+def test_v0_global_skills_are_minimal_and_formal(
+    skill_id: str, agent_kind: str, required_headings: tuple[str, ...]
+) -> None:
+    skill = RuntimeSkillCatalog.load(SKILLS_DIR).resolve(
+        skill_id, "0.0.0", agent_kind=agent_kind  # type: ignore[arg-type]
+    )
+
+    assert all(heading in skill.body for heading in required_headings)
+    for misplaced_content in (
+        "World Version",
+        "world_version",
+        "session_id",
+        "actor_id",
+        "source_kind",
+        "Pydantic",
+    ):
+        assert misplaced_content not in skill.body
+
+
 def test_init_persists_exact_bindings_and_advance_uses_skill_body(
     worlds_dir: Path,
 ) -> None:
@@ -89,7 +159,7 @@ def test_init_persists_exact_bindings_and_advance_uses_skill_body(
             "ORDER BY agent_type, agent_id"
         ).fetchall()
     assert len(bindings) == 4
-    assert len(traces) == 3
+    assert len(traces) == 2
     for agent_type, agent_id, skill_id, version, content_hash, request_json in traces:
         binding = next(
             item for item in bindings if item[0] == agent_type and item[1] == agent_id
@@ -211,34 +281,34 @@ def test_skill_bind_is_audited_without_advancing_world_and_survives_restart(
     receipt = bind_character_skill(
         "binding",
         worlds_dir,
-        character_id="character-anon",
-        skill_id="mygo.character.anon",
-        skill_version="2.0.0",
+        character_id="character-soyo",
+        skill_id="mygo.character.soyo",
+        skill_version="1.0.0",
         operator="test-operator",
         reason="exercise a calmer voice",
     )
     assert receipt["world_version"] == before
-    assert receipt["previous_skill"]["version"] == "3.0.0"
-    assert receipt["new_skill"]["version"] == "2.0.0"
+    assert receipt["previous_skill"]["version"] == "2.0.0"
+    assert receipt["new_skill"]["version"] == "1.0.0"
 
     advance_world("binding", worlds_dir)
     database = worlds_dir / "binding" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         versions = connection.execute(
             "SELECT skill_version FROM generation_traces "
-            "WHERE agent_id='character-anon' ORDER BY created_at, trace_id"
+            "WHERE agent_id='character-soyo' ORDER BY created_at, trace_id"
         ).fetchall()
         audit = connection.execute(
             "SELECT operator, reason, previous_skill_version, skill_version "
-            "FROM skill_bindings WHERE agent_id='character-anon' "
+            "FROM skill_bindings WHERE agent_id='character-soyo' "
             "ORDER BY binding_order"
         ).fetchall()
-    assert {item[0] for item in versions} == {"2.0.0", "3.0.0"}
+    assert {item[0] for item in versions} == {"1.0.0"}
     assert audit[-1] == (
         "test-operator",
         "exercise a calmer voice",
-        "3.0.0",
         "2.0.0",
+        "1.0.0",
     )
 
 

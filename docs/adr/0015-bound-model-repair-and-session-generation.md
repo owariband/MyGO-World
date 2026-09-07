@@ -1,5 +1,8 @@
 # 限制模型修复和 Session 生成
 
+> 关于“全员 `no_op`”的 lockstep 表述已由 ADR 0027 修订为单个被选中角色的
+> Decision Turn；本 ADR 的重试上限与 Session 收束规则继续有效。
+
 Director 可以在角色提案之间补充环境反应、对象结果、时间衔接和无主体桥接事件，但不能替角色作出重要选择、发言或改变动机。每次模型输出的结构或语义校验失败时，只允许一次携带明确诊断的修复；再次失败则终止当前 Generation Batch、保留完整 Generation Trace，并且不提交候选事实。
 
 Director 可以在满足 Session 关闭前置条件时提议正常结束；Runtime 以最大 Generation Wave 数和最大模型调用数提供确定性上限，首个切片默认最多 6 个 Wave，并允许 CLI 显式覆盖。

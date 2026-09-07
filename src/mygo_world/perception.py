@@ -6,6 +6,7 @@ from typing import Any
 
 from mygo_world.contracts import (
     CandidateEvent,
+    CharacterPresentation,
     PerceivedEntity,
     PerceivedMemory,
     PerceptionFrame,
@@ -30,6 +31,15 @@ def _entity_state(entity: dict[str, Any], character_id: str) -> dict[str, Any]:
     payload = entity.get("payload", {})
     state = payload.get("state", {}) if isinstance(payload, dict) else {}
     return _public_state(state, character_id) if isinstance(state, dict) else {}
+
+
+def _character_presentation(entity: dict[str, Any]) -> CharacterPresentation | None:
+    if entity.get("entity_type") != "character":
+        return None
+    payload = entity.get("payload", {})
+    if not isinstance(payload, dict) or payload.get("presentation") is None:
+        return None
+    return CharacterPresentation.model_validate(payload["presentation"])
 
 
 class PerceptionProjector:
@@ -90,6 +100,7 @@ class PerceptionProjector:
                     name=entity["name"],
                     location_id=entity.get("location_id"),
                     scope_key=entity.get("scope_key"),
+                    presentation=_character_presentation(entity),
                     state=_entity_state(entity, character_id),
                 )
             )

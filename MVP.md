@@ -1,7 +1,7 @@
 # MVP 决策
 
 > 状态：当前 MVP 实施基线  
-> 更新：2026-09-06
+> 更新：2026-09-08
 
 若旧文档仍保留 Go + Eino 的技术栈描述，MVP 实现以本页为准；既有 World / Event / Agent 权限边界不因此改变。
 
@@ -31,6 +31,7 @@
 
 - **世界事实：**World Runtime 是唯一权威。
 - **Agent 权限：**Character、Director 和 Broadcast 只产生 Proposal 或 Plan。
+- **人物外显：**Character Presentation 是 Character Entity 拥有的公开可感知值对象，保存跨场景相对稳定的外貌、外显气质、声音和可观察行为倾向；同一 Interaction Scope 内的其他角色通过 PerceptionFrame 获得这些线索。由线索形成的“亲切”“虚伪”或“难以接近”等第一印象属于观察者自己的 Belief，不能作为共享事实写回 Presentation。
 - **外部请求：**未来的玩家自然语言输入只是绑定 `based_on_world_version` 的 Player Event Request；Director 可以将其解释为带来源证据的 External Event Candidate，但不能提交事实。没有对应 ActionProposal 时，外部事件不得替持久 Character 作出重要选择、生成台词或改变动机。
 - **Agent 工具：**首期模型不主动调用工具；后端先按权限投影结构化上下文，再一次性传给对应 Agent。
 - **Prompt 职责分层：**模型输入在职责上分为后端 Agent Contract、版本化 Runtime Skill、场景或 Session 策略及当前 Runtime Context。Agent Contract 负责技术约束，Runtime Skill 只负责跨场景稳定的创作倾向，场景策略负责当前目标与节奏，Runtime Context 提供当前事实与私有记忆；当前 MVP 尚未实现独立 Scenario Policy 时，只组合其余三层。
@@ -51,7 +52,9 @@
   advance:
 
   World Snapshot + Agent Memory
-  → PerceptionProjector / PerceptionFrame
+  → TurnScheduler（点名 → Director 选择 → round-robin fallback）
+  → DecisionTurnRecord
+  → PerceptionProjector / 被选中角色的 PerceptionFrame
   → Character / ActionProposal
   → Proposal Validator
   → Director / SegmentDraft
@@ -82,16 +85,18 @@
 
 - **世界时间：**模型调用的墙钟耗时只进入 Generation Trace；World Time 由剧情语义决定。
 - **时间表示：**权威 World Time 使用 Scenario 起点后的非负整数毫秒；可选 ISO 日历锚点只用于显示，World Event 保存开始和结束毫秒。
-- **并发规则：**同一 Generation Wave 的 Character 基于共同 Snapshot 并行提案，Director 在同步屏障后统一补全，Runtime 原子提交。
-- **调度规则：**Generation Wave 是 lockstep 决策周期而非固定时长 tick；全部行动在统一屏障前完成，提前完成者隐式空闲，首期不允许行动跨 Wave。
-- **空行动：**`wait` 是有意等待并可推进剧情时间；`no_op` 不产生角色行动或独立 Event。全员 `no_op` 且 Session 不结束时只记录 Batch/Wave 与 Trace，不推进 World Version；若 Director 合法提议 `resolved`，或 Runtime 应用 `limit_reached`，则以不含 WorldEvent 的控制 Segment 原子提交 Session/Queue 变化并推进 World Version。
+- **单角色决策：**同一 Generation Wave 只授予一名 Character 一个 Decision Turn，并只生成该角色的一个 Action Proposal。成功提交后，下一个 Wave 从新 World Version 重新投影感知；同一时间点不再向全体角色并发征集彼此不可见的提案。
+- **调度规则：**`TurnScheduler` 是确定性 Runtime 模块而非 Agent。它按“`pending_response_ids` 中的点名角色优先 → 无点名时 Director 从其余合法参与者中选择 → Director 缺失或非法时稳定 round-robin fallback”决定角色。多人 Session 的普通候选默认排除上一位已完成 Decision Turn 的角色；多名待回应者在同一稳定 participant ID 环上选择；round-robin 游标由持久 `DecisionTurnRecord` 恢复。首期不实现 continuation 或 `TurnBid`。
+- **Director 选择：**真实 Provider 使用独立 `turn_selection` 结构化调用；Fixture 使用 `DeterministicDirectorFixture` 固定选择，二者都不能选择 Runtime 给定候选集合以外的角色。选择只授予机会，不强制说话或行动。
+- **空行动：**`wait` 是有意等待并可推进剧情时间；`no_op` 不产生角色行动或独立 Event。被选中角色 `no_op` 且 Session 不结束时只记录 Batch、Wave、Trace 与状态为 `no_op` 的 Decision Turn，不推进 World Version；若 Director 合法提议 `resolved`，或 Runtime 应用 `limit_reached`，则以不含 WorldEvent 的控制 Segment 原子提交 Session/Queue 变化并推进 World Version。
 - **Session 队列：**Runnable Session Queue 是 `status=runnable` 的 Event Session 按其不可变 `queue_order` 排出的逻辑 FIFO 集合，不是独立物理表；每个 Batch 取队首并只跟随一条 lineage。分裂时全部后继按参与者 ID 确定性取得新序号，当前 Batch 继续队首后继，其余留给后续 Batch；不使用 focus character 或模型决定顺序。
 - **空间模型：**Location 是持久 Entity，可拥有多个带稳定 `scope_key` 的 Interaction Scope，并用显式边描述可达性；Character 位置由 `location_id + scope_key` 表示，MVP 不实现坐标或寻路。
+- **人物可感知性：**同一 Interaction Scope 中可见的 Character 会连同其 Character Presentation 一起进入 PerceptionFrame。MVP 将其中的稳定声音描述视为同场角色可获得的基础线索；具体一次发言的音量、颤抖或哽咽属于对应 utterance Event，观察者对此的解释进入自己的 Agent Memory。
 - **话语可见性：**`utterance.addressee_ids` 标记主要接收者和待回应关系，但同一 Scope 内其他角色仍可听见；MVP 不支持耳语。
 - **分裂时点：**移动在当前 Wave 内按事件时间参与感知；Runtime 在最终提交前依据 Wave 结束位置计算分区，并在同一事务中提交角色位置、关闭旧 Session、创建全部后继 Session 和确定性入队，只有事务完成后才对外可见。
-- **Wave 内时间：**所有 Character 共享观察与决策时刻；Director 为已有提案安排 Wave 内执行顺序和语义时间，Runtime 校验时间、因果和角色所有权。
+- **Wave 内时间：**被选中 Character 只观察 Wave 起始时的已提交事实；Director 为该角色提案及合法环境后果安排语义时间，Runtime 校验时间、因果和角色所有权。
 - **Wave 时长：**Scenario 可以覆盖单个 Wave 的最大剧情时长，默认上限为 5 分钟；超限输出按语义错误修复一次，仍失败则终止 Batch。
-- **并发上限：**Character 模型调用使用默认大小为 4 的全局信号量；等待信号量不改变其输入 Snapshot 或 World Time。
+- **并发边界：**一个 Event Session 的单个 Wave 内没有 Character 并发；现有全局信号量只保留为不同 Runtime 调用共享 Provider 容量的兼容保护，不影响谁取得 Decision Turn。
 - **World 锁：**同一 World 的 `init`、`advance` 和 `skill-bind` 获取世界变更独占文件锁；`render` 使用独立的每 World Render 锁，使两个 Render 串行，但可基于固定 World Version 与 `advance` 并存。Render 对 Ledger/Snapshot 只读，对 Trace、Render 元数据和 Broadcast Disposition 有写入，最终使用短 SQLite 事务与唯一约束避免重复消费；进程退出时文件锁自动释放。
 - **失败规则：**重试后仍失败会回滚当前 Wave、将 Generation Batch 标记为失败并让当前 CLI 命令以非零状态退出；此前已提交的 World Version 保留。
 - **空工作：**`advance` 没有 Runnable Session 或 `render` 没有新 Event 时返回成功的 `no_work`，不调用模型或生成空记录。
@@ -115,8 +120,8 @@
 - **初始化输入：**`examples/scenarios/*.yaml` 自包含一个 World 所需的初始角色、地点、对象、记忆和 Event Session；`init` 将其一次性物化为 Genesis Segment、World Version 1 及相应持久记录，之后既有 World 不再读取 Seed 作为状态来源。
 - **初始化提交：**WorldInitializer 负责 Seed 校验、临时数据库迁移与原子文件发布；它构造 `GenesisCommitPlan` 并调用同一个 World Committer。Committer 使用可注入 Clock 与 ID Generator 分配领域时间和 ID，临时文件名不属于领域重放数据。
 - **初始化安全：**目标 `world_id` 已存在时 `init` 失败且不覆盖或合并；World 只保存 `seed_id`、声明版本和内容哈希，不复制完整 YAML。
-- **版本化内容：**Runtime Skill 使用 `content/skills/**/*.md`，Asset Manifest 使用 `content/assets/manifest.yaml`；Scenario 只引用稳定内容 ID，不保存美术文件路径。
-- **Skill 格式：**Runtime Skill 使用 YAML frontmatter 保存 ID、版本和 Agent kind，Markdown 正文保存人物或创作风格；模型、密钥、权限、工具、具体 World Version、固定实体 ID、输出字段复制规则和 Session 结束脚本不属于正式 Skill 内容。
+- **版本化内容：**Runtime Skill 使用 `content/skills/**/*.md` 中的单个版本化 Markdown 文件，MVP 不引入 `SKILL.md + references/` Bundle；Asset Manifest 使用 `content/assets/manifest.yaml`，Scenario 只引用稳定内容 ID，不保存美术文件路径。
+- **Skill 格式：**Runtime Skill 使用 YAML frontmatter 保存 ID、版本和 Agent kind，Markdown 正文保存人物或创作风格；模型、密钥、权限、工具、具体 World Version、固定实体 ID、输出字段复制规则和 Session 结束脚本不属于正式 Skill 内容。只有当人物资料出现可由 Runtime 确定性选择且多数轮次不需要加载的独立分支时，才重新评估整体版本化和整体哈希的 Skill Bundle。
 - **正式与验收 Skill：**无 `-live` 后缀的正式 Character/Director/Broadcast Skill 必须保持场景无关，可供长期 World 重用。显式 Live 验收可以绑定 `-live` Acceptance Skill，以固定动作和收束条件换取稳定覆盖；该例外不得进入正式 World。
 - **Scenario Policy：**当前故事前提、软目标、节奏和自然收束条件属于 Scenario Policy，不属于 Character Skill。MVP 尚未提供独立持久化的 Scenario Policy Schema；现阶段正式世界通过 Scenario 初始状态与 Agent Memory 表达当前动机，Acceptance Skill 仅作为测试专用过渡方案。
 - **人格版本：**MVP 不实现 Character Profile Revision 或自动 Reflection；运行中的经历变化由 Agent Memory 承载。人工调整通过创建新的不可变 Character Skill 版本并显式重绑单个 World 完成，从下一 Batch 生效，Trace 记录实际版本和内容哈希。
@@ -127,11 +132,11 @@
 - **状态快照：**每个 World Version 持久化 Snapshot JSON 和校验和；Snapshot 是可重建缓存，不替代 Ledger。
 - **提交事务：**WorldSegment、Entity Revision、Session/Queue 变化、Event Recognizer 产出的 World Event、PerceptionProjector 产出的 Observation、已接受的 Belief/Commitment change、Snapshot 和新 World Version 在同一 SQLite 事务中原子提交。Segment 与 Revision 先进入事务内待提交状态，Recognizer 和 Projector 基于这些候选结果运行，任何一步失败都会整体回滚。
 - **标识与顺序：**Scenario 内容使用稳定可读 ID；运行生成记录使用 UUID 文本。World Version、Segment/Event 顺序和 Entity Revision 使用显式单调整数，不依赖 UUID 或 SQLite `rowid` 排序；Fixture 注入确定性 ID 生成器。
-- **数据隔离：**World Ledger、Agent Memory 和生成 Trace 分开存储。
-- **候选记录：**ActionProposal 和 SegmentDraft 以带 Schema 版本的 JSON 保存在 Generation Trace；Segment/Event payload 使用通用 `source_kind + source_ref/evidence_refs` 表达来源，不要求来源一定是 Character Proposal。已提交 Segment 引用来源 Trace ID，不建立候选事实表；二期再增加 Player Event Request 的独立输入记录。
+- **数据隔离：**World Ledger、Agent Memory、Decision Turn Record 和 Generation Trace 分开存储。
+- **候选与决策记录：**ActionProposal 和 SegmentDraft，以及真实 Provider 返回的 TurnSelection，以带 Schema 版本的 JSON 保存在 Generation Trace；每次实际调度另写 `DecisionTurnRecord`，保存候选、选中角色、来源与结果状态。Decision Turn 是运行记录而非事实，不进入 World Ledger。Segment/Event payload 使用通用 `source_kind + source_ref/evidence_refs` 表达来源，不要求来源一定是 Character Proposal。已提交 Segment 引用来源 Trace ID，不建立候选事实表；二期再增加 Player Event Request 的独立输入记录。
 - **Trace 内容：**本地数据库保存完整模型输入、原始响应、结构化结果、重试和修复诊断；密钥与认证信息永不保存，终端默认输出脱敏摘要。
 - **Ledger 防护：**World Segment、Entity Revision 和 World Event 除 Repository 禁止改写外，还使用 SQLite Trigger 拒绝 UPDATE/DELETE；派生 Snapshot 可以重建。
-- **感知投影：**提交事务中由 PerceptionProjector 按事件时间、角色位置、可见范围和字段权限，将所有可感知的待提交 Event 确定性投影为对应角色的 Observation；它们只在事务整体成功后可见，首期不增加模型注意力筛选。
+- **感知投影：**生成输入中，PerceptionProjector 将同一 Interaction Scope 内 Entity 的公开状态和 Character Presentation 投影到 PerceptionFrame；提交事务中，它再按事件时间、角色位置、可见范围和字段权限，将所有可感知的待提交 Event 确定性投影为对应角色的 Observation。它们只在事务整体成功后可见，首期不增加模型注意力筛选。
 - **主观更新：**Character 输出可以在唯一 ActionProposal 外附带自己的 Belief/Commitment change；仅在 Wave 成功时提交。Memory append-only，使用 `supersedes_memory_id` 或新的 Commitment 状态记录表达变化，不原地覆盖。
 - **框架状态：**Agent checkpoint 只恢复生成流程，不代表世界重放。
 - **Schema 迁移：**`init` 创建最新 Alembic Schema；其他命令检测到旧 Schema 时失败，不在 `advance` 或 `render` 中自动迁移。MVP 使用显式 Alembic 操作，不额外实现 `mygo-world db-upgrade`；出现首个需长期兼容的旧 World 后再增加安全包装命令。
@@ -146,7 +151,7 @@
 - **测试分层：**默认测试只使用 Fixture；需要密钥和外部 WebGAL 资源的真实模型链路使用显式 `live` 测试及 `demo`，不会被普通测试隐式触发。
 - **Live 验收：**至少显式运行一次双 Character 多轮决策、Director 世界提交、Broadcast 增量编排、真实素材校验和 WebGAL 脚本生成；沿用模型请求预算，不要求加入默认 CI。
 - **主演示门槛：**Anon 与 Soyo 必须各产生至少一次有效行为，目标 Event Session 在默认 6 Wave 内自然 `resolved`，并生成至少一个通过真实素材校验的 Render；`limit_reached` 只证明故障边界有效，不算创作验收通过。
-- **边界测试：**覆盖权限隔离、非法输出、并发冲突和提交原子性。
+- **边界测试：**覆盖权限隔离、点名优先、Director 越权选择、round-robin 重放和提交原子性。
 - **无主体事件测试：**首个 Fixture Wave 由 Director 产生至少一个合法环境或桥接事件，验证它不要求 Character actor、仍带来源证据并经 Segment Validator、Committer、Event Recognizer 与 PerceptionProjector；另验证无 ActionProposal 的 Character 台词或重要行动会被拒绝。
 - **分裂测试：**确定性 Fixture 验证角色离开 Scope 后旧 Session 关闭、所有后继 Session 入队、感知隔离以及下一 Batch 从队首继续；不依赖真实模型随机触发。
 - **故障测试：**覆盖超时、取消、重试和 Render 失败恢复。
@@ -160,7 +165,7 @@
 
 ## 附录 A：当前实体表结构与数据模型
 
-本附录是截至 2026-09-06 的实现快照，覆盖当前 MVP Runtime 的全部 SQLite 业务表、Pydantic 数据契约、判别联合和公开运行时记录。数据库结构以 Alembic head `0008_simplify_sessions` 实际迁移结果为准，模型结构以 `src/mygo_world/contracts.py`、`skills.py` 及对应运行时模块为准；历史 Wiki 中的 Go 草案不属于当前实现。
+本附录是截至 2026-09-08 的实现快照，覆盖当前 MVP Runtime 的全部 SQLite 业务表、Pydantic 数据契约、判别联合和公开运行时记录。数据库结构以 Alembic head `0009_decision_turns` 实际迁移结果为准，模型结构以 `src/mygo_world/contracts.py`、`scheduling.py`、`skills.py` 及对应运行时模块为准；历史 Wiki 中的 Go 草案不属于当前实现。
 
 ### A.1 记号与边界
 
@@ -189,6 +194,7 @@
 | `generation_traces` | `GenerationTraceRow` | 模型请求、响应和校验来源 |
 | `generation_batches` | `GenerationBatchRow` | 有界生成 Batch 状态 |
 | `generation_waves` | `GenerationWaveRow` | Batch 内 Wave bookkeeping |
+| `decision_turn_records` | `DecisionTurnRecordRow` | 单角色调度决定、游标与结果状态 |
 | `broadcast_runs` | `BroadcastRunRow` | 固定版本上的一次 Broadcast Run |
 | `renders` | `RenderRow` | 已发布不可变 Render 元数据 |
 | `broadcast_dispositions` | `BroadcastDispositionRow` | Event 的已纳入/省略决定 |
@@ -427,6 +433,30 @@ UQ(run_id, wave_number)
 
 `status` 当前运行值包括 `running | committed | no_op | failed | cancelled | interrupted`；数据库本身未用 CK 封闭该集合。
 
+#### `decision_turn_records`
+
+```text
+decision_id             varchar(36)  PK
+turn_order              integer      UQ, CK > 0
+run_id                  varchar(36)  FK -> generation_batches.run_id, IDX
+wave_id                 varchar(36)  FK -> generation_waves.wave_id, UQ
+wave_number             integer
+session_id              varchar(200) IDX
+base_world_version      integer      FK -> world_versions.version
+selected_actor_id       varchar(200)
+selection_source        varchar(32)
+candidate_ids_json      text
+status                  varchar(32)
+resulting_world_version integer?      FK -> world_versions.version
+error_code              varchar(100)?
+created_at              varchar(40)
+updated_at              varchar(40)
+```
+
+`selection_source` 封闭为 `nominated | director | round_robin`，`status` 封闭为
+`selected | no_op | committed | failed`。每个 Wave 至多一条记录；`turn_order`
+提供跨 Batch、跨进程的稳定游标顺序；失败记录不推进游标。
+
 #### `broadcast_runs`
 
 ```text
@@ -480,11 +510,12 @@ created_at      varchar(40)
 
 ```text
 Location:  { state: object, scopes: InteractionScopeSeed[] }
-Character: { state: object }
+Character: { state: object, presentation?: CharacterPresentation }
 Object:    { state: object }
 ```
 
 `entity_id`、`entity_type`、`name`、位置和版本信息位于关系型列，不在 payload 中重复。
+`presentation` 是 Character 拥有的公开可感知值对象而非独立 Entity；临时情绪和可变场景状态仍保存在 `state`，美术文件映射仍由 Asset Manifest 持有。
 
 #### World Segment payload
 
@@ -595,7 +626,7 @@ Tags、来源、状态和 supersedes 关系同时关系化保存，以支持过�
 
 ### A.5 Pydantic 数据契约
 
-当前共有 47 个具体 Pydantic 模型和 3 个判别联合。下面的 `={}`、`=[]` 表示通过 `default_factory` 创建空值，不表示共享可变默认对象。
+当前共有 48 个具体 Pydantic 模型和 3 个判别联合。下面的 `={}`、`=[]` 表示通过 `default_factory` 创建空值，不表示共享可变默认对象。
 
 #### Scenario Seed 与初始化
 
@@ -619,12 +650,20 @@ LocationSeed {
   state: object = {}
 }
 
+CharacterPresentation {
+  appearance: str[1..2000]? = null,
+  demeanor: str[1..2000]? = null,
+  voice: str[1..2000]? = null,
+  observable_traits: str[1..][0..20] = []
+}
+
 CharacterSeed {
   entity_type: Literal["character"],
   entity_id: str[1..],
   name: str[1..],
   location_id: str[1..],
   scope_key: str[1..],
+  presentation: CharacterPresentation? = null,
   state: object = {}
 }
 
@@ -693,7 +732,7 @@ LoadedSeed {
 }
 ```
 
-跨字段不变量：Object 的 `location_id` 与 `scope_key` 必须成对出现；Commitment 缺省状态归一为 `active`，其他 Memory 不能有状态，只有 Belief/Commitment 可 supersede；Scenario 内 Entity、Session、Memory ID 唯一，所有 Location/Scope、参与者、Memory owner 和 Skill 绑定引用必须存在，参与者必须位于 Session Scope，Memory supersedes 图不得分叉、跨 owner/namespace/type 或成环，终态 Commitment 必须有前序记录。
+跨字段不变量：Character Presentation 一旦提供就必须至少包含一项可感知特征；Object 的 `location_id` 与 `scope_key` 必须成对出现；Commitment 缺省状态归一为 `active`，其他 Memory 不能有状态，只有 Belief/Commitment 可 supersede；Scenario 内 Entity、Session、Memory ID 唯一，所有 Location/Scope、参与者、Memory owner 和 Skill 绑定引用必须存在，参与者必须位于 Session Scope，Memory supersedes 图不得分叉、跨 owner/namespace/type 或成环，终态 Commitment 必须有前序记录。
 
 #### 感知与 Generation Wave
 
@@ -704,6 +743,7 @@ PerceivedEntity {
   name: str[1..],
   location_id: str? = null,
   scope_key: str? = null,
+  presentation: CharacterPresentation? = null,
   state: object = {}
 }
 
@@ -736,6 +776,14 @@ PerceptionFrame {
   visible_entities: PerceivedEntity[],
   reachable_destinations: ReachableDestination[],
   memories: PerceivedMemory[]
+}
+
+TurnSelection {
+  schema_version: Literal[1] = 1,
+  world_version: int[1..],
+  session_id: str[1..],
+  actor_id: str[1..],
+  reason: str[1..500]
 }
 
 UtteranceAction {
@@ -1044,6 +1092,32 @@ EffectiveSkill {
   version: str,
   content_hash: str,
   body: str
+}
+
+TurnContext {
+  run_id: str,
+  wave_id: str,
+  wave_number: int,
+  world_version: int,
+  session_id: str,
+  participant_ids: tuple[str, ...],
+  pending_response_ids: tuple[str, ...] = (),
+  last_selected_actor_id: str? = null
+}
+
+DecisionTurnRecord {
+  decision_id: str,
+  run_id: str,
+  wave_id: str,
+  wave_number: int,
+  session_id: str,
+  base_world_version: int,
+  selected_actor_id: str,
+  selection_source: "nominated" | "director" | "round_robin",
+  candidate_ids: tuple[str, ...],
+  status: "selected" | "no_op" | "committed" | "failed",
+  resulting_world_version: int? = null,
+  error_code: str? = null
 }
 
 ModelRequest {
