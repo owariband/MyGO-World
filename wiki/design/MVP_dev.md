@@ -10,6 +10,8 @@
 
 本文区分已确认决策、实施建议和待讨论问题。Project 独立 SQLite / WorldRef 模型、固定 EventSession 节点与 UnionPart、Director/Broadcast 分权及 Codex 外置制作已确认。第 6.5 节的“手动停止、保存、下次加载同一 World 继续”是明确需求，具体协议作为实施默认值；自动结局规则仍是待讨论建议。设计确认不代表代码已实现。
 
+2026-09-08 M1 实现校准：Gateway 严格 JSON 解析、WorldRef 进程内归属、AgentView 一次性迁移、普通 Plan queue 和纯 UnionPart 已实现。执行进度以 [dev_plan_MVP.md](dev_plan_MVP.md) 为准，实际接口、文件与测试证据见 [M1_dev_log.md](M1_dev_log.md)。本页后续 Phase 仍是领域规划，不表示 SQLite、自由互动或存档续跑已经完成。
+
 ## 1. MVP 要证明什么
 
 MVP 的关键不是“Agent 能生成一句话”，而是以下闭环可以连续运行：
@@ -39,11 +41,12 @@ MVP 的关键不是“Agent 能生成一句话”，而是以下闭环可以连�
 - `PersonActAgent -> PersonActLoop` 的 prepare/perceive/retrieve/plan/propose；
 - 进程内 Memory、attention、novelty 与 Proposal 权限校验；
 - Character Skill、Model Gateway、Fixture/模型 Cognition Strategy；
+- M1 新增 WorldRef 归属校验、AgentView、普通 Plan queue 和无业务语义的 UnionPart；
 - 现有动态 Render 制作与接入基础。
 
 当前仍缺：
 
-- `project_id -> 独立 SQLite 文件` 的硬隔离、`WorldRef` 传播及跨项目拒绝测试；
+- `project_id -> 独立 SQLite 文件` 的硬隔离；WorldRef 进程内传播和拒绝测试已在 M1 实现，不代替数据库隔离；
 - 面向作品的 `ScenarioSeed`、世界初始化与 Runtime 装配入口；
 - 世界事实与 Agent Memory 的 SQLite 持久化；
 - `WorldUpdater`、世界版本、原子事务和恢复协议；
@@ -969,7 +972,7 @@ resume_world(project_id, world_id, additional_decisions?)
 | 世界与存档身份 | `project_database`、`worlds` 的 WorldRef、seed/config 校验信息、`current_version / world_time` | 仍是原作品的原存档、原世界时刻 |
 | 地点、物体、角色位置与互动组 | 公共关系表、`event_sessions.root_session_id / topology_version` | 咖啡仍在原进度，原分组不变，重建同一 UnionPart |
 | 已发生故事与未完事项 | Entry/link/recipients、`interaction_requests`、pending Entry 的 `next_check_at` | 保留原对白、接收者、未回应邀请和待发生客观事件 |
-| 每个角色的认知状态 | 新增 `agent_runtime_states`，保存已有 `PersonaState` | 保留日计划、当前行动、已知地点、会话冷却与反思进度 |
+| 每个角色的认知状态 | 新增 `agent_runtime_states`，保存 M1 的 `PersonaState` | 保留普通 Plan queue / active_plan_id、已知地点和反思累计；对话轮数随后续 Scheduler 保存，不再保存 daily / 旧时间 cooldown |
 | 每个角色的 Memory | `agent_memory_records` 完整记录及访问/novelty/过期信息 | 继续原 MemoryStream，不能只恢复一份剧情摘要 |
 | 下一决策与唤醒位置 | `worlds.scheduler_seq`；稳定 Session 节点上的 `last_scheduled_seq / next_wakeup_world_time / consecutive_no_op` | 根据未回应请求与保存的进度重新算出下一角色，不每次回到 Anon |
 | 导演进度 | `worlds.director_entry_cursor / character_turn_seq / director_checked_turn_seq` 与 pending Entry 状态同事务保存 | 不重复处理已消费的 Entry，不重复登记咖啡完成事件，保留对话进展检查间隔 |
@@ -988,7 +991,7 @@ agent_runtime_states
   last_decision_id                   最近完成的决策来源
 ```
 
-私有计划/冷却作为严格类型的 Agent 状态整体保存；它与可查询的公共 `agent_world_states` 分开，Director/Broadcast 无权读取。调度字段放在稳定 Session 节点上，merge/split 时随角色保留；当前 root 的优先级由成员进度派生，平局按稳定 ID 排序。具体邀请优先级另按第 8 节冻结，但恢复必须使用同一算法和这些持久字段。
+私有计划作为严格类型的 Agent 状态整体保存；它与可查询的公共 `agent_world_states` 分开，Director/Broadcast 无权读取。M1 的 PlanItem 仅含 plan_id / description，active_plan_id 引用队列；不按日期重置，也不靠预计耗时判完成。等待/完成/取消和推进将在 M3 outcome 接入，对话 50 轮后接行为将在 M4 调度接入。调度字段放在稳定 Session 节点上，merge/split 时随角色保留；当前 root 的优先级由成员进度派生，平局按稳定 ID 排序。具体邀请优先级另按第 8 节冻结，但恢复必须使用同一算法和这些持久字段。
 
 当前安排及执行进度由 PersonaState 保存，重要决定的历史复用已有 `MemoryKind.PLAN`；不新增并行 DecisionMemory/决策队列。Reflect 可以提供计划参考，但当前有效安排由 planning 管理，读档时直接加载而非依赖 top-k Memory 召回。完成标记只能对应已确认生效的结果；没有生效的安排保留为待处理或由角色调整，不能凭原 Proposal 写成已完成。
 
@@ -1172,7 +1175,7 @@ Runner 在每次世界提交后及下一轮调度前检查结局规则。自然�
 交付：
 
 - 持久化当前通用 `MemoryRecord`，以绑定的 `WorldRef` 和 `world_id + agent_id + memory_id` 关系键隔离；`namespace` 只表达记忆类别；
-- 将现有 `PersonaState` 完整保存到 `agent_runtime_states`，恢复日计划、行动、冷却与观察进度；
+- 将 M1 的 `PersonaState` 完整保存到 `agent_runtime_states`，恢复普通 Plan queue / 当前计划引用、观察与反思累计；对话轮数与调度进度按 M4 的归属保存，不恢复已删除的 daily / 旧时间 cooldown；
 - 实现第 6.5 节工作副本与整体提交协议：World、Agent State/Memory、决策幂等信息与调度位置同事务，提交成功后才发布内存状态；
 - 在隐私字段和失败语义冻结后，再决定是否增加 `generation_traces` 表；若增加，只关联 proposal、event entry、validation 和 model repair，不保存 credential 或完整私密上下文；
 - 注入 World SQL 写入后、Agent SQL 写入前以及 commit 后/内存发布前的崩溃；前者整体回滚，后者从完整持久化结果重建。MVP 的最小 outcome feedback 不调用模型，不保留未定义的跨事务 Memory 缺口。
@@ -1215,7 +1218,7 @@ Runner 在每次世界提交后及下一轮调度前检查结局规则。自然�
 11. **Director 回合检查与显式世界时间。** 主路径按第 4.2 节让角色继续聊天、Director 按回合检查待办，不要求咖啡实时倒计时。回合不等同世界分钟；显式 `next_check_at / wait.next_wakeup` 仍使用世界时间，离线冻结。只有首个 Scenario 确实需要精确定时约束时，才补充世界时间推进与跳时规则，不能用对话轮数绕过已声明的时间前提。
 12. **Entity/Location 的 MVP 边界。** 首条 Trace 必须结构化哪些角色、地点、对象和资源事实；既不能回退到任意 dict patch，也不应提前重建 Maze/物理模拟。
 13. **Generation Trace 的隐私与事务关联。** Prompt、模型输出和 repair 信息哪些允许持久化，如何去除 credential/私密 Memory；Trace 写入失败是否影响 world commit。
-14. **重命名迁移方式。** 当前源码公开类型仍为 `PerceptionFrame`，应一次性重命名为 `AgentView`，还是提供一个短期兼容窗口；在 pre-MVP 内部项目中，优先避免永久双名。
+14. **重命名迁移已在 M1 收口。** 已一次性采用 `AgentView / view` 并要求 WorldRef；无 PerceptionFrame/frame alias 或旧 Runtime 格式自动兜底。Manifest 配置版本不变。
 15. **Story watermark 与迟到 Entry 策略。** 三条时间轴和 PresentationBinding 已冻结；仍需决定由谁声明“某个世界事实时间前不再正常补入迟到 Entry”、已发布区间的 revision 保留多久，以及补叙默认使用 `flashback` 还是生成新的连续片段。
 
 ### 延后，不阻塞本轮 MVP

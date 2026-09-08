@@ -9,6 +9,7 @@ description = "Typed Python and LangChain runtime for Generative Go World"
 requires-python = ">=3.12,<4.0"
 dependencies = [
   "langchain-core==1.6.1",
+  "langchain-openai==1.6.0",
   "pydantic==2.13.5",
   "pyyaml==6.0.3",
 ]
@@ -52,4 +53,3 @@ ignore = ["TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
 "agent_runtime/tests/**/*.py" = ["ANN201", "RUF001"]
-

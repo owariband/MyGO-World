@@ -2,7 +2,7 @@
 
 这里维护「多事件 AI Native 世界剧场」的持续架构结论。Wiki 用于沉淀讨论、决策、机制和未决问题，不替代当前仓库源码；涉及现有行为时仍以代码为准。
 
-> 最后更新：2026-09-07。当前 Director 边界以 D-044 的 EventStaff 模型为准。
+> 最后更新：2026-09-08。最新 MVP 边界以 [MVP_dev.md](design/MVP_dev.md) 为准；下文部分历史概述保留原术语。执行顺序和验收请看总计划 / 阶段记录，不据旧概述推断当前实现。
 
 ## 核心模型：Agent 提案，World 提交
 
@@ -68,6 +68,8 @@ perceive -> retrieve -> plan -> ActionProposal
 - [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `decide` 内部 perceive 的局部感知边界，并保留被否决答案、当前代价与未决部分。
 - [Agent Runtime 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Python + LangChain Core 强类型边界、`PersonActAgent.decide`、ActionProposal union、`agent / event / world` 分层、Memory 边界、Fixture Vertical Slice、分阶段 Plan 与启动指令。
 - [MVP 完善开发计划](design/MVP_dev.md)：以直观命名整理 SQLite 世界事实底座、可选择复用的 `origin/mvp` 模型、EventSession 互动/重组闭环、分阶段交付与待重新设计问题。
+- [MVP 分阶段执行计划](design/dev_plan_MVP.md)：固定 dev_plan，维护 M1–M7 的范围、验收和 Review 状态。
+- [M1 开发记录](design/M1_dev_log.md)：固定阶段 dev_log，记录 Gateway、WorldRef / Plan queue、UnionPart 的实际文件与测试证据。
 - [NPC DIY](npc-diy.md)：创作者配置、Pydantic 受信编译、`PersonActAgent.decide`、Proposal contract、当前实现证据与下一步。
 - [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 查询、确定性可见性与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。

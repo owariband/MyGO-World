@@ -7,14 +7,18 @@ from collections.abc import Callable
 from threading import Lock
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from agent_runtime.agent.personact.compiler import CompiledPersonActSpec
-from agent_runtime.agent.personact.errors import PlannerOutputError, ProposalValidationError
+from agent_runtime.agent.personact.errors import (
+    DecisionInputError,
+    PlannerOutputError,
+    ProposalValidationError,
+)
 from agent_runtime.agent.personact.loop import (
     ActionPlanningInput,
-    DailyPlanDraft,
-    DailyPlanningInput,
+    PlanDraft,
+    PlanningInput,
 )
 from agent_runtime.agent.personact.manifest import PersonaDefinition
 from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_proposal
@@ -27,7 +31,8 @@ from agent_runtime.model_gateway import (
     ModelRequest,
     ModelTransportError,
 )
-from agent_runtime.world.contracts import PerceptCandidate
+from agent_runtime.trace import record_trace
+from agent_runtime.world.contracts import PerceptCandidate, WorldRef
 
 Poignancy = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
 
@@ -81,10 +86,13 @@ class ModelCognitionStrategy:
         self,
         spec: CompiledPersonActSpec,
         candidate: PerceptCandidate,
+        *,
+        world_ref: WorldRef,
     ) -> float:
         """Ask the model for subjective importance without changing visibility."""
 
         request = self._request(
+            world_ref=world_ref,
             spec=spec,
             call_kind="score_poignancy",
             task=(
@@ -100,40 +108,70 @@ class ModelCognitionStrategy:
         )
         return self._generate(request, PoignancyScore).score
 
-    def plan_day(self, planning_input: DailyPlanningInput) -> DailyPlanDraft:
-        """Generate private intentions and a coarse schedule for the current day."""
+    def plan(self, planning_input: PlanningInput) -> PlanDraft:
+        """Generate queued private intentions without a calendar or execution claim."""
+
+        try:
+            planning_input = PlanningInput.model_validate(planning_input, strict=True)
+        except ValidationError as error:
+            raise DecisionInputError("planning input failed strict validation") from error
+        _validate_private_context(planning_input)
+        if (
+            planning_input.memory.agent_id != planning_input.spec.agent_id
+            or planning_input.memory.world_ref != planning_input.state.world_ref
+            or not (
+                planning_input.memory.scope == planning_input.spec.memory_scope
+                or planning_input.memory.scope.startswith(f"{planning_input.spec.memory_scope}/")
+            )
+        ):
+            raise DecisionInputError("planning input has inconsistent private ownership")
 
         request = self._request(
+            world_ref=planning_input.state.world_ref,
             spec=planning_input.spec,
-            call_kind="plan_day",
+            call_kind="plan",
             task=(
-                "Create private daily intentions and a coarse schedule. Treat the compiled "
+                "Create a short ordered queue of private plans, each with a unique plan ID "
+                "and description. There is no daily schedule. Treat the compiled "
                 "Persona, current observations, and retrieved private Memory as authoritative. "
                 "Do not claim that planned actions already happened."
             ),
             input_json=planning_input.model_dump_json(by_alias=True, exclude_none=False),
         )
-        return self._generate(request, DailyPlanDraft)
+        return self._generate(request, PlanDraft)
 
     def plan_action(self, planning_input: ActionPlanningInput) -> ProposalDraft:
         """Generate one draft, repairing schema or authority failure at most once."""
 
+        try:
+            planning_input = ActionPlanningInput.model_validate(planning_input, strict=True)
+        except ValidationError as error:
+            raise DecisionInputError("action planning input failed strict validation") from error
+        _validate_private_context(planning_input)
+        if (
+            planning_input.state.world_ref != planning_input.view.world_ref
+            or planning_input.view.agent_id != planning_input.spec.agent_id
+        ):
+            raise DecisionInputError("action planning input has inconsistent private ownership")
+
         request = self._request(
+            world_ref=planning_input.view.world_ref,
             spec=planning_input.spec,
             call_kind="plan_action",
             task=(
                 "Choose exactly one Action draft for this character. Use only the supplied "
                 "observations, private Memory, and current affordances. Return action and "
-                "visible evidence IDs only; actor, proposal, session, and World Version are "
-                "injected later by trusted Runtime code."
+                "visible evidence IDs only; project, world, actor, proposal, session, and version "
+                "are injected later by trusted Runtime code."
             ),
             input_json=planning_input.model_dump_json(by_alias=True, exclude_none=False),
         )
 
         def validate(draft: ProposalDraft) -> None:
             build_action_proposal(
+                world_ref=planning_input.view.world_ref,
                 spec=planning_input.spec,
-                frame=planning_input.frame,
+                view=planning_input.view,
                 proposal_id="model-strategy-validation",
                 draft=draft,
             )
@@ -143,11 +181,19 @@ class ModelCognitionStrategy:
     def _request(
         self,
         *,
+        world_ref: WorldRef,
         spec: CompiledPersonActSpec,
         call_kind: str,
         task: str,
         input_json: str,
     ) -> ModelRequest:
+        try:
+            world_ref = WorldRef.model_validate(world_ref, strict=True)
+            spec = CompiledPersonActSpec.model_validate(spec, strict=True)
+        except ValidationError as error:
+            raise DecisionInputError("model request identity failed strict validation") from error
+        if world_ref.project_id != spec.project_id:
+            raise DecisionInputError("model request WorldRef does not belong to compiled project")
         if spec.character_skill.skill_id != self._skill.skill_id:
             raise ValueError("compiled Character Skill ID does not match the resolved Skill")
         if spec.character_skill.version != self._skill.version:
@@ -155,6 +201,7 @@ class ModelCognitionStrategy:
         if spec.character_skill.content_hash != self._skill.content_hash:
             raise ValueError("bound Character Skill content hash does not match the resolved Skill")
         return ModelRequest(
+            world_ref=world_ref,
             call_id=self._call_id_generator(),
             agent_kind="character",
             agent_id=spec.agent_id,
@@ -183,9 +230,12 @@ class ModelCognitionStrategy:
                 generation = self._gateway.generate(current, response_type)
             except ModelOutputInvalidError as error:
                 diagnostic = error.diagnostic
-                self._append_trace(_invalid_output(error.trace, diagnostic))
+                repair_reason = "schema"
+                self._append_trace(
+                    _invalid_output(error.trace, diagnostic), agent_id=current.agent_id
+                )
             except ModelTransportError as error:
-                self._append_trace(error.trace)
+                self._append_trace(error.trace, agent_id=current.agent_id)
                 raise
             else:
                 try:
@@ -193,9 +243,12 @@ class ModelCognitionStrategy:
                         semantic_validator(generation.structured)
                 except ProposalValidationError as error:
                     diagnostic = str(error) or type(error).__name__
-                    self._append_trace(_semantic_rejection(generation.trace, diagnostic))
+                    repair_reason = "semantic"
+                    self._append_trace(
+                        _semantic_rejection(generation.trace, diagnostic), agent_id=current.agent_id
+                    )
                 else:
-                    self._append_trace(generation.trace)
+                    self._append_trace(generation.trace, agent_id=current.agent_id)
                     return generation.structured
 
             if semantic_attempt == 2:
@@ -203,6 +256,7 @@ class ModelCognitionStrategy:
                     f"model strategy output remained invalid after one repair: {diagnostic}"
                 )
             current = ModelRequest(
+                world_ref=current.world_ref,
                 call_id=self._call_id_generator(),
                 agent_kind=current.agent_kind,
                 agent_id=current.agent_id,
@@ -218,11 +272,49 @@ class ModelCognitionStrategy:
                 input_json=current.input_json,
                 repair_diagnostic=diagnostic,
             )
+            record_trace(
+                "model.repair",
+                {
+                    "callId": current.call_id,
+                    "repairOfCallId": request.call_id,
+                    "reason": repair_reason,
+                },
+                world_ref=current.world_ref,
+                agent_id=current.agent_id,
+            )
         raise AssertionError("unreachable model strategy state")
 
-    def _append_trace(self, trace: ModelCallTrace) -> None:
+    def _append_trace(self, trace: ModelCallTrace, *, agent_id: str) -> None:
         with self._trace_lock:
             self._traces.append(trace)
+        record_trace(
+            "model.result",
+            trace.model_dump(mode="json", by_alias=True),
+            world_ref=trace.world_ref,
+            agent_id=agent_id,
+        )
+
+
+def _validate_private_context(planning_input: PlanningInput | ActionPlanningInput) -> None:
+    spec = planning_input.spec
+    state = planning_input.state
+    if state.agent_id != spec.agent_id:
+        raise DecisionInputError("planning state belongs to another agent")
+    for retrieved in planning_input.retrieved:
+        for record in (*retrieved.related, *retrieved.ranked):
+            if (
+                record.world_ref != state.world_ref
+                or record.agent_id != state.agent_id
+                or not (
+                    record.scope == spec.memory_scope
+                    or record.scope.startswith(f"{spec.memory_scope}/")
+                )
+                or (
+                    isinstance(planning_input, PlanningInput)
+                    and record.scope != planning_input.memory.scope
+                )
+            ):
+                raise DecisionInputError("retrieved memory has inconsistent private ownership")
 
 
 def _system_prompt(skill_body: str, task: str) -> str:
@@ -237,6 +329,7 @@ def _system_prompt(skill_body: str, task: str) -> str:
 
 def _semantic_rejection(trace: ModelCallTrace, diagnostic: str) -> ModelCallTrace:
     return ModelCallTrace(
+        world_ref=trace.world_ref,
         call_id=trace.call_id,
         call_kind=trace.call_kind,
         model_id=trace.model_id,
@@ -257,6 +350,7 @@ def _semantic_rejection(trace: ModelCallTrace, diagnostic: str) -> ModelCallTrac
 
 def _invalid_output(trace: ModelCallTrace, diagnostic: str) -> ModelCallTrace:
     return ModelCallTrace(
+        world_ref=trace.world_ref,
         call_id=trace.call_id,
         call_kind=trace.call_kind,
         model_id=trace.model_id,

@@ -13,11 +13,13 @@ from agent_runtime.agent.memory.errors import (
     MemoryTouchError,
 )
 from agent_runtime.model import StrictModel
+from agent_runtime.world.contracts import WorldRef
 
 
 class MemoryStream(StrictModel):
-    """Append-only records bound to one exact ``agent_id + scope`` pair."""
+    """Append-only records bound to one exact World, Agent, and scope."""
 
+    world_ref: WorldRef
     agent_id: str
     scope: str
     records: tuple[MemoryRecord, ...] = ()
@@ -31,9 +33,14 @@ class MemoryStream(StrictModel):
 
         memory_ids: set[str] = set()
         for record in self.records:
-            if record.agent_id != self.agent_id or record.scope != self.scope:
+            if (
+                record.world_ref != self.world_ref
+                or record.agent_id != self.agent_id
+                or record.scope != self.scope
+            ):
                 raise ValueError(
-                    f'memory "{record.id}" is outside agent "{self.agent_id}" '
+                    f'memory "{record.id}" is outside World "{self.world_ref.world_id}", '
+                    f'agent "{self.agent_id}" '
                     f'and scope "{self.scope}"'
                 )
             if record.id in memory_ids:
@@ -45,14 +52,20 @@ class MemoryStream(StrictModel):
         """Return a stream with one validated record appended at the tail."""
 
         validated = MemoryRecord.model_validate(record, strict=True)
-        if validated.agent_id != self.agent_id or validated.scope != self.scope:
+        if (
+            validated.world_ref != self.world_ref
+            or validated.agent_id != self.agent_id
+            or validated.scope != self.scope
+        ):
             raise MemoryScopeError(
-                f'memory "{validated.id}" is outside agent "{self.agent_id}" '
+                f'memory "{validated.id}" is outside World "{self.world_ref.world_id}", '
+                f'agent "{self.agent_id}" '
                 f'and scope "{self.scope}"'
             )
         if any(existing.id == validated.id for existing in self.records):
             raise DuplicateMemoryError(f'duplicate memory id "{validated.id}"')
         return MemoryStream(
+            world_ref=self.world_ref,
             agent_id=self.agent_id,
             scope=self.scope,
             records=(*self.records, validated),
@@ -64,6 +77,17 @@ class MemoryStream(StrictModel):
         validated_touches = tuple(
             MemoryTouch.model_validate(touch, strict=True) for touch in touches
         )
+        for touch in validated_touches:
+            if (
+                touch.world_ref != self.world_ref
+                or touch.agent_id != self.agent_id
+                or touch.scope != self.scope
+            ):
+                raise MemoryScopeError(
+                    f'touch for memory "{touch.memory_id}" is outside '
+                    f'World "{self.world_ref.world_id}", agent "{self.agent_id}" '
+                    f'and scope "{self.scope}"'
+                )
         touch_ids = tuple(touch.memory_id for touch in validated_touches)
         if len(touch_ids) != len(set(touch_ids)):
             raise DuplicateMemoryError("memory touch ids must be unique")
@@ -89,6 +113,7 @@ class MemoryStream(StrictModel):
             touched_records.append(_touch_record(record, touch))
 
         return MemoryStream(
+            world_ref=self.world_ref,
             agent_id=self.agent_id,
             scope=self.scope,
             records=tuple(touched_records),
@@ -136,6 +161,7 @@ class MemoryStream(StrictModel):
 def _touch_record(record: MemoryRecord, touch: MemoryTouch) -> MemoryRecord:
     return MemoryRecord(
         id=record.id,
+        world_ref=record.world_ref,
         agent_id=record.agent_id,
         scope=record.scope,
         kind=record.kind,

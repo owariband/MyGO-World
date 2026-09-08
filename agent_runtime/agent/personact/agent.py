@@ -13,27 +13,28 @@ from agent_runtime.agent.personact.errors import DecisionInputError
 from agent_runtime.agent.personact.loop import (
     ActionPlanningInput,
     CognitionStrategy,
-    DailyPlanDraft,
-    DailyPlanningInput,
     DecisionRequest,
     DecisionTrace,
     Observation,
     PersonActLoop,
     PersonActLoopInput,
+    PlanDraft,
+    PlanningInput,
     RetrievedContext,
 )
 from agent_runtime.agent.personact.state import PersonaState
-from agent_runtime.world.contracts import ActionProposal
+from agent_runtime.trace import LocalTrace, record_trace, trace_debug_enabled, trace_scope
+from agent_runtime.world.contracts import ActionProposal, WorldRef
 
 __all__ = [
     "ActionPlanningInput",
     "CognitionStrategy",
-    "DailyPlanDraft",
-    "DailyPlanningInput",
     "DecisionRequest",
     "DecisionTrace",
     "Observation",
     "PersonActAgent",
+    "PlanDraft",
+    "PlanningInput",
     "RetrievedContext",
 ]
 
@@ -69,7 +70,14 @@ class PersonActAgent:
         memory: MemoryStream,
         strategy: CognitionStrategy,
         embedding_provider: EmbeddingProvider,
+        *,
+        world_ref: WorldRef,
+        trace_log: LocalTrace | None = None,
     ) -> None:
+        self._world_ref = WorldRef.model_validate(world_ref, strict=True)
+        if trace_log is not None and trace_log.world_ref != self._world_ref:
+            raise DecisionInputError("trace log belongs to a different WorldRef")
+        self._trace_log = trace_log
         self._spec = CompiledPersonActSpec.model_validate(spec, strict=True)
         validated_state = PersonaState.model_validate(state, strict=True)
         validated_memory = MemoryStream.model_validate(memory, strict=True)
@@ -83,6 +91,7 @@ class PersonActAgent:
         )
         self._validate_ownership()
         self._loop = PersonActLoop(
+            world_ref=self._world_ref,
             spec=self._spec,
             strategy=strategy,
             embedding_provider=embedding_provider,
@@ -116,7 +125,15 @@ class PersonActAgent:
     ) -> ActionProposal:
         """Return a proposal, never a movement or execution result."""
 
-        with self._lock:
+        with (
+            self._lock,
+            trace_scope(
+                self._trace_log,
+                world_ref=self._world_ref,
+                agent_kind="character",
+                agent_id=self._spec.agent_id,
+            ),
+        ):
             try:
                 validated_request = DecisionRequest.model_validate(request, strict=True)
                 PersonaState.model_validate(self._snapshot.state, strict=True)
@@ -124,13 +141,27 @@ class PersonActAgent:
             except ValidationError as error:
                 raise DecisionInputError("decision request failed strict validation") from error
 
+            self._validate_ownership()
+            if validated_request.view.world_ref != self._world_ref:
+                raise DecisionInputError("view belongs to a different WorldRef")
+            if validated_request.view.agent_id != self._spec.agent_id:
+                raise DecisionInputError("view belongs to a different agent")
+            record_trace(
+                "decision.input",
+                {
+                    "proposalId": validated_request.proposal_id,
+                    "eventSessionId": validated_request.view.event_session_id,
+                    "worldVersion": validated_request.view.based_on_world_version,
+                    "candidateIds": [c.candidate_id for c in validated_request.view.candidates],
+                },
+            )
             request_fingerprint = _fingerprint(validated_request)
             replay = self._snapshot.replay
             if replay is not None and replay.proposal_id == validated_request.proposal_id:
                 if replay.request_fingerprint != request_fingerprint:
                     raise DecisionInputError(
                         f'proposal id "{validated_request.proposal_id}" was reused '
-                        "with a different frame"
+                        "with a different view"
                     )
                 self._snapshot = _PrivateSnapshot(
                     state=self._snapshot.state,
@@ -138,6 +169,20 @@ class PersonActAgent:
                     trace=replay.trace,
                     replay=replay,
                     used_proposal_ids=self._snapshot.used_proposal_ids,
+                )
+                record_trace("decision.replay", {"proposalId": replay.proposal_id})
+                record_trace(
+                    "decision.result",
+                    {
+                        "kind": replay.proposal.action.kind,
+                        "evidenceIds": replay.proposal.evidence_ids,
+                    },
+                    content={
+                        "proposal": replay.proposal.model_dump(mode="json"),
+                        "decisionTrace": replay.trace.model_dump(mode="json"),
+                    }
+                    if trace_debug_enabled()
+                    else None,
                 )
                 return replay.proposal
             if validated_request.proposal_id in self._snapshot.used_proposal_ids:
@@ -167,9 +212,26 @@ class PersonActAgent:
                     self._snapshot.used_proposal_ids | {validated_request.proposal_id}
                 ),
             )
+            record_trace(
+                "decision.result",
+                {"kind": result.proposal.action.kind, "evidenceIds": result.proposal.evidence_ids},
+                content={
+                    "proposal": result.proposal.model_dump(mode="json"),
+                    "decisionTrace": result.trace.model_dump(mode="json"),
+                }
+                if trace_debug_enabled()
+                else None,
+            )
             return result.proposal
 
     def _validate_ownership(self) -> None:
+        if self._world_ref.project_id != self._spec.project_id:
+            raise DecisionInputError("WorldRef project does not match compiled spec")
+        if (
+            self._snapshot.state.world_ref != self._world_ref
+            or self._snapshot.memory.world_ref != self._world_ref
+        ):
+            raise DecisionInputError("private state or memory belongs to a different WorldRef")
         if self._snapshot.state.agent_id != self._spec.agent_id:
             raise DecisionInputError(
                 f'state belongs to agent "{self._snapshot.state.agent_id}", '

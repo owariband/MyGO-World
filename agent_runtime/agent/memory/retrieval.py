@@ -177,7 +177,16 @@ def _touches(
     records: tuple[MemoryRecord, ...],
     accessed_at: datetime,
 ) -> tuple[MemoryTouch, ...]:
-    return tuple(MemoryTouch(memory_id=record.id, accessed_at=accessed_at) for record in records)
+    return tuple(
+        MemoryTouch(
+            world_ref=record.world_ref,
+            agent_id=record.agent_id,
+            scope=record.scope,
+            memory_id=record.id,
+            accessed_at=accessed_at,
+        )
+        for record in records
+    )
 
 
 def _validate_embedding(embedding: tuple[float, ...], label: str) -> None:

@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from agent_runtime.agent.memory import (
     MemoryKind,
     MemoryRecord,
+    MemoryRetrieval,
     MemoryStream,
     MemoryTouch,
     retrieve_ranked,
@@ -20,10 +22,18 @@ from agent_runtime.agent.memory.errors import (
     MemoryScopeError,
     MemoryTouchError,
 )
+from agent_runtime.world.contracts import WorldRef
 
 BASE_TIME = datetime(2026, 8, 31, 12, tzinfo=UTC)
 AGENT_ID = "anon"
 MEMORY_SCOPE = "project/coffee-golden/persona/anon/episodic"
+WORLD_REF = WorldRef(project_id="coffee-golden", world_id="world-1")
+FOREIGN_OWNERS = (
+    (WorldRef(project_id="other-project", world_id="world-1"), AGENT_ID, MEMORY_SCOPE),
+    (WorldRef(project_id="coffee-golden", world_id="world-2"), AGENT_ID, MEMORY_SCOPE),
+    (WORLD_REF, "soyo", MEMORY_SCOPE),
+    (WORLD_REF, AGENT_ID, f"{MEMORY_SCOPE}/private"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +60,7 @@ def test_stream_append_recent_and_runtime_supplied_novelty() -> None:
         novelty_key="event-2/rev-1/location",
     )
 
-    empty = MemoryStream(agent_id=AGENT_ID, scope=MEMORY_SCOPE)
+    empty = MemoryStream(world_ref=WORLD_REF, agent_id=AGENT_ID, scope=MEMORY_SCOPE)
     stream = empty.append(first).append(second)
 
     assert empty.records == ()
@@ -62,7 +72,7 @@ def test_stream_append_recent_and_runtime_supplied_novelty() -> None:
 
 
 def test_stream_rejects_foreign_scope_and_duplicate_ids() -> None:
-    stream = MemoryStream(agent_id=AGENT_ID, scope=MEMORY_SCOPE)
+    stream = MemoryStream(world_ref=WORLD_REF, agent_id=AGENT_ID, scope=MEMORY_SCOPE)
     foreign_agent = _record("foreign-agent", minute=1, agent_id="soyo")
     foreign_scope = _record(
         "foreign-scope",
@@ -144,7 +154,7 @@ def test_retrieve_ranked_combines_relevance_importance_and_recent_first_recency(
 
 def test_retrieve_ranked_handles_empty_stream_without_embedding_call() -> None:
     result = retrieve_ranked(
-        MemoryStream(agent_id=AGENT_ID, scope=MEMORY_SCOPE),
+        MemoryStream(world_ref=WORLD_REF, agent_id=AGENT_ID, scope=MEMORY_SCOPE),
         focal_point="coffee queue",
         embedding_provider=UnexpectedEmbeddingProvider(),
         accessed_at=BASE_TIME,
@@ -193,12 +203,12 @@ def test_retrieval_returns_explicit_touches_without_mutating_stream() -> None:
     touched = stream.touch(result.touches)
 
     assert stream.records[0].last_accessed_at == original_access
-    assert result.touches == (MemoryTouch(memory_id="memory-1", accessed_at=accessed_at),)
+    assert result.touches == (_touch("memory-1", accessed_at),)
     assert touched.records[0].last_accessed_at == accessed_at
     assert touched is not stream
 
     with pytest.raises(MemoryTouchError, match="cannot move lastAccessedAt backwards"):
-        touched.touch((MemoryTouch(memory_id="memory-1", accessed_at=original_access),))
+        touched.touch((_touch("memory-1", original_access),))
 
 
 def test_retrieval_excludes_future_records_instead_of_returning_backward_touches() -> None:
@@ -228,13 +238,164 @@ def test_retrieval_excludes_future_records_instead_of_returning_backward_touches
 
     assert tuple(record.id for record in related.records) == ("eligible",)
     assert tuple(record.id for record in ranked.records) == ("eligible",)
-    assert related.touches == (MemoryTouch(memory_id="eligible", accessed_at=accessed_at),)
-    assert ranked.touches == (MemoryTouch(memory_id="eligible", accessed_at=accessed_at),)
+    assert related.touches == (_touch("eligible", accessed_at),)
+    assert ranked.touches == (_touch("eligible", accessed_at),)
     assert stream.touch((*related.touches,)) is not stream
 
 
-def _stream(*records: MemoryRecord) -> MemoryStream:
-    stream = MemoryStream(agent_id=AGENT_ID, scope=MEMORY_SCOPE)
+@pytest.mark.parametrize(("world_ref", "agent_id", "scope"), FOREIGN_OWNERS)
+def test_constructor_and_append_reject_foreign_owner_before_matching_id(
+    world_ref: WorldRef, agent_id: str, scope: str
+) -> None:
+    record = _record("same-id", minute=1)
+    stream = _stream(record)
+    foreign = _record("same-id", minute=1, world_ref=world_ref, agent_id=agent_id, scope=scope)
+
+    with pytest.raises(ValidationError, match="outside"):
+        MemoryStream(
+            world_ref=WORLD_REF,
+            agent_id=AGENT_ID,
+            scope=MEMORY_SCOPE,
+            records=(record, foreign),
+        )
+    with pytest.raises(MemoryScopeError, match="outside"):
+        stream.append(foreign)
+
+    assert stream.records == (record,)
+
+
+@pytest.mark.parametrize(("world_ref", "agent_id", "scope"), FOREIGN_OWNERS)
+@pytest.mark.parametrize("memory_id", ("same-id", "unknown-id"))
+def test_touch_rejects_foreign_owner_before_id_checks_without_partial_updates(
+    world_ref: WorldRef, agent_id: str, scope: str, memory_id: str
+) -> None:
+    record = _record("same-id", minute=1)
+    stream = _stream(record)
+    accessed_at = BASE_TIME + timedelta(minutes=10)
+    foreign = _touch(memory_id, accessed_at, world_ref=world_ref, agent_id=agent_id, scope=scope)
+
+    with pytest.raises(MemoryScopeError, match="outside"):
+        stream.touch((_touch("same-id", accessed_at), foreign))
+
+    assert stream.records == (record,)
+    assert stream.records[0].last_accessed_at == record.last_accessed_at
+
+
+@pytest.mark.parametrize(("world_ref", "agent_id", "scope"), FOREIGN_OWNERS)
+def test_retrieval_matches_full_record_and_touch_owner(
+    world_ref: WorldRef, agent_id: str, scope: str
+) -> None:
+    record = _record("same-id", minute=1)
+    foreign = _touch(
+        "same-id",
+        BASE_TIME + timedelta(minutes=10),
+        world_ref=world_ref,
+        agent_id=agent_id,
+        scope=scope,
+    )
+
+    with pytest.raises(ValidationError, match="owners and IDs"):
+        MemoryRetrieval(records=(record,), touches=(foreign,))
+
+
+def test_memory_identity_round_trip_and_rebuilding_preserve_owner() -> None:
+    record = _record("memory-1", minute=1, tags=("coffee",))
+    stream = _stream(record)
+    restored = MemoryStream.model_validate_json(stream.model_dump_json(), strict=True)
+    assert restored == stream
+    assert restored.model_dump(mode="json")["worldRef"] == {
+        "projectId": "coffee-golden",
+        "worldId": "world-1",
+    }
+
+    related = retrieve_related(
+        restored, keywords=("coffee",), accessed_at=BASE_TIME + timedelta(minutes=10)
+    )
+    ranked = retrieve_ranked(
+        restored,
+        focal_point="coffee queue",
+        embedding_provider=FixedEmbeddingProvider((1.0, 0.0)),
+        accessed_at=BASE_TIME + timedelta(minutes=10),
+    )
+    assert related == ranked
+    assert MemoryRetrieval.model_validate_json(related.model_dump_json(), strict=True) == related
+    touched = restored.touch(related.touches)
+    assert touched.world_ref == touched.records[0].world_ref == WORLD_REF
+    assert touched.agent_id == touched.records[0].agent_id == AGENT_ID
+    assert touched.scope == touched.records[0].scope == MEMORY_SCOPE
+    assert related.touches[0].world_ref == WORLD_REF
+    assert related.touches[0].agent_id == AGENT_ID
+    assert related.touches[0].scope == MEMORY_SCOPE
+    assert touched.records[0].last_accessed_at > record.last_accessed_at
+    assert restored.records[0].last_accessed_at == record.last_accessed_at
+    with pytest.raises(ValidationError, match="frozen"):
+        restored.world_ref = WorldRef(project_id="coffee-golden", world_id="world-2")
+
+
+def test_independent_worlds_can_reuse_memory_ids_without_cross_touch() -> None:
+    other_world = WorldRef(project_id="coffee-golden", world_id="world-2")
+    first = _stream(_record("same-id", minute=1, tags=("coffee",)))
+    second = _stream(
+        _record("same-id", minute=1, world_ref=other_world, tags=("coffee",)),
+        world_ref=other_world,
+    )
+    result = retrieve_related(
+        second, keywords=("coffee",), accessed_at=BASE_TIME + timedelta(minutes=10)
+    )
+    touched = second.touch(result.touches)
+
+    assert touched.world_ref == other_world
+    assert touched.records[0].id == first.records[0].id
+    assert touched.records[0].last_accessed_at > first.records[0].last_accessed_at
+    with pytest.raises(MemoryScopeError, match="outside"):
+        first.touch(result.touches)
+
+
+def test_memory_contracts_require_explicit_identity() -> None:
+    record = _record("memory-1", minute=1)
+    record_data = record.model_dump()
+    record_data.pop("worldRef")
+    with pytest.raises(ValidationError, match="worldRef"):
+        MemoryRecord.model_validate(record_data, strict=True)
+
+    with pytest.raises(ValidationError, match="worldRef"):
+        MemoryStream.model_validate({"agentId": AGENT_ID, "scope": MEMORY_SCOPE}, strict=True)
+
+    touch = _touch("memory-1", BASE_TIME + timedelta(minutes=2))
+    for field in ("worldRef", "agentId", "scope"):
+        touch_data = touch.model_dump()
+        touch_data.pop(field)
+        with pytest.raises(ValidationError, match=field):
+            MemoryTouch.model_validate(touch_data, strict=True)
+
+
+def test_retrieval_matches_ids_and_order_in_addition_to_owner() -> None:
+    first = _record("memory-1", minute=1)
+    second = _record("memory-2", minute=2)
+    accessed_at = BASE_TIME + timedelta(minutes=10)
+    with pytest.raises(ValidationError, match="owners and IDs"):
+        MemoryRetrieval(
+            records=(first, second),
+            touches=(_touch("memory-2", accessed_at), _touch("memory-1", accessed_at)),
+        )
+    with pytest.raises(ValidationError, match="owners and IDs"):
+        MemoryRetrieval(records=(first,), touches=())
+
+
+def test_owner_checks_preserve_existing_touch_failure_rules() -> None:
+    record = _record("memory-1", minute=1)
+    stream = _stream(record)
+    touch = _touch("memory-1", BASE_TIME + timedelta(minutes=10))
+    with pytest.raises(DuplicateMemoryError, match="unique"):
+        stream.touch((touch, touch))
+    with pytest.raises(MemoryTouchError, match="unknown"):
+        stream.touch((_touch("unknown-id", touch.accessed_at),))
+    assert stream.touch(()) == stream
+    assert stream.records == (record,)
+
+
+def _stream(*records: MemoryRecord, world_ref: WorldRef = WORLD_REF) -> MemoryStream:
+    stream = MemoryStream(world_ref=world_ref, agent_id=AGENT_ID, scope=MEMORY_SCOPE)
     for record in records:
         stream = stream.append(record)
     return stream
@@ -244,6 +405,7 @@ def _record(
     memory_id: str,
     *,
     minute: int,
+    world_ref: WorldRef = WORLD_REF,
     agent_id: str = AGENT_ID,
     scope: str = MEMORY_SCOPE,
     kind: MemoryKind = MemoryKind.EVENT,
@@ -259,6 +421,7 @@ def _record(
     created_at = BASE_TIME + timedelta(minutes=minute)
     return MemoryRecord(
         id=memory_id,
+        world_ref=world_ref,
         agent_id=agent_id,
         scope=scope,
         kind=kind,
@@ -274,4 +437,21 @@ def _record(
         evidence_ids=(f"evidence:{memory_id}",),
         embedding=embedding,
         novelty_key=novelty_key or f"novelty:{memory_id}",
+    )
+
+
+def _touch(
+    memory_id: str,
+    accessed_at: datetime,
+    *,
+    world_ref: WorldRef = WORLD_REF,
+    agent_id: str = AGENT_ID,
+    scope: str = MEMORY_SCOPE,
+) -> MemoryTouch:
+    return MemoryTouch(
+        memory_id=memory_id,
+        accessed_at=accessed_at,
+        world_ref=world_ref,
+        agent_id=agent_id,
+        scope=scope,
     )

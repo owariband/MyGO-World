@@ -36,16 +36,18 @@ from agent_runtime.world.contracts import (
     ActAction,
     ActionProposal,
     Affordance,
+    AgentView,
     CharacterTarget,
     InteractAction,
     NoOpAction,
     ObjectTarget,
-    PerceptionFrame,
     ProposalKind,
     RespondAction,
     UtterAction,
+    WorldRef,
 )
 
+WORLD_REF = WorldRef(project_id="coffee-golden", world_id="save-001")
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
 SKILLS_PATH = Path(__file__).parents[2] / "content" / "skills"
 
@@ -154,17 +156,17 @@ def test_project_identity_partitions_digest_and_memory_scope() -> None:
 
 
 def test_frozen_models_reject_mutation_and_strict_revalidation() -> None:
-    frame = _frame(affordances=())
+    view = _view(affordances=())
 
     with pytest.raises(ValidationError, match="Input should be a valid integer"):
-        PerceptionFrame.model_validate(
+        AgentView.model_validate(
             {
-                **frame.model_dump(by_alias=False),
+                **view.model_dump(by_alias=False),
                 "based_on_world_version": "7",
             },
             strict=True,
         )
-    assert frame.model_config.get("frozen") is True
+    assert view.model_config.get("frozen") is True
 
 
 def test_compile_rejects_duplicate_catalog_ids() -> None:
@@ -238,8 +240,9 @@ def test_compile_rejects_unknown_or_wrong_kind_character_skill() -> None:
 def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
     target = CharacterTarget(id="soyo")
     proposal = build_action_proposal(
+        world_ref=WORLD_REF,
         spec=_anon_spec(),
-        frame=_frame(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+        view=_view(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
         proposal_id="proposal-1",
         draft=ProposalDraft(
             action=UtterAction(target=target, content="轮到我们了，要这个吗？"),
@@ -249,6 +252,7 @@ def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
 
     assert isinstance(proposal, ActionProposal)
     assert json.loads(proposal.model_dump_json(by_alias=True)) == {
+        "worldRef": {"projectId": "coffee-golden", "worldId": "save-001"},
         "proposalId": "proposal-1",
         "agentId": "anon",
         "eventSessionId": "cafe",
@@ -287,8 +291,9 @@ def test_build_action_proposal_accepts_character_and_object_interact(
     target: CharacterTarget | ObjectTarget,
 ) -> None:
     proposal = build_action_proposal(
+        world_ref=WORLD_REF,
         spec=_anon_spec(),
-        frame=_frame(affordances=(Affordance(kind=ProposalKind.INTERACT, target=target),)),
+        view=_view(affordances=(Affordance(kind=ProposalKind.INTERACT, target=target),)),
         proposal_id="proposal-1",
         draft=ProposalDraft(
             action=InteractAction(target=target, description="interact with target")
@@ -318,15 +323,16 @@ def test_build_action_proposal_does_not_confuse_target_kind_with_same_id(
     afforded_target: CharacterTarget | ObjectTarget,
     draft_target: CharacterTarget | ObjectTarget,
 ) -> None:
-    frame = _frame(affordances=(Affordance(kind=ProposalKind.INTERACT, target=afforded_target),))
+    view = _view(affordances=(Affordance(kind=ProposalKind.INTERACT, target=afforded_target),))
     draft = ProposalDraft(
         action=InteractAction(target=draft_target, description="interact with target")
     )
 
     with pytest.raises(ProposalValidationError, match="not afforded"):
         build_action_proposal(
+            world_ref=WORLD_REF,
             spec=_anon_spec(),
-            frame=frame,
+            view=view,
             proposal_id="proposal-1",
             draft=draft,
         )
@@ -400,8 +406,9 @@ def test_build_action_proposal_rejects_wrong_target_or_affordance(
 
     with pytest.raises(ProposalValidationError, match="not afforded"):
         build_action_proposal(
+            world_ref=WORLD_REF,
             spec=_anon_spec(),
-            frame=_frame(affordances=(affordance,)),
+            view=_view(affordances=(affordance,)),
             proposal_id="proposal-1",
             draft=draft,
         )
@@ -410,8 +417,9 @@ def test_build_action_proposal_rejects_wrong_target_or_affordance(
 def test_build_action_proposal_rejects_kind_not_granted_by_spec() -> None:
     with pytest.raises(ProposalValidationError, match="not granted"):
         build_action_proposal(
+            world_ref=WORLD_REF,
             spec=_anon_spec(),
-            frame=_frame(affordances=(Affordance(kind=ProposalKind.ACT),)),
+            view=_view(affordances=(Affordance(kind=ProposalKind.ACT),)),
             proposal_id="proposal-1",
             draft=ProposalDraft(action=ActAction(description="look around")),
         )
@@ -424,10 +432,11 @@ def test_build_action_proposal_rejects_hidden_evidence() -> None:
         evidence_ids=("tomori-private-event",),
     )
 
-    with pytest.raises(ProposalValidationError, match="outside the current frame"):
+    with pytest.raises(ProposalValidationError, match="outside the current view"):
         build_action_proposal(
+            world_ref=WORLD_REF,
             spec=_anon_spec(),
-            frame=_frame(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+            view=_view(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
             proposal_id="proposal-1",
             draft=draft,
         )
@@ -435,8 +444,9 @@ def test_build_action_proposal_rejects_hidden_evidence() -> None:
 
 def test_no_op_needs_no_affordance_and_carries_no_evidence() -> None:
     proposal = build_action_proposal(
+        world_ref=WORLD_REF,
         spec=_anon_spec(),
-        frame=_frame(affordances=()),
+        view=_view(affordances=()),
         proposal_id="proposal-1",
         draft=ProposalDraft(action=NoOpAction(next_wakeup="event_change")),
     )
@@ -447,14 +457,93 @@ def test_no_op_needs_no_affordance_and_carries_no_evidence() -> None:
 
     with pytest.raises(ProposalValidationError, match="cannot carry evidence"):
         build_action_proposal(
+            world_ref=WORLD_REF,
             spec=_anon_spec(),
-            frame=_frame(affordances=(), visible_evidence_ids=("queue-ready",)),
+            view=_view(affordances=(), visible_evidence_ids=("queue-ready",)),
             proposal_id="proposal-2",
             draft=ProposalDraft(
                 action=NoOpAction(next_wakeup="event_change"),
                 evidence_ids=("queue-ready",),
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "foreign_ref",
+    [
+        WorldRef(project_id="another-project", world_id="save-001"),
+        WorldRef(project_id="coffee-golden", world_id="save-002"),
+    ],
+)
+def test_proposal_builder_refuses_foreign_view_even_for_no_op(foreign_ref: WorldRef) -> None:
+    view = _view(affordances=())
+    foreign_view = AgentView.model_validate(
+        {**view.model_dump(by_alias=False), "world_ref": foreign_ref}, strict=True
+    )
+    with pytest.raises(ProposalValidationError, match="different WorldRef"):
+        build_action_proposal(
+            world_ref=WORLD_REF,
+            spec=_anon_spec(),
+            view=foreign_view,
+            proposal_id="same-id",
+            draft=ProposalDraft(action=NoOpAction(next_wakeup="event_change")),
+        )
+
+
+def test_proposal_builder_refuses_ref_project_mismatching_spec() -> None:
+    foreign = WorldRef(project_id="another-project", world_id="save-001")
+    view = AgentView.model_validate(
+        {**_view(affordances=()).model_dump(by_alias=False), "world_ref": foreign}, strict=True
+    )
+    with pytest.raises(ProposalValidationError, match="project"):
+        build_action_proposal(
+            world_ref=foreign,
+            spec=_anon_spec(),
+            view=view,
+            proposal_id="same-id",
+            draft=ProposalDraft(action=NoOpAction(next_wakeup="event_change")),
+        )
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"worldRef": {"projectId": "p", "worldId": "w"}},
+        {"projectId": "p"},
+        {"worldId": "w"},
+        {"eventSessionId": "foreign"},
+        {"basedOnWorldVersion": 999},
+    ],
+)
+def test_model_draft_cannot_author_runtime_identity(identity: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ProposalDraft.model_validate_json(
+            json.dumps(
+                {
+                    **identity,
+                    "action": {"kind": "no_op", "nextWakeup": "event_change"},
+                }
+            ),
+            strict=True,
+        )
+
+
+def test_proposal_round_trip_is_strict_and_requires_world_identity() -> None:
+    proposal = build_action_proposal(
+        world_ref=WORLD_REF,
+        spec=_anon_spec(),
+        view=_view(affordances=()),
+        proposal_id="same-id",
+        draft=ProposalDraft(action=NoOpAction(next_wakeup="event_change")),
+    )
+    wire = proposal.model_dump_json(by_alias=True)
+    assert ActionProposal.model_validate_json(wire, strict=True) == proposal
+    with pytest.raises(ValidationError, match="frozen"):
+        proposal.world_ref = WorldRef(project_id="p", world_id="w")
+    data = proposal.model_dump(by_alias=False)
+    del data["world_ref"]
+    with pytest.raises(ValidationError, match="Field required"):
+        ActionProposal.model_validate(data, strict=True)
 
 
 def _catalog() -> Catalog:
@@ -504,12 +593,13 @@ def _anon_spec() -> CompiledPersonActSpec:
     return compile_manifest(load_manifest(FIXTURE_PATH), _catalog())[0]
 
 
-def _frame(
+def _view(
     *,
     affordances: tuple[Affordance, ...],
     visible_evidence_ids: tuple[str, ...] = ("queue-ready",),
-) -> PerceptionFrame:
-    return PerceptionFrame(
+) -> AgentView:
+    return AgentView(
+        world_ref=WORLD_REF,
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,

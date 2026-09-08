@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from json import dumps
 from threading import Lock
 from time import perf_counter
 from typing import Annotated, Literal, Protocol
@@ -15,6 +16,8 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import Field, StringConstraints, ValidationError
 
 from agent_runtime.model import StrictModel
+from agent_runtime.trace import record_trace, trace_debug_enabled
+from agent_runtime.world.contracts import WorldRef
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -23,6 +26,7 @@ Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 class ModelRequest(StrictModel):
     """One provider-independent structured generation request."""
 
+    world_ref: WorldRef
     call_id: NonEmptyText
     agent_kind: Literal["character", "director", "broadcast"]
     agent_id: NonEmptyText
@@ -45,8 +49,9 @@ class ModelRequest(StrictModel):
 
 
 class ModelCallTrace(StrictModel):
-    """Non-secret provenance for one physical model call."""
+    """Non-secret generation provenance, aggregating its transport attempts."""
 
+    world_ref: WorldRef
     call_id: NonEmptyText
     call_kind: NonEmptyText
     model_id: NonEmptyText
@@ -127,6 +132,8 @@ class LangChainModelGateway:
             TimeoutError,
             ConnectionError,
         ),
+        rejected_error_types: tuple[type[Exception], ...] = (),
+        structured_output_method: Literal["function_calling"] | None = None,
     ) -> None:
         if not model_id.strip():
             raise ValueError("model_id cannot be empty")
@@ -136,6 +143,8 @@ class LangChainModelGateway:
         self._model_id = model_id
         self._max_transport_attempts = max_transport_attempts
         self._retryable_error_types = retryable_error_types
+        self._rejected_error_types = rejected_error_types
+        self._structured_output_method = structured_output_method
 
     def generate[ResponseT: StrictModel](
         self,
@@ -152,12 +161,53 @@ class LangChainModelGateway:
             HumanMessage(content=request.input_json),
         ]
         started = perf_counter()
+        schema = response_type.model_json_schema(by_alias=True)
         for attempt in range(1, self._max_transport_attempts + 1):
+            _record_attempt(request, "start", attempt)
             try:
-                runnable = self._model.with_structured_output(response_type)
+                if self._structured_output_method is None:
+                    runnable = self._model.with_structured_output(schema)
+                else:
+                    runnable = self._model.with_structured_output(
+                        schema, method=self._structured_output_method
+                    )
                 raw_result: object = runnable.invoke(messages, config=config)
-                structured = response_type.model_validate(raw_result, strict=True)
+                try:
+                    payload = dumps(raw_result, allow_nan=False)
+                except (TypeError, ValueError) as error:
+                    diagnostic = f"structured output is not JSON data ({type(error).__name__})"
+                    raise ModelOutputInvalidError(
+                        diagnostic,
+                        _trace(
+                            request,
+                            status="invalid_output",
+                            output_hash=None,
+                            diagnostic=diagnostic,
+                            latency_ms=_elapsed_ms(started),
+                            transport_attempts=attempt,
+                        ),
+                    ) from error
+                # JSON mode accepts arrays as tuples without weakening strict domain types.
+                structured = response_type.model_validate_json(payload, strict=True)
             except Exception as error:
+                _record_attempt(request, "error", attempt, error=error)
+                if isinstance(error, ModelOutputInvalidError):
+                    raise
+                if isinstance(error, (OutputParserException, ValidationError)):
+                    diagnostic = _validation_diagnostic(error)
+                    trace = _trace(
+                        request,
+                        status="invalid_output",
+                        output_hash=None,
+                        diagnostic=diagnostic,
+                        latency_ms=_elapsed_ms(started),
+                        transport_attempts=attempt,
+                    )
+                    raise ModelOutputInvalidError(diagnostic, trace) from error
+                if isinstance(error, NotImplementedError):
+                    raise ModelRequestRejectedError(
+                        "configured ChatModel does not support structured output"
+                    ) from error
                 if isinstance(error, self._retryable_error_types):
                     if attempt < self._max_transport_attempts:
                         continue
@@ -175,24 +225,15 @@ class LangChainModelGateway:
                             transport_attempts=attempt,
                         ),
                     ) from error
-                if isinstance(error, (OutputParserException, ValidationError)):
-                    diagnostic = _validation_diagnostic(error)
-                    trace = _trace(
-                        request,
-                        status="invalid_output",
-                        output_hash=None,
-                        diagnostic=diagnostic,
-                        latency_ms=_elapsed_ms(started),
-                        transport_attempts=attempt,
-                    )
-                    raise ModelOutputInvalidError(diagnostic, trace) from error
-                if isinstance(error, NotImplementedError):
+                if isinstance(error, self._rejected_error_types):
+                    # SDK error bodies may echo secrets or submitted prompts.
                     raise ModelRequestRejectedError(
-                        "configured ChatModel does not support structured output"
-                    ) from error
+                        f"model provider rejected request ({type(error).__name__})"
+                    ) from None
                 raise
 
             output_json = structured.model_dump_json(by_alias=True, exclude_none=False)
+            _record_attempt(request, "end", attempt, structured=structured)
             return ModelGeneration(
                 structured=structured,
                 trace=_trace(
@@ -234,9 +275,11 @@ class FixtureModelGateway:
             self._index += 1
             self.requests.append(request)
         started = perf_counter()
+        _record_attempt(request, "start", 1)
         try:
             structured = response_type.model_validate_json(response, strict=True)
         except ValidationError as error:
+            _record_attempt(request, "error", 1, error=error)
             diagnostic = _validation_diagnostic(error)
             trace = _trace(
                 request,
@@ -248,6 +291,7 @@ class FixtureModelGateway:
             )
             raise ModelOutputInvalidError(diagnostic, trace) from error
         output_json = structured.model_dump_json(by_alias=True, exclude_none=False)
+        _record_attempt(request, "end", 1, structured=structured)
         return ModelGeneration(
             structured=structured,
             trace=_trace(
@@ -258,6 +302,46 @@ class FixtureModelGateway:
                 transport_attempts=1,
             ),
         )
+
+
+def _record_attempt(
+    request: ModelRequest,
+    event: Literal["start", "end", "error"],
+    attempt: int,
+    *,
+    error: Exception | None = None,
+    structured: StrictModel | None = None,
+) -> None:
+    data: dict[str, object] = {
+        "callId": request.call_id,
+        "callKind": request.call_kind,
+        "modelId": request.model_id,
+        "promptId": request.prompt_id,
+        "promptVersion": request.prompt_version,
+        "promptDigest": request.prompt_digest,
+        "skillId": request.skill_id,
+        "skillVersion": request.skill_version,
+        "skillContentHash": request.skill_content_hash,
+        "inputHash": request.input_hash,
+        "attempt": attempt,
+    }
+    content: object | None = None
+    if error is not None:
+        data["errorType"] = type(error).__name__
+    if trace_debug_enabled():
+        if event == "start":
+            content = {"systemMessage": _system_message(request), "inputJson": request.input_json}
+        if structured is not None:
+            content = {
+                "validatedStructuredOutput": structured.model_dump(mode="json", by_alias=True)
+            }
+    record_trace(
+        f"model.attempt.{event}",
+        data,
+        content=content,
+        world_ref=request.world_ref,
+        agent_id=request.agent_id,
+    )
 
 
 def _system_message(request: ModelRequest) -> str:
@@ -289,6 +373,7 @@ def _trace(
     diagnostic: str | None = None,
 ) -> ModelCallTrace:
     return ModelCallTrace(
+        world_ref=request.world_ref,
         call_id=request.call_id,
         call_kind=request.call_kind,
         model_id=request.model_id,
@@ -313,18 +398,12 @@ def _elapsed_ms(started: float) -> float:
 
 def _validation_diagnostic(error: OutputParserException | ValidationError) -> str:
     if isinstance(error, ValidationError):
-        fields = tuple(
-            ".".join(str(part) for part in item["loc"]) or "$"
-            for item in error.errors(include_url=False, include_context=False, include_input=False)
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
+        # Locations can contain model-authored field names or private mapping keys.
+        details = ", ".join(
+            f"{index}:{item['type']}" for index, item in enumerate(errors[:6], start=1)
         )
-        kinds = tuple(
-            str(item["type"])
-            for item in error.errors(
-                include_url=False,
-                include_context=False,
-                include_input=False,
-            )
-        )
-        details = ", ".join(f"{field}:{kind}" for field, kind in zip(fields, kinds, strict=True))
+        if len(errors) > 6:
+            details += f", {len(errors) - 6} additional errors"
         return f"structured output failed validation ({details})"
     return f"structured output parser rejected the response ({type(error).__name__})"

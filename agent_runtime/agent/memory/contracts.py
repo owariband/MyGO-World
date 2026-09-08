@@ -10,6 +10,7 @@ from typing import Annotated, Protocol, Self
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from agent_runtime.model import StrictModel
+from agent_runtime.world.contracts import WorldRef
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 NonNegativeScore = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
@@ -23,9 +24,10 @@ class MemoryKind(StrEnum):
 
 
 class MemoryRecord(StrictModel):
-    """One append-only memory value owned by exactly one Agent scope."""
+    """One append-only memory value owned by one World, Agent, and scope."""
 
     id: NonEmptyText
+    world_ref: WorldRef
     agent_id: NonEmptyText
     scope: NonEmptyText
     kind: MemoryKind
@@ -70,6 +72,9 @@ class MemoryTouch(StrictModel):
     """An explicit request to advance one record's access timestamp."""
 
     memory_id: NonEmptyText
+    world_ref: WorldRef
+    agent_id: NonEmptyText
+    scope: NonEmptyText
     accessed_at: datetime
 
     @field_validator("accessed_at")
@@ -88,10 +93,15 @@ class MemoryRetrieval(StrictModel):
 
     @model_validator(mode="after")
     def _match_records_and_touches(self) -> Self:
-        record_ids = tuple(record.id for record in self.records)
-        touch_ids = tuple(touch.memory_id for touch in self.touches)
-        if record_ids != touch_ids:
-            raise ValueError("retrieval touches must match records in result order")
+        record_keys = tuple(
+            (record.world_ref, record.agent_id, record.scope, record.id) for record in self.records
+        )
+        touch_keys = tuple(
+            (touch.world_ref, touch.agent_id, touch.scope, touch.memory_id)
+            for touch in self.touches
+        )
+        if record_keys != touch_keys:
+            raise ValueError("retrieval touches must match record owners and IDs in result order")
         return self
 
 

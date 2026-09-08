@@ -13,14 +13,15 @@ from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import (
     ActionProposal,
     AgentAction,
+    AgentView,
     Identifier,
     InteractAction,
     InteractionTarget,
     NoOpAction,
-    PerceptionFrame,
     ProposalKind,
     RespondAction,
     UtterAction,
+    WorldRef,
 )
 
 
@@ -33,23 +34,29 @@ class ProposalDraft(StrictModel):
 
 def build_action_proposal(
     *,
+    world_ref: WorldRef,
     spec: CompiledPersonActSpec,
-    frame: PerceptionFrame,
+    view: AgentView,
     proposal_id: Identifier,
     draft: ProposalDraft,
 ) -> ActionProposal:
     """Validate one draft and inject the actor and snapshot envelope."""
 
     try:
+        validated_ref = WorldRef.model_validate(world_ref, strict=True)
         validated_spec = CompiledPersonActSpec.model_validate(spec, strict=True)
-        validated_frame = PerceptionFrame.model_validate(frame, strict=True)
+        validated_view = AgentView.model_validate(view, strict=True)
         validated_draft = ProposalDraft.model_validate(draft, strict=True)
     except ValidationError as error:
         raise ProposalValidationError("proposal inputs failed strict validation") from error
 
-    if validated_frame.agent_id != validated_spec.agent_id:
+    if validated_ref.project_id != validated_spec.project_id:
+        raise ProposalValidationError("WorldRef project does not match compiled spec")
+    if validated_view.world_ref != validated_ref:
+        raise ProposalValidationError("view belongs to a different WorldRef")
+    if validated_view.agent_id != validated_spec.agent_id:
         raise ProposalValidationError(
-            f'frame belongs to agent "{validated_frame.agent_id}", not "{validated_spec.agent_id}"'
+            f'view belongs to agent "{validated_view.agent_id}", not "{validated_spec.agent_id}"'
         )
 
     action_kind = ProposalKind(validated_draft.action.kind)
@@ -62,20 +69,21 @@ def build_action_proposal(
             raise ProposalValidationError("no_op proposal cannot carry evidence")
     elif not any(
         affordance.kind is action_kind and affordance.target == _target(validated_draft.action)
-        for affordance in validated_frame.affordances
+        for affordance in validated_view.affordances
     ):
         raise ProposalValidationError(
-            f'proposal kind "{action_kind.value}" and target are not afforded by current frame'
+            f'proposal kind "{action_kind.value}" and target are not afforded by current view'
         )
 
-    if not set(validated_draft.evidence_ids).issubset(validated_frame.visible_evidence_ids):
-        raise ProposalValidationError("proposal references evidence outside the current frame")
+    if not set(validated_draft.evidence_ids).issubset(validated_view.visible_evidence_ids):
+        raise ProposalValidationError("proposal references evidence outside the current view")
 
     return ActionProposal(
+        world_ref=validated_ref,
         proposal_id=proposal_id,
         agent_id=validated_spec.agent_id,
-        event_session_id=validated_frame.event_session_id,
-        based_on_world_version=validated_frame.based_on_world_version,
+        event_session_id=validated_view.event_session_id,
+        based_on_world_version=validated_view.based_on_world_version,
         action=validated_draft.action,
         evidence_ids=validated_draft.evidence_ids,
     )

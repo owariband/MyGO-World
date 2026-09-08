@@ -3,12 +3,12 @@
 from agent_runtime.agent.personact.agent import (
     ActionPlanningInput,
     CognitionStrategy,
-    DailyPlanDraft,
-    DailyPlanningInput,
     DecisionRequest,
     DecisionTrace,
     Observation,
     PersonActAgent,
+    PlanDraft,
+    PlanningInput,
     RetrievedContext,
 )
 from agent_runtime.agent.personact.compiler import compile_manifest
@@ -18,12 +18,12 @@ from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_p
 __all__ = [
     "ActionPlanningInput",
     "CognitionStrategy",
-    "DailyPlanDraft",
-    "DailyPlanningInput",
     "DecisionRequest",
     "DecisionTrace",
     "Observation",
     "PersonActAgent",
+    "PlanDraft",
+    "PlanningInput",
     "ProposalDraft",
     "RetrievedContext",
     "build_action_proposal",

@@ -18,6 +18,13 @@ EventRevision = Annotated[int, Field(ge=1)]
 Salience = Annotated[float, Field(ge=0.0, le=1.0)]
 
 
+class WorldRef(StrictModel):
+    """Ownership of one story world; stable across saves, not an authorization token."""
+
+    project_id: Identifier
+    world_id: Identifier
+
+
 class ProposalKind(StrEnum):
     ACT = "act"
     INTERACT = "interact"
@@ -114,9 +121,10 @@ class PerceptCandidate(StrictModel):
         return self
 
 
-class PerceptionFrame(StrictModel):
+class AgentView(StrictModel):
     """The complete world-facing input visible to one actor for one decision."""
 
+    world_ref: WorldRef
     agent_id: Identifier
     event_session_id: Identifier
     based_on_world_version: WorldVersion
@@ -171,8 +179,9 @@ AgentAction = Annotated[
 
 
 class ActionProposal(StrictModel):
-    """A candidate action; only World Committer can turn it into fact."""
+    """A candidate action; only WorldUpdater can turn it into fact."""
 
+    world_ref: WorldRef
     proposal_id: Identifier
     agent_id: Identifier
     event_session_id: Identifier

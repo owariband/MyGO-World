@@ -1,0 +1,1 @@
+"""Business-independent data structures."""

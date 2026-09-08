@@ -2,6 +2,8 @@ node_modules/
 .DS_Store
 .motor-code/
 .runtime/
+.env
+.env.*
 .venv/
 __pycache__/
 .pytest_cache/

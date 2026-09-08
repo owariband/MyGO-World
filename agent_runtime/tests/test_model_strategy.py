@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -11,12 +13,15 @@ from typing import Any, cast, override
 import pytest
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.runnables import Runnable, RunnableLambda
-from pydantic import ValidationError
+from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from pydantic import Field, ValidationError
 
-from agent_runtime.agent.memory import MemoryStream
+from agent_runtime.agent.memory import MemoryKind, MemoryRecord, MemoryStream
 from agent_runtime.agent.personact.agent import DecisionRequest, PersonActAgent
 from agent_runtime.agent.personact.compiler import (
     Catalog,
@@ -26,32 +31,38 @@ from agent_runtime.agent.personact.compiler import (
     ToolMode,
     compile_manifest,
 )
-from agent_runtime.agent.personact.errors import PlannerOutputError
+from agent_runtime.agent.personact.errors import DecisionInputError, PlannerOutputError
 from agent_runtime.agent.personact.loop import (
     ActionPlanningInput,
-    DailyPlanDraft,
-    DailyPlanningInput,
+    Observation,
+    PlanDraft,
+    PlanningInput,
+    RetrievedContext,
 )
 from agent_runtime.agent.personact.manifest import load_manifest
 from agent_runtime.agent.personact.model_strategy import ModelCognitionStrategy
-from agent_runtime.agent.personact.state import CognitiveConfig, NewDayStatus, PersonaState
+from agent_runtime.agent.personact.proposal import ProposalDraft
+from agent_runtime.agent.personact.state import CognitiveConfig, PersonaState, PlanItem
 from agent_runtime.agent.skill import RuntimeSkill, RuntimeSkillCatalog, load_runtime_skill
 from agent_runtime.model import StrictModel
 from agent_runtime.model_gateway import (
     FixtureModelGateway,
     LangChainModelGateway,
+    ModelOutputInvalidError,
     ModelRequest,
+    ModelRequestRejectedError,
     ModelTransportError,
 )
 from agent_runtime.world.contracts import (
     Affordance,
+    AgentView,
     AttentionTier,
     CharacterTarget,
     InteractAction,
     PerceptCandidate,
     PerceptionChannel,
-    PerceptionFrame,
     ProposalKind,
+    WorldRef,
 )
 
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
@@ -74,6 +85,18 @@ class _Answer(StrictModel):
     value: str
 
 
+class _NestedTuple(StrictModel):
+    values: tuple[int, ...]
+
+
+class _TupleAnswer(StrictModel):
+    groups: tuple[_NestedTuple, ...]
+
+
+class _MappingAnswer(StrictModel):
+    values: dict[str, int]
+
+
 class FixedEmbeddingProvider:
     def embed(self, text: str) -> tuple[float, ...]:
         del text
@@ -81,9 +104,14 @@ class FixedEmbeddingProvider:
 
 
 class FakeStructuredChatModel(BaseChatModel):
+    """Fake only the provider transport; use LangChain's real structured parser."""
+
     responses: tuple[object, ...]
     index: int = 0
     structured_calls: int = 0
+    schemas: list[dict[str, Any] | type] = Field(
+        default_factory=lambda: list[dict[str, Any] | type]()
+    )
 
     @property
     @override
@@ -98,29 +126,42 @@ class FakeStructuredChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: object,
     ) -> ChatResult:
-        del messages, stop, run_manager, kwargs
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="unused"))])
+        del messages, stop, run_manager
+        self.structured_calls += 1
+        response = self.responses[self.index]
+        self.index += 1
+        if isinstance(response, BaseException):
+            raise response
+        if isinstance(response, AIMessage):
+            message = response
+        else:
+            arguments = response if isinstance(response, str) else json.dumps(response)
+            message = AIMessage(
+                content="",
+                additional_kwargs={
+                    "tool_calls": [
+                        {
+                            "id": "tool-result-1",
+                            "type": "function",
+                            "function": {"name": kwargs["tool_name"], "arguments": arguments},
+                        }
+                    ]
+                },
+            )
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
     @override
-    def with_structured_output(
+    def bind_tools(
         self,
-        schema: dict[str, Any] | type,
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
         *,
-        include_raw: bool = False,
+        tool_choice: str | None = None,
         **kwargs: object,
-    ) -> Runnable[object, dict[str, Any] | StrictModel]:
-        del include_raw, kwargs
-        response_type = cast(type[StrictModel], schema)
-
-        def invoke(_input: object) -> StrictModel:
-            self.structured_calls += 1
-            response = self.responses[self.index]
-            self.index += 1
-            if isinstance(response, BaseException):
-                raise response
-            return response_type.model_validate(response, strict=True)
-
-        return RunnableLambda(invoke)
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        del tool_choice, kwargs
+        self.schemas.append(cast(dict[str, Any] | type, tools[0]))
+        tool_name = convert_to_openai_tool(tools[0])["function"]["name"]
+        return self.bind(tool_name=tool_name)
 
 
 def test_runtime_skill_is_strict_versioned_and_hashed(tmp_path: Path) -> None:
@@ -185,6 +226,186 @@ def test_langchain_gateway_traces_final_transport_failure() -> None:
     assert model.structured_calls == 2
 
 
+@pytest.mark.parametrize(
+    "payload, expected",
+    [
+        ({"groups": list[dict[str, object]]()}, ()),
+        ({"groups": [{"values": list[int]()}]}, ((),)),
+        ({"groups": [{"values": [1, 2]}, {"values": [3]}]}, ((1, 2), (3,))),
+    ],
+)
+def test_gateway_strict_json_accepts_nested_tuples_through_standard_parser(
+    payload: dict[str, object], expected: tuple[tuple[int, ...], ...]
+) -> None:
+    model = FakeStructuredChatModel(responses=(payload,))
+    generation = LangChainModelGateway(model, model_id="fake-model").generate(
+        _model_request(), _TupleAnswer
+    )
+
+    assert tuple(group.values for group in generation.structured.groups) == expected
+    assert isinstance(model.schemas[0], dict)
+    assert FakeStructuredChatModel.with_structured_output is BaseChatModel.with_structured_output
+    assert generation.trace.world_ref == _world_ref()
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        generation.structured.groups = ()
+
+
+def test_standard_pydantic_parser_reproduces_the_old_tuple_failure() -> None:
+    model = FakeStructuredChatModel(responses=({"groups": [{"values": [1]}]},))
+    with pytest.raises(ValidationError, match="tuple_type"):
+        model.with_structured_output(_TupleAnswer).invoke("visible context")
+
+
+def test_gateway_parses_real_proposal_union_and_evidence_array() -> None:
+    model = FakeStructuredChatModel(
+        responses=(
+            {
+                "action": {
+                    "kind": "interact",
+                    "target": {"kind": "character", "id": "soyo"},
+                    "description": "offer the menu",
+                },
+                "evidenceIds": ["soyo-visible"],
+            },
+        )
+    )
+    result = LangChainModelGateway(model, model_id="fake-model").generate(
+        _model_request(), ProposalDraft
+    )
+    assert isinstance(result.structured.action, InteractAction)
+    assert result.structured.evidence_ids == ("soyo-visible",)
+    assert result.trace.status == "succeeded"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"groups": [], "extra": "secret-output"},
+        {"groups": [{"values": ["1"]}]},
+        {"groups": [{"values": [True]}]},
+        {"groups": "secret-output"},
+    ],
+)
+def test_gateway_keeps_strict_types_and_unknown_field_rejection(
+    payload: dict[str, object],
+) -> None:
+    model = FakeStructuredChatModel(responses=(payload,))
+    with pytest.raises(ModelOutputInvalidError) as caught:
+        LangChainModelGateway(model, model_id="fake-model").generate(_model_request(), _TupleAnswer)
+    assert model.structured_calls == 1
+    assert caught.value.trace.status == "invalid_output"
+    assert caught.value.trace.world_ref == _world_ref()
+    assert "secret-output" not in repr(caught.value.trace)
+
+
+@pytest.mark.parametrize(
+    "response_type, payload, error_kind",
+    [
+        (_Answer, {"value": "ok", "private-story-secret": True}, "extra_forbidden"),
+        (
+            _MappingAnswer,
+            {"values": {"private-story-secret": "private-story-value"}},
+            "int_type",
+        ),
+    ],
+)
+def test_validation_diagnostics_never_expose_model_authored_error_locations(
+    response_type: type[StrictModel], payload: dict[str, object], error_kind: str
+) -> None:
+    gateway = LangChainModelGateway(
+        FakeStructuredChatModel(responses=(payload,)), model_id="fake-model"
+    )
+    with pytest.raises(ModelOutputInvalidError) as caught:
+        gateway.generate(_model_request(), response_type)
+    assert error_kind in caught.value.diagnostic
+    assert "private-story" not in caught.value.diagnostic
+    assert "private-story" not in caught.value.trace.model_dump_json()
+
+
+def test_validation_diagnostics_have_a_bounded_number_of_error_details() -> None:
+    gateway = LangChainModelGateway(
+        FakeStructuredChatModel(
+            responses=({"values": {f"private-story-{index}": "bad" for index in range(20)}},)
+        ),
+        model_id="fake-model",
+    )
+    with pytest.raises(ModelOutputInvalidError) as caught:
+        gateway.generate(_model_request(), _MappingAnswer)
+    assert caught.value.diagnostic.count("int_type") == 6
+    assert "14 additional errors" in caught.value.diagnostic
+    assert "private-story" not in caught.value.trace.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '{"value":"secret-output",',
+        AIMessage(content="no structured result"),
+        AIMessage(content="", tool_calls=[{"name": "wrong_tool", "args": {}, "id": "x"}]),
+        {"value": float("nan")},
+        {"value": float("inf")},
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "_Answer", "args": {"value": object()}, "id": "x"}],
+        ),
+    ],
+)
+def test_gateway_rejects_bad_missing_or_non_json_results_without_transport_retry(
+    response: object,
+) -> None:
+    model = FakeStructuredChatModel(responses=(response,))
+    with pytest.raises(ModelOutputInvalidError) as caught:
+        LangChainModelGateway(model, model_id="fake-model").generate(_model_request(), _Answer)
+    assert model.structured_calls == 1
+    assert caught.value.trace.status == "invalid_output"
+    assert caught.value.trace.world_ref == _world_ref()
+    assert "secret-output" not in repr(caught.value.trace)
+
+
+def test_gateway_does_not_treat_sdk_configuration_errors_as_model_output() -> None:
+    model = FakeStructuredChatModel(responses=(ValueError("invalid SDK configuration"),))
+    with pytest.raises(ValueError, match="SDK configuration"):
+        LangChainModelGateway(model, model_id="fake-model").generate(_model_request(), _Answer)
+    assert model.structured_calls == 1
+
+
+def test_gateway_reports_unsupported_structured_output_as_request_rejection() -> None:
+    model = FakeStructuredChatModel(responses=(NotImplementedError(),))
+    with pytest.raises(ModelRequestRejectedError, match="does not support structured output"):
+        LangChainModelGateway(model, model_id="fake-model").generate(_model_request(), _Answer)
+    assert model.structured_calls == 1
+
+
+@pytest.mark.parametrize("response", [{"groups": [1]}, {"groups": float("nan")}])
+def test_output_failure_cannot_be_reclassified_by_broad_transport_configuration(
+    response: dict[str, object],
+) -> None:
+    model = FakeStructuredChatModel(responses=(response,))
+    with pytest.raises(ModelOutputInvalidError):
+        LangChainModelGateway(
+            model, model_id="fake-model", retryable_error_types=(Exception,)
+        ).generate(_model_request(), _TupleAnswer)
+    assert model.structured_calls == 1
+
+
+@pytest.mark.parametrize("identity_key", ["worldRef", "agentId", "eventSessionId"])
+def test_model_proposal_cannot_author_runtime_identity(identity_key: str) -> None:
+    model = FakeStructuredChatModel(
+        responses=(
+            {
+                "action": {"kind": "act", "description": "listen"},
+                "evidenceIds": [],
+                identity_key: "forged",
+            },
+        )
+    )
+    with pytest.raises(ModelOutputInvalidError):
+        LangChainModelGateway(model, model_id="fake-model").generate(
+            _model_request(), ProposalDraft
+        )
+    assert model.structured_calls == 1
+
+
 def test_model_strategy_retains_final_transport_failure_trace() -> None:
     model = FakeStructuredChatModel(responses=(TimeoutError(),))
     strategy = ModelCognitionStrategy(
@@ -199,9 +420,10 @@ def test_model_strategy_retains_final_transport_failure_trace() -> None:
     )
 
     with pytest.raises(ModelTransportError):
-        strategy.plan_day(_daily_planning_input())
+        strategy.plan(_queue_planning_input())
 
     assert tuple(trace.status for trace in strategy.traces) == ("transport_failed",)
+    assert strategy.traces[0].world_ref == _world_ref()
 
 
 def test_model_strategy_repairs_semantically_invalid_action_once(tmp_path: Path) -> None:
@@ -240,21 +462,29 @@ def test_model_strategy_repairs_semantically_invalid_action_once(tmp_path: Path)
         "succeeded",
     )
     assert all(trace.skill_content_hash == skill.content_hash for trace in strategy.traces)
+    assert all(trace.world_ref == _world_ref() for trace in strategy.traces)
+    assert all(request.world_ref == _world_ref() for request in gateway.requests)
     assert all("talk" not in repr(trace) for trace in strategy.traces)
 
 
-def test_personact_loop_uses_model_strategy_without_moving_world() -> None:
-    gateway = FixtureModelGateway(
+@pytest.mark.parametrize("use_langchain", [False, True], ids=["fixture", "standard-parser"])
+def test_personact_loop_uses_model_strategy_without_moving_world(use_langchain: bool) -> None:
+    responses = (
+        '{"score":3.0}',
+        '{"items":[{"planId":"talk","description":"talk naturally"}]}',
         (
-            '{"score":3.0}',
-            '{"intentions":["talk naturally"],"schedule":[]}',
-            (
-                '{"action":{"kind":"interact","target":'
-                '{"kind":"character","id":"soyo"},'
-                '"description":"offer the menu"},'
-                '"evidenceIds":["soyo-visible"]}'
-            ),
+            '{"action":{"kind":"interact","target":'
+            '{"kind":"character","id":"soyo"},'
+            '"description":"offer the menu"},'
+            '"evidenceIds":["soyo-visible"]}'
+        ),
+    )
+    gateway = (
+        LangChainModelGateway(
+            FakeStructuredChatModel(responses=responses), model_id="fixture-model"
         )
+        if use_langchain
+        else FixtureModelGateway(responses)
     )
     strategy = ModelCognitionStrategy(
         gateway=gateway,
@@ -266,11 +496,13 @@ def test_personact_loop_uses_model_strategy_without_moving_world() -> None:
     agent = PersonActAgent(
         spec=spec,
         state=_state(),
-        memory=MemoryStream(agent_id="anon", scope=spec.memory_scope),
+        memory=MemoryStream(world_ref=_world_ref(), agent_id="anon", scope=spec.memory_scope),
         strategy=strategy,
         embedding_provider=FixedEmbeddingProvider(),
+        world_ref=_world_ref(),
     )
-    frame = PerceptionFrame(
+    view = AgentView(
+        world_ref=_world_ref(),
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
@@ -286,18 +518,33 @@ def test_personact_loop_uses_model_strategy_without_moving_world() -> None:
         ),
     )
 
-    proposal = agent.decide(DecisionRequest(proposal_id="proposal-1", frame=frame))
+    proposal = agent.decide(DecisionRequest(proposal_id="proposal-1", view=view))
 
     assert proposal.agent_id == "anon"
     assert proposal.event_session_id == "cafe"
+    assert proposal.world_ref == _world_ref()
     assert isinstance(proposal.action, InteractAction)
-    assert tuple(request.call_kind for request in gateway.requests) == (
+    assert tuple(trace.call_kind for trace in strategy.traces) == (
         "score_poignancy",
-        "plan_day",
+        "plan",
         "plan_action",
     )
     assert agent.last_trace is not None
     assert agent.last_trace.stages == ("prepare", "perceive", "retrieve", "plan", "propose")
+    assert agent.last_trace.world_ref == _world_ref()
+    assert agent.state.plan_queue == (PlanItem(plan_id="talk", description="talk naturally"),)
+    assert agent.state.active_plan_id == "talk"
+    assert agent.state.world_ref == agent.memory.world_ref == _world_ref()
+    assert all(record.world_ref == _world_ref() for record in agent.memory.records)
+    if isinstance(gateway, FixtureModelGateway):
+        assert all(request.world_ref == _world_ref() for request in gateway.requests)
+    assert all(trace.world_ref == _world_ref() for trace in strategy.traces)
+    assert all(trace.status == "succeeded" for trace in strategy.traces)
+
+    state_before_replay = agent.state
+    assert agent.decide(DecisionRequest(proposal_id="proposal-1", view=view)) == proposal
+    assert agent.state == state_before_replay
+    assert len(strategy.traces) == 3
 
 
 def test_model_strategy_repairs_schema_failure_and_then_fails(tmp_path: Path) -> None:
@@ -311,19 +558,218 @@ def test_model_strategy_repairs_schema_failure_and_then_fails(tmp_path: Path) ->
     )
 
     with pytest.raises(PlannerOutputError, match="after one repair"):
-        strategy.plan_day(_daily_planning_input())
+        strategy.plan(_queue_planning_input())
 
     assert tuple(request.call_kind for request in gateway.requests) == (
-        "plan_day",
-        "plan_day_repair",
+        "plan",
+        "plan_repair",
     )
     assert tuple(trace.status for trace in strategy.traces) == (
         "invalid_output",
         "invalid_output",
     )
     assert gateway.requests[1].repair_diagnostic is not None
-    assert "intentions:missing" in gateway.requests[1].repair_diagnostic
-    assert "schedule:missing" in gateway.requests[1].repair_diagnostic
+    assert "1:missing" in gateway.requests[1].repair_diagnostic
+    assert all(request.world_ref == _world_ref() for request in gateway.requests)
+    assert all(trace.world_ref == _world_ref() for trace in strategy.traces)
+
+
+def test_model_strategy_shares_one_repair_budget_for_schema_and_semantics() -> None:
+    model = FakeStructuredChatModel(
+        responses=(
+            {},
+            {
+                "action": {
+                    "kind": "interact",
+                    "target": {"kind": "character", "id": "unknown"},
+                    "description": "talk",
+                },
+                "evidenceIds": [],
+            },
+        )
+    )
+    strategy = ModelCognitionStrategy(
+        gateway=LangChainModelGateway(model, model_id="fake-model"),
+        skill=_bound_skill(),
+        model_id="fake-model",
+        call_id_generator=SequentialIdGenerator(),
+    )
+    with pytest.raises(PlannerOutputError, match="after one repair"):
+        strategy.plan_action(_planning_input())
+    assert model.structured_calls == 2
+    assert tuple(trace.status for trace in strategy.traces) == (
+        "invalid_output",
+        "semantic_rejected",
+    )
+    assert tuple(trace.call_kind for trace in strategy.traces) == (
+        "plan_action",
+        "plan_action_repair",
+    )
+    assert all(trace.world_ref == _world_ref() for trace in strategy.traces)
+
+
+def test_model_strategy_repairs_duplicate_plan_ids() -> None:
+    gateway = FixtureModelGateway(
+        (
+            '{"items":[{"planId":"a","description":"talk"},{"planId":"a","description":"listen"}]}',
+            '{"items":[{"planId":"a","description":"talk"}]}',
+        )
+    )
+    strategy = ModelCognitionStrategy(
+        gateway=gateway,
+        skill=_bound_skill(),
+        model_id="fixture-model",
+        call_id_generator=SequentialIdGenerator(),
+    )
+    assert strategy.plan(_queue_planning_input()).items == (
+        PlanItem(plan_id="a", description="talk"),
+    )
+    assert tuple(trace.status for trace in strategy.traces) == ("invalid_output", "succeeded")
+
+
+def test_repair_diagnostics_redact_private_keys_and_keep_one_repair_budget() -> None:
+    invalid = '{"items":[],"private-story-secret":"private-story-value"}'
+    gateway = FixtureModelGateway((invalid, invalid))
+    strategy = ModelCognitionStrategy(
+        gateway=gateway,
+        skill=_bound_skill(),
+        model_id="fixture-model",
+        call_id_generator=SequentialIdGenerator(),
+    )
+    with pytest.raises(PlannerOutputError, match="after one repair") as caught:
+        strategy.plan(_queue_planning_input())
+    assert len(gateway.requests) == 2
+    assert gateway.requests[1].repair_diagnostic is not None
+    assert "extra_forbidden" in gateway.requests[1].repair_diagnostic
+    assert "private-story" not in gateway.requests[1].repair_diagnostic
+    assert "private-story" not in str(caught.value)
+    assert all("private-story" not in trace.model_dump_json() for trace in strategy.traces)
+    assert tuple(trace.status for trace in strategy.traces) == ("invalid_output", "invalid_output")
+
+
+def test_shared_strategy_preserves_each_world_without_mutable_current_world() -> None:
+    gateway = FixtureModelGateway(('{"score":1.0}', '{"score":2.0}'))
+    strategy = ModelCognitionStrategy(
+        gateway=gateway,
+        skill=_bound_skill(),
+        model_id="fixture-model",
+        call_id_generator=SequentialIdGenerator(),
+    )
+    other_world = WorldRef(project_id=_world_ref().project_id, world_id="save-2")
+    strategy.score_poignancy(_spec(), _poignancy_candidate(), world_ref=_world_ref())
+    strategy.score_poignancy(_spec(), _poignancy_candidate(), world_ref=other_world)
+    assert tuple(request.world_ref for request in gateway.requests) == (_world_ref(), other_world)
+    assert tuple(trace.world_ref for trace in strategy.traces) == (_world_ref(), other_world)
+
+
+@pytest.mark.parametrize("kind", ["score", "plan", "action"])
+def test_strategy_rejects_wrong_ownership_before_call_or_trace(kind: str) -> None:
+    gateway = FixtureModelGateway(("{}",))
+    ids = SequentialIdGenerator()
+    strategy = ModelCognitionStrategy(
+        gateway=gateway,
+        skill=_bound_skill(),
+        model_id="fixture-model",
+        call_id_generator=ids,
+    )
+    other_world = WorldRef(project_id=_world_ref().project_id, world_id="save-2")
+    with pytest.raises(DecisionInputError):
+        if kind == "score":
+            strategy.score_poignancy(
+                _spec(),
+                _poignancy_candidate(),
+                world_ref=WorldRef(project_id="other-project", world_id="save-1"),
+            )
+        elif kind == "plan":
+            planning_input = _queue_planning_input()
+            strategy.plan(
+                PlanningInput.model_validate(
+                    {
+                        **planning_input.model_dump(),
+                        "memory": MemoryStream(
+                            world_ref=other_world, agent_id="anon", scope=_spec().memory_scope
+                        ),
+                    },
+                    strict=True,
+                )
+            )
+        else:
+            action_input = _planning_input()
+            strategy.plan_action(
+                ActionPlanningInput.model_validate(
+                    {
+                        **action_input.model_dump(),
+                        "view": AgentView.model_validate(
+                            {
+                                **action_input.view.model_dump(by_alias=False),
+                                "world_ref": other_world,
+                            },
+                            strict=True,
+                        ),
+                    },
+                    strict=True,
+                )
+            )
+    assert gateway.requests == []
+    assert ids.values == []
+    assert strategy.traces == ()
+
+
+@pytest.mark.parametrize("kind", ["plan", "action"])
+@pytest.mark.parametrize("foreign_owner", ["world", "agent", "scope"])
+def test_strategy_rejects_foreign_retrieved_memory_before_model_call(
+    kind: str, foreign_owner: str
+) -> None:
+    gateway = FixtureModelGateway(("{}",))
+    ids = SequentialIdGenerator()
+    strategy = ModelCognitionStrategy(
+        gateway=gateway,
+        skill=_bound_skill(),
+        model_id="fixture-model",
+        call_id_generator=ids,
+    )
+    record = MemoryRecord(
+        id="memory-1",
+        world_ref=(
+            WorldRef(project_id=_world_ref().project_id, world_id="save-2")
+            if foreign_owner == "world"
+            else _world_ref()
+        ),
+        agent_id="soyo" if foreign_owner == "agent" else "anon",
+        scope="other-scope" if foreign_owner == "scope" else _spec().memory_scope,
+        kind=MemoryKind.EVENT,
+        created_at=datetime(2026, 9, 1, 9, tzinfo=UTC),
+        last_accessed_at=datetime(2026, 9, 1, 9, tzinfo=UTC),
+        subject="soyo",
+        predicate="speaks",
+        content="private memory",
+        poignancy=1.0,
+        source="world-entry",
+        novelty_key="memory-1",
+    )
+    retrieved = RetrievedContext(
+        observation=Observation(
+            candidate=_poignancy_candidate(), novelty_key="candidate-1", is_novel=True
+        ),
+        related=(record,),
+        ranked=(record,),
+    )
+    with pytest.raises(DecisionInputError, match="retrieved memory"):
+        if kind == "plan":
+            strategy.plan(
+                PlanningInput.model_validate(
+                    {**_queue_planning_input().model_dump(), "retrieved": (retrieved,)}, strict=True
+                )
+            )
+        else:
+            strategy.plan_action(
+                ActionPlanningInput.model_validate(
+                    {**_planning_input().model_dump(), "retrieved": (retrieved,)}, strict=True
+                )
+            )
+    assert gateway.requests == []
+    assert ids.values == []
+    assert strategy.traces == ()
 
 
 def test_model_strategy_trace_retention_is_bounded() -> None:
@@ -343,9 +789,9 @@ def test_model_strategy_trace_retention_is_bounded() -> None:
     )
     spec = _spec()
     percept = _poignancy_candidate()
-    strategy.score_poignancy(spec, percept)
-    strategy.score_poignancy(spec, percept)
-    strategy.score_poignancy(spec, percept)
+    strategy.score_poignancy(spec, percept, world_ref=_world_ref())
+    strategy.score_poignancy(spec, percept, world_ref=_world_ref())
+    strategy.score_poignancy(spec, percept, world_ref=_world_ref())
 
     assert tuple(trace.call_id for trace in strategy.traces) == (
         "model-call-2",
@@ -380,7 +826,7 @@ def test_model_strategy_rejects_changed_pinned_skill_hash(tmp_path: Path) -> Non
     )
     strategy = ModelCognitionStrategy(
         gateway=FixtureModelGateway(
-            (DailyPlanDraft(intentions=("talk",), schedule=()).model_dump_json(),)
+            (PlanDraft(items=(PlanItem(plan_id="talk", description="talk"),)).model_dump_json(),)
         ),
         skill=changed_skill,
         model_id="fixture-model",
@@ -388,7 +834,7 @@ def test_model_strategy_rejects_changed_pinned_skill_hash(tmp_path: Path) -> Non
     )
 
     with pytest.raises(ValueError, match="content hash"):
-        strategy.plan_day(_daily_planning_input())
+        strategy.plan(_queue_planning_input())
 
 
 def _bound_skill() -> RuntimeSkill:
@@ -401,6 +847,7 @@ def _bound_skill() -> RuntimeSkill:
 
 def _model_request(*, model_id: str = "fake-model") -> ModelRequest:
     return ModelRequest(
+        world_ref=_world_ref(),
         call_id="call-1",
         agent_kind="character",
         agent_id="anon",
@@ -413,13 +860,14 @@ def _model_request(*, model_id: str = "fake-model") -> ModelRequest:
         skill_version="3.0.0",
         skill_content_hash="a" * 64,
         system_prompt="Follow the Character Skill.",
-        input_json='{"frame":"visible"}',
+        input_json='{"view":"visible"}',
     )
 
 
 def _planning_input() -> ActionPlanningInput:
     spec = _spec()
-    frame = PerceptionFrame(
+    view = AgentView(
+        world_ref=_world_ref(),
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
@@ -434,11 +882,11 @@ def _planning_input() -> ActionPlanningInput:
     )
     return ActionPlanningInput(
         spec=spec,
-        frame=frame,
+        view=view,
         state=_state(),
         observations=(),
         retrieved=(),
-        active_action_finished=True,
+        active_plan=None,
     )
 
 
@@ -454,14 +902,13 @@ def _poignancy_candidate() -> PerceptCandidate:
     )
 
 
-def _daily_planning_input() -> DailyPlanningInput:
+def _queue_planning_input() -> PlanningInput:
     spec = _spec()
-    return DailyPlanningInput(
+    return PlanningInput(
         spec=spec,
         state=_state(),
-        memory=MemoryStream(agent_id="anon", scope=spec.memory_scope),
+        memory=MemoryStream(world_ref=_world_ref(), agent_id="anon", scope=spec.memory_scope),
         world_time=datetime(2026, 9, 1, 9, tzinfo=UTC),
-        new_day=NewDayStatus.FIRST_DAY,
         observations=(),
         retrieved=(),
     )
@@ -469,6 +916,7 @@ def _daily_planning_input() -> DailyPlanningInput:
 
 def _state() -> PersonaState:
     return PersonaState(
+        world_ref=_world_ref(),
         agent_id="anon",
         cognitive_config=CognitiveConfig(
             attention_budget=5,
@@ -482,6 +930,10 @@ def _state() -> PersonaState:
         ),
         reflection_remaining=10.0,
     )
+
+
+def _world_ref() -> WorldRef:
+    return WorldRef(project_id="coffee-golden", world_id="save-1")
 
 
 def _spec() -> CompiledPersonActSpec:
