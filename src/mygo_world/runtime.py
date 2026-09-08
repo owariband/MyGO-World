@@ -25,8 +25,8 @@ from mygo_world.committer import (
 )
 from mygo_world.contracts import (
     ActionProposal,
+    DirectorResolution,
     PerceptionFrame,
-    SegmentDraft,
     TurnSelection,
     ValidatedCommitPlan,
 )
@@ -64,6 +64,7 @@ from mygo_world.scheduling import (
     TurnContext,
     TurnScheduler,
 )
+from mygo_world.segment_assembler import SegmentAssembler
 from mygo_world.skill_bindings import load_effective_skills, require_effective_skill
 from mygo_world.skills import DEFAULT_SKILLS_DIR, RuntimeSkillCatalog
 from mygo_world.telemetry import (
@@ -98,7 +99,6 @@ def _default_fixture_responses(
 ) -> dict[str, dict[str, Any]]:
     """Build one deterministic Character turn and its Director settlement."""
 
-    world_time = snapshot["world_time_ms"]
     target_ids = [item for item in participant_ids if item != actor_id]
     responses: dict[str, dict[str, Any]] = {}
     primary = {
@@ -126,46 +126,18 @@ def _default_fixture_responses(
         ],
     }
     responses[f"character:{actor_id}:action_proposal"] = primary
-    proposal_event_key = "event-character-greeting"
-    responses["director:global-director:segment_draft"] = {
+    responses["director:global-director:director_resolution"] = {
         "schema_version": 1,
-        "world_version": snapshot["world_version"],
-        "session_id": session_id,
-        "wave_started_at_ms": world_time,
-        "wave_ended_at_ms": world_time + 2_000,
-        "proposal_events": [
-            {
-                "event_key": proposal_event_key,
-                "event_type": "utterance",
-                "actor_id": actor_id,
-                "start_time_ms": world_time + 500,
-                "end_time_ms": world_time + 1_000,
-                "cause_event_keys": [],
-                "source_kind": "action_proposal",
-                "source_ref": primary["proposal_id"],
-                "evidence_refs": [],
-                "location_id": _character(snapshot, actor_id)["location_id"],
-                "scope_key": _character(snapshot, actor_id)["scope_key"],
-                "payload": {
-                    "intent_summary": primary["intent_summary"],
-                    "text": primary["action"]["text"],
-                    "addressee_ids": primary["action"]["addressee_ids"],
-                    "expects_response": primary["action"]["expects_response"],
-                    "response_to_event_id": primary["action"]["response_to_event_id"],
-                },
-            }
-        ],
+        "elapsed_ms": 2_000,
+        "outcome_summary": "The greeting opens the rehearsal warmly.",
         "external_events": [
             {
-                "event_key": "event-house-lights-warm",
                 "event_type": "environment_change",
                 "actor_id": None,
-                "start_time_ms": world_time + 1_000,
-                "end_time_ms": world_time + 2_000,
-                "cause_event_keys": [proposal_event_key],
-                "source_kind": "director",
-                "source_ref": "fixture-director-environment-v1",
-                "evidence_refs": [proposal_event_key],
+                "start_offset_ms": 2_000,
+                "end_offset_ms": 2_000,
+                "cause_refs": [{"kind": "proposal"}],
+                "evidence_refs": [{"kind": "proposal"}],
                 "location_id": _character(snapshot, actor_id)["location_id"],
                 "scope_key": _character(snapshot, actor_id)["scope_key"],
                 "payload": {
@@ -258,13 +230,7 @@ def _invalid_trace_record(
         validation={
             "ok": False,
             "attempt": attempt,
-            "diagnostics": [
-                {
-                    "code": "MODEL_SCHEMA_INVALID",
-                    "path": "$",
-                    "message": error.diagnostic,
-                }
-            ],
+            "diagnostics": list(error.diagnostics),
         },
     )
 
@@ -420,6 +386,24 @@ def _repair_request(
     )
 
 
+def _director_repair_request(
+    request: ModelRequest,
+    *,
+    previous_output: dict[str, Any] | str,
+    diagnostics: list[dict[str, Any]],
+) -> ModelRequest:
+    payload = dict(request.input_payload)
+    payload["repair"] = {
+        "previous_output": previous_output,
+        "diagnostics": diagnostics,
+    }
+    return replace(
+        request,
+        call_kind="director_resolution_repair",
+        input_payload=payload,
+    )
+
+
 def _generate_character(
     *,
     gateway: ModelGateway,
@@ -496,12 +480,13 @@ def _generate_character(
     raise AssertionError("unreachable")
 
 
-def _generate_director(
+def _generate_director_resolution(
     *,
     gateway: ModelGateway,
     request: ModelRequest,
     world_id: str,
     snapshot: dict[str, Any],
+    session_id: str,
     proposals: list[ActionProposal],
     trace_id: str,
     budget: _RequestBudget,
@@ -512,10 +497,10 @@ def _generate_director(
     has_unresolved_key_commitments: bool,
 ) -> tuple[
     ValidatedCommitPlan,
-    tuple[tuple[ModelGeneration[SegmentDraft], dict[str, Any]], ...],
+    tuple[tuple[ModelGeneration[DirectorResolution], dict[str, Any]], ...],
     tuple[tuple[ModelOutputInvalidError, int], ...],
 ]:
-    attempts: list[tuple[ModelGeneration[SegmentDraft], dict[str, Any]]] = []
+    attempts: list[tuple[ModelGeneration[DirectorResolution], dict[str, Any]]] = []
     invalid_attempts: list[tuple[ModelOutputInvalidError, int]] = []
     current = request
     for semantic_attempt in (1, 2):
@@ -523,7 +508,7 @@ def _generate_director(
             generation = _call_gateway(
                 gateway,
                 current,
-                SegmentDraft,
+                DirectorResolution,
                 budget=budget,
                 cancellation_event=cancellation_event,
                 retries=retries,
@@ -537,13 +522,10 @@ def _generate_director(
                 )
                 error.schema_attempts = tuple(invalid_attempts)
                 raise error from exc
-            current = _repair_request(
+            current = _director_repair_request(
                 request,
-                call_kind="segment_draft_repair",
-                diagnostic={
-                    "code": "MODEL_SCHEMA_INVALID",
-                    "message": exc.diagnostic,
-                },
+                previous_output=exc.raw_response,
+                diagnostics=list(exc.diagnostics),
             )
             continue
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
@@ -552,17 +534,55 @@ def _generate_director(
                     "MODEL_SCHEMA_INVALID",
                     "Director returned invalid structured output",
                 ) from exc
-            current = _repair_request(
+            current = _director_repair_request(
                 request,
-                call_kind="segment_draft_repair",
-                diagnostic={"code": "MODEL_SCHEMA_INVALID", "message": str(exc)},
+                previous_output=str(exc),
+                diagnostics=[
+                    {
+                        "code": "MODEL_SCHEMA_INVALID",
+                        "path": "$",
+                        "message": str(exc),
+                    }
+                ],
             )
             continue
+        assembly = SegmentAssembler().assemble(
+            snapshot=snapshot,
+            session_id=session_id,
+            proposal=proposals[0],
+            resolution=generation.structured,
+            director_trace_id=trace_id,
+        )
+        if not assembly.ok:
+            validation = _diagnostics_payload(
+                assembly.diagnostics, attempt=semantic_attempt
+            )
+            attempts.append((generation, validation))
+            if not assembly.director_repairable or semantic_attempt == 2:
+                first = next(
+                    (
+                        item
+                        for item in assembly.diagnostics
+                        if item.code == "SEGMENT_ASSEMBLY_CONTEXT_INVALID"
+                    ),
+                    assembly.diagnostics[0],
+                )
+                error = WorldError(first.code, first.message)
+                error.trace_attempts = tuple(attempts)
+                error.schema_attempts = tuple(invalid_attempts)
+                raise error
+            current = _director_repair_request(
+                request,
+                previous_output=generation.structured.model_dump(mode="json"),
+                diagnostics=validation["diagnostics"],
+            )
+            continue
+        assert assembly.value is not None
         outcome = SegmentValidator().validate(
             world_id=world_id,
             snapshot=snapshot,
             proposals=proposals,
-            draft=generation.structured,
+            draft=assembly.value,
             source_trace_id=trace_id,
             completed_wave_count=completed_wave_count,
             pending_response_ids=pending_response_ids,
@@ -579,10 +599,10 @@ def _generate_director(
             error.trace_attempts = tuple(attempts)
             error.schema_attempts = tuple(invalid_attempts)
             raise error
-        current = _repair_request(
+        current = _director_repair_request(
             request,
-            call_kind="segment_draft_repair",
-            diagnostic=validation,
+            previous_output=generation.structured.model_dump(mode="json"),
+            diagnostics=validation["diagnostics"],
         )
     raise AssertionError("unreachable")
 
@@ -733,12 +753,7 @@ def _record_decision_turn(
     now = _timestamp(clock)
     with Session(engine) as session, session.begin():
         turn_order = (
-            int(
-                session.scalar(
-                    select(func.max(DecisionTurnRecordRow.turn_order))
-                )
-                or 0
-            )
+            int(session.scalar(select(func.max(DecisionTurnRecordRow.turn_order))) or 0)
             + 1
         )
         session.add(
@@ -1338,7 +1353,7 @@ def advance_world(
                     director_request = ModelRequest(
                         agent_type="director",
                         agent_id="global-director",
-                        call_kind="segment_draft",
+                        call_kind="director_resolution",
                         model_id=getattr(
                             selected_gateway, "model_id", "fixture-model-v1"
                         ),
@@ -1346,6 +1361,14 @@ def advance_world(
                         skill_version=director_skill.version,
                         skill_content_hash=director_skill.content_hash,
                         input_payload={
+                            "task": {
+                                "kind": "resolve_generation_wave",
+                                "output_contract": "director_resolution",
+                                "authority": (
+                                    "Return only relative creative decisions; Runtime "
+                                    "assembles proposal-owned and authoritative fields."
+                                ),
+                            },
                             "world_version": snapshot["world_version"],
                             "world_time_ms": snapshot["world_time_ms"],
                             "run_id": batch_run_id,
@@ -1360,11 +1383,12 @@ def advance_world(
                     )
                     try:
                         plan, director_attempts, director_schema_attempts = (
-                            _generate_director(
+                            _generate_director_resolution(
                                 gateway=selected_gateway,
                                 request=director_request,
                                 world_id=world_id,
                                 snapshot=snapshot,
+                                session_id=session_id,
                                 proposals=proposals,
                                 trace_id=director_trace_id,
                                 budget=budget,

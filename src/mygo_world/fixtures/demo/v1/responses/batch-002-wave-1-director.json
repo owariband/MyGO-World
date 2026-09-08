@@ -1,29 +1,7 @@
 {
   "schema_version": 1,
-  "world_version": 3,
-  "session_id": "{{soyo_successor_session_id}}",
-  "wave_started_at_ms": 2000,
-  "wave_ended_at_ms": 3000,
-  "proposal_events": [
-    {
-      "event_key": "soyo-waits-lounge",
-      "event_type": "wait",
-      "actor_id": "character-soyo",
-      "start_time_ms": 2000,
-      "end_time_ms": 3000,
-      "cause_event_keys": [],
-      "source_kind": "action_proposal",
-      "source_ref": "demo-proposal-soyo-wait",
-      "evidence_refs": [],
-      "location_id": "location-live-house",
-      "scope_key": "lounge",
-      "payload": {
-        "intent_summary": "Waits in the lounge for one second.",
-        "duration_ms": 1000,
-        "reason": "Collects her thoughts"
-      }
-    }
-  ],
+  "elapsed_ms": 1000,
+  "outcome_summary": null,
   "external_events": [],
   "entity_changes": [],
   "session_intent": "keep_open"

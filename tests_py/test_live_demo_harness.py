@@ -51,37 +51,10 @@ def _response(body: dict[str, Any]) -> dict[str, Any]:
                 "actor_id": candidates[(version - 1) % len(candidates)],
                 "reason": "Deterministic test turn selection.",
             }
-        proposals = payload["proposals"]
-        events = []
-        for index, proposal in enumerate(proposals):
-            start = payload["world_time_ms"] + index * 1000
-            events.append(
-                {
-                    "event_key": f"event-{proposal['actor_id']}",
-                    "event_type": "interact",
-                    "actor_id": proposal["actor_id"],
-                    "start_time_ms": start,
-                    "end_time_ms": start + 500,
-                    "cause_event_keys": [],
-                    "source_kind": "action_proposal",
-                    "source_ref": proposal["proposal_id"],
-                    "evidence_refs": [],
-                    "location_id": "location-ring-lounge",
-                    "scope_key": "lounge",
-                    "payload": {
-                        "intent_summary": proposal["intent_summary"],
-                        "target_id": proposal["action"]["target_id"],
-                        "description": proposal["action"]["description"],
-                    },
-                }
-            )
         return {
             "schema_version": 1,
-            "world_version": version,
-            "session_id": proposals[0]["session_id"],
-            "wave_started_at_ms": payload["world_time_ms"],
-            "wave_ended_at_ms": payload["world_time_ms"] + 2000,
-            "proposal_events": events,
+            "elapsed_ms": 2000,
+            "outcome_summary": "The opening song is reviewed on the set list.",
             "external_events": [],
             "entity_changes": [],
             "session_intent": "resolved" if version > 1 else "keep_open",
@@ -216,10 +189,10 @@ MYGO_MODEL_PARAMETERS_JSON={{"temperature":0}}
         and "proposals" in json.loads(item["messages"][1]["content"])
     )
     director_schema = json.dumps(director_request["response_format"])
-    assert '"const": "action_proposal"' in director_schema
-    director_prompt = director_request["messages"][0]["content"]
-    assert "`source_kind` 必须严格填写为 `action_proposal`" in director_prompt
-    assert "原样复制 `actor_id` 和 `intent_summary`" in director_prompt
+    assert '"name": "DirectorResolution"' in director_schema
+    assert '"elapsed_ms"' in director_schema
+    assert '"world_version"' not in director_schema
+    assert '"proposal_events"' not in director_schema
     system_prompts = [item["messages"][0]["content"] for item in request_bodies]
     assert any("你是排练前身处 RiNG 的千早爱音" in item for item in system_prompts)
     assert any("你是排练前身处 RiNG 的长崎素世" in item for item in system_prompts)

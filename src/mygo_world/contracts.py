@@ -52,10 +52,7 @@ class CharacterPresentation(StrictModel):
     @model_validator(mode="after")
     def contains_a_perceivable_quality(self) -> CharacterPresentation:
         if not (
-            self.appearance
-            or self.demeanor
-            or self.voice
-            or self.observable_traits
+            self.appearance or self.demeanor or self.voice or self.observable_traits
         ):
             raise ValueError("Character Presentation must not be empty")
         if any(not item for item in self.observable_traits):
@@ -496,6 +493,42 @@ class EntityStateChange(StrictModel):
         if (self.location_id is None) != (self.scope_key is None):
             raise ValueError("location_id and scope_key must be provided together")
         return self
+
+
+class ProposalEventReference(StrictModel):
+    kind: Literal["proposal"]
+
+
+class ExternalEventReference(StrictModel):
+    kind: Literal["external"]
+    index: int = Field(ge=0)
+
+
+CreativeEventReference = Annotated[
+    ProposalEventReference | ExternalEventReference,
+    Field(discriminator="kind"),
+]
+
+
+class CreativeExternalEvent(StrictModel):
+    event_type: str = Field(min_length=1)
+    actor_id: str | None = None
+    start_offset_ms: int = Field(ge=0)
+    end_offset_ms: int = Field(ge=0)
+    cause_refs: list[CreativeEventReference] = Field(default_factory=list)
+    evidence_refs: list[CreativeEventReference] = Field(default_factory=list)
+    location_id: str = Field(min_length=1)
+    scope_key: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DirectorResolution(StrictModel):
+    schema_version: Literal[1] = 1
+    elapsed_ms: int = Field(ge=0)
+    outcome_summary: str | None = Field(default=None, min_length=1, max_length=2000)
+    external_events: list[CreativeExternalEvent] = Field(default_factory=list)
+    entity_changes: list[EntityStateChange] = Field(default_factory=list)
+    session_intent: Literal["keep_open", "resolved"] = "keep_open"
 
 
 class CandidateEvent(StrictModel):

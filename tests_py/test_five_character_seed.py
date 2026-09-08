@@ -57,34 +57,10 @@ def _offline_wave_responses() -> dict[str, dict[str, object]]:
     responses: dict[str, dict[str, object]] = {
         f"character:{character_id}:action_proposal": proposal
     }
-    responses["director:global-director:segment_draft"] = {
+    responses["director:global-director:director_resolution"] = {
         "schema_version": 1,
-        "world_version": 1,
-        "session_id": "session-ring-arrangement",
-        "wave_started_at_ms": 0,
-        "wave_ended_at_ms": 600,
-        "proposal_events": [
-            {
-                "event_key": f"event-{character_id}-opinion",
-                "event_type": "utterance",
-                "actor_id": character_id,
-                "start_time_ms": 100,
-                "end_time_ms": 150,
-                "cause_event_keys": [],
-                "source_kind": "action_proposal",
-                "source_ref": proposal_id,
-                "evidence_refs": [],
-                "location_id": "location-ring-lounge",
-                "scope_key": "lounge",
-                "payload": {
-                    "intent_summary": proposal["intent_summary"],
-                    "text": text,
-                    "addressee_ids": [],
-                    "expects_response": False,
-                    "response_to_event_id": None,
-                },
-            }
-        ],
+        "elapsed_ms": 600,
+        "outcome_summary": "The opinion is heard by the group.",
         "external_events": [],
         "entity_changes": [],
         "session_intent": "keep_open",

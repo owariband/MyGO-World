@@ -1,40 +1,19 @@
 {
   "schema_version": 1,
-  "world_version": 1,
-  "session_id": "session-first-meeting",
-  "wave_started_at_ms": 0,
-  "wave_ended_at_ms": 1000,
-  "proposal_events": [
-    {
-      "event_key": "anon-moves-stage",
-      "event_type": "move",
-      "actor_id": "character-anon",
-      "start_time_ms": 100,
-      "end_time_ms": 300,
-      "cause_event_keys": [],
-      "source_kind": "action_proposal",
-      "source_ref": "demo-proposal-anon-move",
-      "evidence_refs": [],
-      "location_id": "location-live-house",
-      "scope_key": "lounge",
-      "payload": {
-        "intent_summary": "Moves from the lounge to the stage to focus.",
-        "location_id": "location-live-house",
-        "scope_key": "stage"
-      }
-    }
-  ],
+  "elapsed_ms": 1000,
+  "outcome_summary": "Anon reaches the stage and focuses on rehearsal.",
   "external_events": [
     {
-      "event_key": "lounge-door-closes",
       "event_type": "environment_change",
       "actor_id": null,
-      "start_time_ms": 700,
-      "end_time_ms": 900,
-      "cause_event_keys": ["anon-moves-stage"],
-      "source_kind": "director",
-      "source_ref": "demo-director-environment-v1",
-      "evidence_refs": ["anon-moves-stage"],
+      "start_offset_ms": 1000,
+      "end_offset_ms": 1000,
+      "cause_refs": [
+        {"kind": "proposal"}
+      ],
+      "evidence_refs": [
+        {"kind": "proposal"}
+      ],
       "location_id": "location-live-house",
       "scope_key": "lounge",
       "payload": {
@@ -42,13 +21,6 @@
       }
     }
   ],
-  "entity_changes": [
-    {
-      "entity_id": "character-anon",
-      "state_patch": {},
-      "location_id": "location-live-house",
-      "scope_key": "stage"
-    }
-  ],
+  "entity_changes": [],
   "session_intent": "keep_open"
 }

@@ -74,25 +74,57 @@ def _valid_proposal(frame: PerceptionFrame) -> ActionProposal:
 
 
 def _valid_draft(frame: PerceptionFrame) -> SegmentDraft:
+    proposal = _valid_proposal(frame)
     return SegmentDraft.model_validate(
-        _default_fixture_responses(
-            snapshot={
-                "world_version": frame.world_version,
-                "world_time_ms": frame.world_time_ms,
-                "entities": [
-                    {
-                        "entity_id": item.entity_id,
-                        "entity_type": item.entity_type,
-                        "location_id": item.location_id,
-                        "scope_key": item.scope_key,
-                    }
-                    for item in frame.visible_entities
-                ],
-            },
-            session_id=frame.session_id,
-            actor_id=frame.character_id,
-            participant_ids=frame.participant_ids,
-        )["director:global-director:segment_draft"]
+        {
+            "schema_version": 1,
+            "world_version": frame.world_version,
+            "session_id": frame.session_id,
+            "wave_started_at_ms": frame.world_time_ms,
+            "wave_ended_at_ms": frame.world_time_ms + 2_000,
+            "proposal_events": [
+                {
+                    "event_key": f"proposal:{proposal.proposal_id}",
+                    "event_type": "utterance",
+                    "actor_id": proposal.actor_id,
+                    "start_time_ms": frame.world_time_ms,
+                    "end_time_ms": frame.world_time_ms + 1_000,
+                    "source_kind": "action_proposal",
+                    "source_ref": proposal.proposal_id,
+                    "location_id": frame.location_id,
+                    "scope_key": frame.scope_key,
+                    "payload": {
+                        "intent_summary": proposal.intent_summary,
+                        "text": proposal.action.text,
+                        "addressee_ids": proposal.action.addressee_ids,
+                        "expects_response": proposal.action.expects_response,
+                        "response_to_event_id": proposal.action.response_to_event_id,
+                    },
+                }
+            ],
+            "external_events": [
+                {
+                    "event_key": "external:fixture:0",
+                    "event_type": "environment_change",
+                    "start_time_ms": frame.world_time_ms + 1_000,
+                    "end_time_ms": frame.world_time_ms + 2_000,
+                    "cause_event_keys": [f"proposal:{proposal.proposal_id}"],
+                    "source_kind": "director",
+                    "source_ref": "trace-director",
+                    "evidence_refs": [f"proposal:{proposal.proposal_id}"],
+                    "location_id": frame.location_id,
+                    "scope_key": frame.scope_key,
+                    "payload": {"description": "The lights become warmer."},
+                }
+            ],
+            "entity_changes": [
+                {
+                    "entity_id": frame.location_id,
+                    "state_patch": {"lighting": "warm"},
+                }
+            ],
+            "session_intent": "keep_open",
+        }
     )
 
 

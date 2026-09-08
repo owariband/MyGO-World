@@ -109,70 +109,33 @@ class SplitGateway:
                 "memory_changes": [],
             }
         else:
-            snapshot = request.input_payload["snapshot"]
             proposals = request.input_payload["proposals"]
             moving = next(
                 (item for item in proposals if item["action"]["kind"] == "move"), None
             )
-            events: list[dict[str, Any]] = []
-            changes: list[dict[str, Any]] = []
             external: list[dict[str, Any]] = []
-            end_time = snapshot["world_time_ms"]
             if moving is not None:
-                end_time += 200
-                events.append(
-                    {
-                        "event_key": "move-a",
-                        "event_type": "move",
-                        "actor_id": moving["actor_id"],
-                        "start_time_ms": end_time - 200,
-                        "end_time_ms": end_time - 100,
-                        "cause_event_keys": [],
-                        "source_kind": "action_proposal",
-                        "source_ref": moving["proposal_id"],
-                        "evidence_refs": [],
-                        "location_id": "location-live-house",
-                        "scope_key": "lounge",
-                        "payload": {
-                            "intent_summary": moving["intent_summary"],
-                            "location_id": "location-live-house",
-                            "scope_key": "stage",
-                        },
-                    }
-                )
                 external.append(
                     {
-                        "event_key": "old-scope-after-move",
                         "event_type": "environment_change",
                         "actor_id": None,
-                        "start_time_ms": end_time - 50,
-                        "end_time_ms": end_time,
-                        "cause_event_keys": ["move-a"],
-                        "source_kind": "director",
-                        "source_ref": "split-fixture",
-                        "evidence_refs": ["move-a"],
+                        "start_offset_ms": 200,
+                        "end_offset_ms": 200,
+                        "cause_refs": [{"kind": "proposal"}],
+                        "evidence_refs": [{"kind": "proposal"}],
                         "location_id": "location-live-house",
                         "scope_key": "lounge",
                         "payload": {"description": "A door closes in the lounge."},
                     }
                 )
-                changes.append(
-                    {
-                        "entity_id": moving["actor_id"],
-                        "state_patch": {},
-                        "location_id": "location-live-house",
-                        "scope_key": "stage",
-                    }
-                )
             raw = {
                 "schema_version": 1,
-                "world_version": snapshot["world_version"],
-                "session_id": proposals[0]["session_id"],
-                "wave_started_at_ms": snapshot["world_time_ms"],
-                "wave_ended_at_ms": end_time,
-                "proposal_events": events,
+                "elapsed_ms": 200 if moving is not None else 0,
+                "outcome_summary": (
+                    "The Character arrives on stage." if moving is not None else None
+                ),
                 "external_events": external,
-                "entity_changes": changes,
+                "entity_changes": [],
                 "session_intent": "keep_open",
             }
         structured = response_type.model_validate(raw)
@@ -216,7 +179,6 @@ class MergeGateway:
                 "memory_changes": [],
             }
         else:
-            snapshot = request.input_payload["snapshot"]
             proposals = request.input_payload["proposals"]
             interaction = next(
                 (item for item in proposals if item["action"]["kind"] == "interact"),
@@ -224,34 +186,8 @@ class MergeGateway:
             )
             raw = {
                 "schema_version": 1,
-                "world_version": snapshot["world_version"],
-                "session_id": proposals[0]["session_id"],
-                "wave_started_at_ms": snapshot["world_time_ms"],
-                "wave_ended_at_ms": snapshot["world_time_ms"]
-                + (100 if interaction else 0),
-                "proposal_events": (
-                    [
-                        {
-                            "event_key": "direct-interaction",
-                            "event_type": "interact",
-                            "actor_id": interaction["actor_id"],
-                            "start_time_ms": snapshot["world_time_ms"],
-                            "end_time_ms": snapshot["world_time_ms"] + 100,
-                            "cause_event_keys": [],
-                            "source_kind": "action_proposal",
-                            "source_ref": interaction["proposal_id"],
-                            "evidence_refs": [],
-                            "location_id": "location-live-house",
-                            "scope_key": "lounge",
-                            "payload": {
-                                "intent_summary": interaction["intent_summary"],
-                                "target_id": "character-c",
-                            },
-                        }
-                    ]
-                    if interaction
-                    else []
-                ),
+                "elapsed_ms": 100 if interaction else 0,
+                "outcome_summary": ("C is directly greeted." if interaction else None),
                 "external_events": [],
                 "entity_changes": [],
                 "session_intent": "keep_open",
@@ -284,14 +220,10 @@ class ResolvingNoOpGateway:
                 "memory_changes": [],
             }
         else:
-            snapshot = request.input_payload["snapshot"]
             raw = {
                 "schema_version": 1,
-                "world_version": snapshot["world_version"],
-                "session_id": request.input_payload["proposals"][0]["session_id"],
-                "wave_started_at_ms": snapshot["world_time_ms"],
-                "wave_ended_at_ms": snapshot["world_time_ms"],
-                "proposal_events": [],
+                "elapsed_ms": 0,
+                "outcome_summary": None,
                 "external_events": [],
                 "entity_changes": [],
                 "session_intent": (
@@ -353,40 +285,12 @@ class DialogueResolutionGateway:
                 "memory_changes": [],
             }
         else:
-            snapshot = request.input_payload["snapshot"]
-            proposals = request.input_payload["proposals"]
-            spoken = next(
-                proposal
-                for proposal in proposals
-                if proposal["action"]["kind"] == "utterance"
-            )
-            action = spoken["action"]
             raw = {
                 "schema_version": 1,
-                "world_version": snapshot["world_version"],
-                "session_id": spoken["session_id"],
-                "wave_started_at_ms": snapshot["world_time_ms"],
-                "wave_ended_at_ms": snapshot["world_time_ms"] + 100,
-                "proposal_events": [
-                    {
-                        "event_key": f"dialogue-event-wave-{wave_number}",
-                        "event_type": "utterance",
-                        "actor_id": spoken["actor_id"],
-                        "start_time_ms": snapshot["world_time_ms"],
-                        "end_time_ms": snapshot["world_time_ms"] + 100,
-                        "source_kind": "action_proposal",
-                        "source_ref": spoken["proposal_id"],
-                        "location_id": "location-live-house",
-                        "scope_key": "lounge",
-                        "payload": {
-                            "intent_summary": spoken["intent_summary"],
-                            "text": action["text"],
-                            "addressee_ids": action["addressee_ids"],
-                            "expects_response": action["expects_response"],
-                            "response_to_event_id": action["response_to_event_id"],
-                        },
-                    }
-                ],
+                "elapsed_ms": 100,
+                "outcome_summary": "The utterance is heard.",
+                "external_events": [],
+                "entity_changes": [],
                 "session_intent": "resolved" if wave_number == 2 else "keep_open",
             }
         structured = response_type.model_validate(raw)
@@ -464,9 +368,7 @@ def test_split_is_atomic_fifo_and_scope_isolated(
     next_gateway = SplitGateway()
     next_receipt = advance_world("split", worlds_dir, gateway=next_gateway, max_waves=1)
     assert next_receipt["session_id"] == queue[2]["session_id"]
-    assert {frame["character_id"] for frame in next_gateway.frames} == {
-        "character-b"
-    }
+    assert {frame["character_id"] for frame in next_gateway.frames} == {"character-b"}
 
 
 def test_direct_interaction_merges_sessions_but_colocation_alone_does_not(

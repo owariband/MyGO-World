@@ -88,12 +88,35 @@ class ModelOutputInvalidError(ValueError):
     """A response reached the model boundary but did not match its contract."""
 
     def __init__(
-        self, request: ModelRequest, raw_response: str, diagnostic: str
+        self,
+        request: ModelRequest,
+        raw_response: str,
+        diagnostic: str,
+        *,
+        diagnostics: tuple[dict[str, str], ...] | None = None,
     ) -> None:
         super().__init__(diagnostic)
         self.request = request
         self.raw_response = raw_response
         self.diagnostic = diagnostic
+        self.diagnostics = diagnostics or (
+            {
+                "code": "MODEL_SCHEMA_INVALID",
+                "path": "$",
+                "message": diagnostic,
+            },
+        )
+
+
+def _schema_diagnostics(error: ValidationError) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "code": "MODEL_SCHEMA_INVALID",
+            "path": ".".join(str(part) for part in item["loc"]) or "$",
+            "message": str(item["msg"]),
+        }
+        for item in error.errors()
+    )
 
 
 @dataclass(frozen=True)
@@ -245,7 +268,12 @@ class FixtureGateway:
         try:
             structured = response_type.model_validate_json(raw)
         except ValidationError as exc:
-            raise ModelOutputInvalidError(request, raw, str(exc)) from exc
+            raise ModelOutputInvalidError(
+                request,
+                raw,
+                str(exc),
+                diagnostics=_schema_diagnostics(exc),
+            ) from exc
         return ModelGeneration(request=request, raw_response=raw, structured=structured)
 
     @property
@@ -640,7 +668,12 @@ class OpenAICompatibleGateway:
         try:
             structured = response_type.model_validate_json(raw)
         except ValidationError as exc:
-            raise ModelOutputInvalidError(request, raw, str(exc)) from exc
+            raise ModelOutputInvalidError(
+                request,
+                raw,
+                str(exc),
+                diagnostics=_schema_diagnostics(exc),
+            ) from exc
         usage_source = decoded.get("usage")
         usage = {
             key: value

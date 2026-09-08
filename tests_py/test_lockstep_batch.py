@@ -49,15 +49,10 @@ def _proposal(request: ModelRequest, *, invalid_actor: bool = False) -> dict[str
 
 
 def _director(request: ModelRequest, *, invalid_time: bool = False) -> dict[str, Any]:
-    snapshot = request.input_payload["snapshot"]
     return {
         "schema_version": 1,
-        "world_version": snapshot["world_version"],
-        "session_id": snapshot["sessions"][0]["session_id"],
-        "wave_started_at_ms": snapshot["world_time_ms"],
-        "wave_ended_at_ms": snapshot["world_time_ms"]
-        + (300_001 if invalid_time else 0),
-        "proposal_events": [],
+        "elapsed_ms": 300_001 if invalid_time else 0,
+        "outcome_summary": None,
         "external_events": [],
         "entity_changes": [],
         "session_intent": "keep_open",
@@ -118,7 +113,9 @@ class RepairGateway(ObservingGateway):
                 ),
             )
         else:
-            raw = _director(request, invalid_time=request.call_kind == "segment_draft")
+            raw = _director(
+                request, invalid_time=request.call_kind == "director_resolution"
+            )
         structured = response_type.model_validate(raw)
         return ModelGeneration(
             request=request,
@@ -234,7 +231,11 @@ def test_provider_director_selects_character_and_records_trace(
         max_waves=1,
     )
 
-    assert gateway.calls == ["turn_selection", "action_proposal", "segment_draft"]
+    assert gateway.calls == [
+        "turn_selection",
+        "action_proposal",
+        "director_resolution",
+    ]
     assert receipt["model_call_count"] == 3
     database = worlds_dir / "provider-turn" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
@@ -301,8 +302,8 @@ def test_semantic_repairs_are_limited_to_the_invalid_agent_call(
         {
             "action_proposal": 1,
             "action_proposal_repair": 1,
-            "segment_draft": 1,
-            "segment_draft_repair": 1,
+            "director_resolution": 1,
+            "director_resolution_repair": 1,
         }
     )
     assert receipt["model_call_count"] == 4
@@ -344,13 +345,10 @@ def test_schema_failure_raw_response_is_traced_before_one_repair(
             "action": {"kind": "no_op", "reason": "Listening"},
             "memory_changes": [],
         },
-        "director:global-director:segment_draft": {
+        "director:global-director:director_resolution": {
             "schema_version": 1,
-            "world_version": 1,
-            "session_id": "session-first-meeting",
-            "wave_started_at_ms": 0,
-            "wave_ended_at_ms": 0,
-            "proposal_events": [],
+            "elapsed_ms": 0,
+            "outcome_summary": None,
             "external_events": [],
             "entity_changes": [],
             "session_intent": "keep_open",
@@ -421,39 +419,10 @@ def test_later_wave_failure_preserves_prior_wait_commit(worlds_dir: Path) -> Non
                         "reason": "Listening",
                     }
             else:
-                snapshot = request.input_payload["snapshot"]
-                proposal = request.input_payload["proposals"][0]
-                actor = next(
-                    item
-                    for item in snapshot["entities"]
-                    if item["entity_id"] == proposal["actor_id"]
-                )
                 raw = {
                     "schema_version": 1,
-                    "world_version": snapshot["world_version"],
-                    "session_id": snapshot["sessions"][0]["session_id"],
-                    "wave_started_at_ms": snapshot["world_time_ms"],
-                    "wave_ended_at_ms": snapshot["world_time_ms"] + 1_000,
-                    "proposal_events": [
-                        {
-                            "event_key": f"wait-wave-{wave_number}",
-                            "event_type": "wait",
-                            "actor_id": proposal["actor_id"],
-                            "start_time_ms": snapshot["world_time_ms"],
-                            "end_time_ms": snapshot["world_time_ms"] + 1_000,
-                            "cause_event_keys": [],
-                            "source_kind": "action_proposal",
-                            "source_ref": proposal["proposal_id"],
-                            "evidence_refs": [],
-                            "location_id": actor["location_id"],
-                            "scope_key": actor["scope_key"],
-                            "payload": {
-                                "intent_summary": proposal["intent_summary"],
-                                "duration_ms": 1_000,
-                                "reason": "Listening",
-                            },
-                        }
-                    ],
+                    "elapsed_ms": 1_000,
+                    "outcome_summary": None,
                     "external_events": [],
                     "entity_changes": [],
                     "session_intent": "keep_open",
