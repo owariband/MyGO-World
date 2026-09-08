@@ -17,6 +17,10 @@ from agent_runtime.agent.personact.manifest import (
     PersonaDefinition,
     RetrievalPolicy,
 )
+from agent_runtime.agent.skill import (
+    CompiledSkillReference,
+    RuntimeSkill,
+)
 from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import ProposalKind
 
@@ -42,12 +46,23 @@ class PromptDefinition(StrictModel):
 class Catalog(StrictModel):
     tools: tuple[ToolDefinition, ...]
     prompts: tuple[PromptDefinition, ...]
+    skills: tuple[RuntimeSkill, ...] = ()
 
     def tool(self, tool_id: str) -> ToolDefinition | None:
         return next((tool for tool in self.tools if tool.id == tool_id), None)
 
     def prompt(self, prompt_id: str) -> PromptDefinition | None:
         return next((prompt for prompt in self.prompts if prompt.id == prompt_id), None)
+
+    def skill(self, skill_id: str, version: str) -> RuntimeSkill | None:
+        return next(
+            (
+                skill
+                for skill in self.skills
+                if skill.skill_id == skill_id and skill.version == version
+            ),
+            None,
+        )
 
 
 class ResolvedTool(StrictModel):
@@ -87,6 +102,7 @@ class CompiledPersonActSpec(StrictModel):
     allowed_proposal_kinds: tuple[ProposalKind, ...]
     tools: tuple[ResolvedTool, ...]
     behavior: BehaviorDefinition
+    character_skill: CompiledSkillReference
     prompt: PromptRef
 
 
@@ -112,6 +128,7 @@ class _DigestSpec(StrictModel):
     allowed_proposal_kinds: tuple[ProposalKind, ...]
     tools: tuple[ResolvedTool, ...]
     behavior: BehaviorDefinition
+    character_skill: CompiledSkillReference
     prompt: PromptRef
 
 
@@ -122,6 +139,10 @@ def compile_manifest(manifest: Manifest, catalog: Catalog) -> tuple[CompiledPers
     _require_unique(agent_ids, "agent ids")
     _require_unique(tuple(tool.id for tool in catalog.tools), "catalog tool ids")
     _require_unique(tuple(prompt.id for prompt in catalog.prompts), "catalog prompt ids")
+    _require_unique(
+        tuple(f"{skill.skill_id}@{skill.version}" for skill in catalog.skills),
+        "catalog skill versions",
+    )
 
     known_agent_ids = frozenset(agent_ids)
     return tuple(
@@ -199,6 +220,24 @@ def _compile_agent(
             f'agent "{definition.id}" requests unknown prompt profile "{definition.prompt_profile}"'
         )
     prompt_ref = PromptRef(id=prompt.id, version=prompt.version, digest=prompt.digest)
+    skill = catalog.skill(
+        definition.character_skill.skill_id,
+        definition.character_skill.version,
+    )
+    if skill is None:
+        raise ManifestCompileError(
+            f'agent "{definition.id}" requests unknown Character Skill '
+            f'"{definition.character_skill.skill_id}@{definition.character_skill.version}"'
+        )
+    if skill.agent_kind != "character":
+        raise ManifestCompileError(
+            f'agent "{definition.id}" requests non-character Skill "{skill.skill_id}"'
+        )
+    skill_ref = CompiledSkillReference(
+        skill_id=skill.skill_id,
+        version=skill.version,
+        content_hash=skill.content_hash,
+    )
     memory_scope = f"project/{project_id}/persona/{definition.id}"
 
     digest_spec = _DigestSpec(
@@ -214,6 +253,7 @@ def _compile_agent(
         allowed_proposal_kinds=allowed_proposal_kinds,
         tools=tuple(resolved_tools),
         behavior=definition.behavior,
+        character_skill=skill_ref,
         prompt=prompt_ref,
     )
     digest = _stable_digest(digest_spec)
@@ -232,6 +272,7 @@ def _compile_agent(
         allowed_proposal_kinds=allowed_proposal_kinds,
         tools=tuple(resolved_tools),
         behavior=definition.behavior,
+        character_skill=skill_ref,
         prompt=prompt_ref,
     )
 

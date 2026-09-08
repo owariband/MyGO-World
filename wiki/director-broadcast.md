@@ -1,385 +1,438 @@
-# 导演层与导播层：Generative Agents 之上的待研究算法
+# EventStaff Director 与 Broadcast
 
-与本页相关的历史卡点、否决方案和交换代价见[难点、卡点与代价账本](difficulty-ledger.md)。
+> 状态：Director 的权限边界已由 [D-044](decisions.md#d-044director-只管理由已提交事实触发的-eventstaff) 重定义。旧版“Segment Completion / Narrative Intervention / Narrative Thread”设计已经废止，不再作为实现目标。本文字段和唤醒策略是自由互动 MVP 的默认方案，仍需用 Golden Trace 验证。
 
-## 1. 已确认的宏观起点
+## 1. 三类 Agent 的边界
 
-角色底座可以高度复用 Generative Agents 的思想：
+| 角色 | 可以决定 | 明确不能决定 |
+| --- | --- | --- |
+| Character Agent | 自己说什么、做什么、回应谁、是否等待 | 其他角色的行动；未经提交的世界事实；后台环境过程的完成 |
+| Director Agent | 已经客观启动的后台过程是否入队、继续等待、释放或取消 | Character 的台词、行动、意愿、关系、组队；剧情压力；任意 World patch |
+| Broadcast Agent | 玩家看到哪些已提交 Event、以什么镜头和 WebGAL 表现 | 世界发生了什么；角色知道什么；后台过程是否完成 |
 
-```text
-Character Agent
-  Persona / Goal
-  Perception
-  Memory Retrieval
-  Planning / Reacting
-  Reflection
-  Action
-        |
-        v
-Sandbox / World Action Loop
-```
+Director 不是故事里的“导演角色”，也不是上帝视角的剧情作者。它更接近一个受权限约束的**客观异步过程调度器**。
 
-这里的“几乎原封不动”指**认知循环可以作为 baseline**，不代表复制其全部工程实现。当前仍明确改造：
+## 2. 为什么需要 EventStaff
 
-- 每轮 Agent 真实响应耗时进入 generation trace，响应后再对该段世界做时间/因果补完；
-- 用 Snapshot/Version/Validator 防止顺序执行污染；
-- 增加客观 WorldTransaction / WorldEvent Ledger；
-- 把观察、信念和世界事实分离；
-- MyGO/WebGAL 只作为 Render Backend。
+有些世界变化不是 Character 一次动作提交后立刻完成的：
 
-在这一底座上，本项目新增两个职责不同的 Agent 层：
+- Character 启动咖啡机，咖啡稍后煮好；
+- Character 发起下载，文件稍后完成；
+- 门被打开后，自动闭门器稍后关门；
+- 已经确认发出的列车，在预定世界时间到站。
 
-```text
-Director Agent  导演层：世界应该获得什么叙事压力与机会？
-Broadcast Agent 导播层：已经发生的世界应该怎样被玩家看见？
-```
+这些事情有三个共同点：
 
-三类 Agent 共享 AgentLoop 生命周期，但不共享 PersonAct 的具体实现：
+1. 必须先有已经提交的客观起因；
+2. 中间需要跨越至少一次调度或世界时间；
+3. 完成结果不再需要 Character 替环境作决定。
+
+`EventStaff` 表示的正是“已被客观事件启动、尚未完成的环境过程”。它不是已经发生的 `WorldEvent`，也不是 Director 想让故事发生的愿望。
 
 ```text
-observe/perceive -> retrieve -> plan -> propose
-                     |
-                     v
-           Runtime validate / commit
-                     |
-                     v
-          observe_outcome -> reflect
+Character ActionProposal
+-> WorldChangeValidator
+-> World.apply_change / WorldUpdater
+-> committed WorldEvent
+-> DirectorRunner 构造受限 DirectorView
+-> EventStaffDecision
+   enqueue / keep / no_op 只更新 Staff 与消费游标
+   release / cancel 再进入 Validator + WorldUpdater
+-> committed objective WorldEvent
+-> AgentViewBuilder 投影给可见 Character
+-> Broadcast Agent 只读选择玩家表现
 ```
 
-Persona、Director、Broadcast 共享 `perceive -> retrieve -> plan -> propose`、提交后 `observe_outcome -> reflect` 的生命周期，以及 strict/frozen Pydantic、Memory/Model 与 `RunnableConfig` 基础设施；各自的 typed input、State、Strategy、Prompt、Proposal、触发频率和 Memory namespace 隔离。当前 Character loop 明确位于 `agent/personact/loop.py`，由 `agent.py` 的 `PersonActAgent.decide` 调用；跨 Agent 公共 runner 等 Director Fixture 出现后再提取。外部 Event Scheduler 不属于 AgentLoop，`execute` 也不属于通用 Agent 能力。
+Character Proposal 的提交不经过 Director。Director 永远位于第一次事实提交之后。
 
-实现状态上，当前已落地 `PersonActAgent.decide` 的单次认知 Slice；reflection/commit feedback、Director、Broadcast 及其与 World Commit 的完整链路仍是本页描述的研究/实现目标。
+## 3. EventStaff 数据模型
 
-2026-08-21 的修正进一步把 Director 拆成两种运行频率：
+MVP 使用以下持久化字段：
 
 ```text
-每个 generation wave 必经
-  Segment Completion：在角色响应后补齐该段时间、因果、对象结果和 Event 边界
-
-低频、可 NoOp
-  Narrative Intervention：管理长期线程、机会、压力和剧情节奏
+EventStaff
+  event_staff_id
+  world_id
+  session_id
+  source_event_id
+  staff_kind
+  subject_type
+  subject_id
+  completion_event_type
+  status
+  created_world_version
+  created_world_time
+  next_check_at?
+  release_event_id?
+  details_json
 ```
 
-它们可以先由同一个 Director Agent 完成，但契约和评测必须分开。前者是无 Maze 的 Character Runtime 能闭合世界段的基础能力；后者才是可延后的高层导演优化。
+字段语义：
 
-## 2. 为什么需要导演层
+- `session_id` 是 Character 的稳定 EventSession 节点，不是会随 merge/split 改变的 root；
+- `source_event_id` 必须指向真正启动过程的 committed Event；
+- `staff_kind` 标识受信过程类型，例如 `coffee_brewing_completion`；
+- `subject_type + subject_id` 标识正在变化的客观对象；
+- `completion_event_type` 在 enqueue 时已经由 World 规则确定，release 时不能临场改写；
+- `status` 只允许 `pending / released / cancelled`；
+- `next_check_at` 是下一次可检查时间，不等同于“保证完成时间”；
+- `details_json` 只容纳该 staff kind 独有且经 strict schema 校验、无需单独查询的数据。
 
-纯 Generative Agents 擅长产生 believable everyday behavior，但不保证：
-
-- 一条重要线索会在可接受时间内被触发；
-- 角色弧会产生推进而不是日常循环；
-- 冲突、缓和和高潮具有节奏；
-- 多条 Event 不会长期停滞或互相稀释；
-- 一个 Galgame 体验具有可辨识的主题和段落。
-
-导演层的目标不是代替 Character Agent，而是在不破坏角色自治的前提下，调节世界的**叙事势能**。
-
-因此更准确的运行时名称建议是 `NarrativeDirector`：它区别于制作期的脚本 Director、Skill 工作流和只负责画面效果的 Stage Director。
-
-### 2.1 每轮必需的 Segment Completion
-
-Character Agent 返回的是局部角色表演、意图、台词或对环境的反应，不足以单独回答“这一段客观上发生了什么、花了多久”。Director 读取：
+`event_staff` 表本身就是持久化队列，不再建立一张复制顺序的 queue 表。Runner 按类似以下键稳定查询：
 
 ```text
-起始 committed snapshot
-当前 active Event / 未完成动作 / 对象状态
-各 Character 的局部输出与可知信息
-本轮 Character / tool measured latency
-跨 Event 的共享角色与因果约束
+(world_id, status, next_check_at, created_world_time, event_staff_id)
 ```
 
-输出待校验的：
+至少需要以下约束：
 
 ```text
-SegmentDraft
-  temporal_relations       before / after / overlaps / continues
-  action_transitions       start / continue / interrupt / complete
-  object_deltas            咖啡、物品、位置和关系发生什么变化
-  bridge_events            多个角色输出之间缺失的客观连接
-  event_candidates         新建、延续、合并或关闭哪个 Event
-  unresolved_at_segment_end
-  evidence_refs
+UNIQUE(source_event_id, staff_kind, subject_type, subject_id)
+FOREIGN KEY(source_event_id) REFERENCES world_events(event_id)
+FOREIGN KEY(release_event_id) REFERENCES world_events(event_id)
+CHECK(status IN ('pending', 'released', 'cancelled'))
 ```
 
-具体持续时间不能由程序的通用 `duration=120s` 表替剧情作答。Director 可以把排队或冲煮保持为 `ACTIVE` 跨越多个 generation wave；当后续实际运行时间和新输出足以支持完成时，再在后续 Segment 中关闭。因此 Event duration 可以由 `ended_at - started_at` 事后得到，而不是在开始时硬编码。
+唯一键保证同一个 source Event 因重试被再次消费时不会重复排入同一个客观过程。
 
-Director 只提出 SegmentDraft；单调时间、角色双占用、知识边界、对象前后状态和因果引用仍由 Validator 检查。
+## 4. Director 到底能看见什么
 
-### 2.1.1 地点到访前的信息发现
+Director 不使用 Character 的 `PerceptionFrame`。它没有“站在哪里、听见什么”的角色认知语义；Runtime 为它构造的是一个**操作授权视图** `DirectorView`。
 
-当 Character 的 `go_to(location)` Proposal 已通过移动前提校验时，Runtime 在该角色下一次基于目的地信息决策前，为 Director Pipeline/strategy 注入同一 `world_version` 的 `LocationView`。这是 mandatory strict Pydantic input，不是由模型自行选择是否调用的开放 Tool。
-
-Runtime 先确定性过滤已失效、角色已知或 disclosure 不允许的信息；只有仍存在多种合理传播方式或叙事时机时才调用 Director。Director 输出 `NoOp / DiscoveryPlan`，并只能引用 LocationInfo 声明的 discovery channel：
+这个 View 必须由 World-owned 的确定性函数构造，例如 `World.build_director_view(trigger)`。Director Agent 不能自己查询数据库、扩大因果窗口或选择想看的 Session。DirectorRunner 可以读取下一条 Event 的 ID/type 以推进 cursor；若 World 计算后没有任何 Staff affordance，也没有相关 pending Staff，Runner 直接以确定性 `no_op` 前移 cursor，不调用模型、更不必把整条台词交给 Director。
 
 ```text
-公开日程 / 已存在海报 -> Projector 可直接形成引用 Info revision 的 Candidate
-新消息 / 他人告知 / 新公告 -> 先提交 WorldEvent，再由 Projector 投影
-到场声音 / 现场表演       -> 等 arrival 已提交且满足 same_scene 后投影
+DirectorView
+  trigger
+    kind                    committed_event | event_staff_check
+    source_event_id?
+    event_staff_id?
+
+  world_id
+  based_on_world_version
+  world_time
+
+  session_id                    opaque delivery anchor
+
+  source_event_projection
+  bounded_causal_events
+  relevant_object_process_state
+  relevant_location_process_state
+  selected_pending_staff?
+  conflicting_pending_staff
+
+  event_staff_affordances
 ```
 
-Director 不得因为 LocationInfo 存在就声称角色已经知道，也不得临场杜撰不存在的海报、广播或知情人。Location 的权威事实、Info revision 和完整规则见[地点 World Model](location-world-model.md)。
+### 4.1 可以看
 
-### 2.2 高层 Narrative Director 可以控制什么
+一次调用只允许看到：
+
+- 当前尚未消费且确实产生 Staff affordance 的一个 committed source Event，或者当前被唤醒检查的一条 Staff；
+- 与 source/staff 的同一 process/subject 直接相连的有限因果窗口，而不是全部世界历史；
+- source/staff 明确引用且完成条件确实需要的 Object/Location 机器状态；
+- Staff 的稳定 `session_id`，但只把它当不透明投递锚点；
+- World 已判断为冲突或互斥的 pending Staff；
+- World 根据事件类型、对象状态和规则预先计算的 `event_staff_affordances`；
+- 判断客观完成条件所需的世界时间与过程状态。
+
+Director 默认不读角色台词正文。只有某种受信 process contract 明确需要某个已提交字段时，World 才将该字段投影进 `source_event_projection`；咖啡流程只需要 `coffee_brewing_started` 的 typed process 数据，不需要“我要煮咖啡”的 quote。真正的操作范围仍由 affordance 决定。
+
+### 4.2 不能看
+
+Director 明确不能收到：
+
+- 未提交、被拒绝或仍在生成中的 `ActionProposal`；
+- Character 私有 Memory、Scratch、Goal、Plan、Reflection、检索结果或模型思维过程；
+- 与当前触发源没有因果关系的其它 EventSession 正文；
+- 当前 root、成员名单，以及哪些 Character 正在等待、观看或谈论该过程；
+- `interaction_requests` 中用于角色自主回应的调度选择；
+- BroadcastPlan、RenderJob、Viewer Cursor、热度或玩家观看反馈；
+- secret WorldFact，除非它是当前客观过程自身的受信机器状态且不会作为自然语言泄露；
+- 任意 SQL、任意 World patch、任意角色 Memory write 能力。
+
+这不是单纯依靠 Prompt 约束。`DirectorView` 的构造器根本不查询这些数据，`EventStaffDecision` 的类型也不提供相应输出槽位。
+
+### 4.3 Affordance 才是最终权限
+
+World 先以确定性规则决定某次 Director 调用有哪些合法选项。例如：
 
 ```text
-Narrative Thread
-  当前未解决的承诺、秘密、误会、关系张力和目标冲突
-
-Narrative Constraint
-  某线索在时间窗内获得暴露机会；某角色弧不能无原因跳变
-
-World Stimulus
-  电话、天气、偶遇条件、消息、公共事件、资源变化
-
-Priority / Budget
-  哪条线程更值得获得世界机会和计算预算
-
-Guardrail
-  禁止角色越权获知、禁止无因果情绪反转、保护硬设定
+event_staff_affordances:
+  - kind: enqueue
+    staff_kind: coffee_brewing_completion
+    source_event_id: E2
+    subject_type: object
+    subject_id: coffee-machine-1
+    completion_event_type: coffee_ready
+    earliest_release_at: T+120s
+    invalidated_by:
+      - coffee_brewing_cancelled
+      - coffee_machine_broken
 ```
 
-### 2.3 导演不能控制什么
+Director 只能在这些候选中选择，不能自行发明 `staff_kind`、subject 或完成事件。若没有 affordance，唯一合法输出就是 `no_op`。
 
-- 不能直接替角色选择行动；
-- 不能绕过 Validator/Ledger，把补完草稿直接宣称为已提交世界事实；
-- 不能绕过 Perception 把秘密塞进角色记忆；
-- 不能为了剧情推进强制所有 Agent 接受互动；
-- 不能直接输出 WebGAL DSL；
-- 不能把“观众更爱看”作为修改过去事实的理由。
+当 Staff 尚未满足 World 计算的 release guard 时，只允许 `keep` 或在存在明确失效事实时 `cancel`。即使模型错误地请求 `release`，Validator 也必须拒绝；到达硬 deadline 时，Runtime 可以使用确定性 fallback，避免模型故障导致客观过程永久悬挂。
 
-一句话边界：
+### 4.4 当前 Action contract 的前置缺口
 
-> Character Agent 控制角色选择和反应；Director 补齐世界段的时间与因果，并低频控制机会、压力和约束；Validator/Committer 控制什么可以成为已提交事实。
+当前源码中的 Character `Affordance` 只有 `kind + target`，`InteractAction` 只有 `target + description`。这还不足以把一次自然语言交互稳定解析为 `start_brewing`：同一个 coffee machine target 也可能是 inspect、start、stop 或取走咖啡。
 
-### 2.4 只有高层叙事干预的默认动作必须是 `NoOp`
-
-`NoOp` 约束的是 Narrative Intervention，不是每轮必需的 Segment Completion。导演对长期剧情应是低频、最小干预的滚动控制器；只有角色行为长期没有推进 Narrative Thread、硬约束即将失效或场景不可达时才介入。
-
-候选刺激先过硬约束，再按下式做相对评分：
+EventStaff 开工前必须增加稳定操作引用，推荐：
 
 ```text
-DirectorScore =
-  scene_goal_progress
-+ causal_coherence
-+ persona_consistency
-+ tension_and_pacing
-+ character_coverage
-- intervention_cost
-- repetition_and_contrivance
-- future_unreachability_risk
+AgentView Affordance
+  affordance_id
+  kind=interact
+  target=coffee-machine-1
+  operation_id=start_brewing
+  based_on_world_version
+
+InteractAction
+  kind=interact
+  target=coffee-machine-1
+  affordance_id
+  description
 ```
 
-`NoOp` 永远参与比较；世界自己能推进时，不干预就是最优动作。
+Validator 以 `affordance_id` 解析受信 operation 和状态转换；`description` 只用于表达/Trace，不能单独触发 Object mutation 或 Staff enqueue。备选是为每类 Object operation 建 typed action union，但不能继续依赖自由文本猜测。
 
-导演介入可按强度分级：
+## 5. Director 的输出
 
 ```text
-L0  观察 / NoOp
-L1  轻量世界刺激、开放 affordance
-L2  带 deadline 的剧情锚点，但完成路径自由
-L3  停滞救场、要求重新规划
-L4  固定 canon/cutscene，明确退出 Agent 自治模式
+EventStaffDecision =
+  EnqueueDecision {
+    affordance_id
+    next_check_at?
+  }
+  | KeepDecision {
+      event_staff_id
+      next_check_at
+    }
+  | ReleaseDecision {
+      event_staff_id
+    }
+  | CancelDecision {
+      event_staff_id
+      caused_by_event_id
+    }
+  | NoOpDecision
 ```
 
-连续停滞才升级；恢复推进后立即降级并进入冷却。
+权限含义：
 
-## 3. 为什么需要导播层
+- `enqueue`：接受一个 World 已提供的 affordance，建立 pending Staff；
+- `keep`：当前不释放，只安排下一次检查；
+- `release`：请求兑现既有 Staff 的固定 completion contract；
+- `cancel`：引用一条已提交的客观失效事件，终止 Staff；
+- `no_op`：当前 committed Event 不产生后台过程。
 
-Director Completion 和 Committer 先产生连续、多地点、并发且包含 generation span 的世界历史；玩家一次只能观看有限窗口。导播层解决的是**观看投影**而不是世界生成。
+Director 不能输出 Character ActionProposal、Session merge/split、自由文本 WorldEvent 或自然语言补丁。解释文本即使保留在调用 Trace 中，也没有世界写入权。
 
-### 3.1 导播读取什么
+## 6. 咖啡 Golden Trace
 
-- 已提交 WorldEvent 与 evidence；
-- Event 的参与者、地点、时间区间、因果关系和显著性；
-- 当前 Viewer Cursor 与未读历史；
-- 各 Event 的 Ready Render 水位；
-- 当前镜头的角色/场景连续性；
-- 导演标记的主题、伏笔和优先线程；
-- 玩家明确选择的 Event 和观看模式。
+“Anon 说『我要煮个咖啡』”只证明一句话发生了：
 
-### 3.2 导播输出什么
+```text
+E1: utter(actor=anon, quote="我要煮个咖啡")
+-> committed
+-> World 计算不到 coffee completion affordance
+-> DirectorRunner 确定性前移 cursor，不调用 Director Agent
+```
+
+若 Director 此时就排入“咖啡煮好”，它实际上替 Anon 走到咖啡机旁并启动了机器，违反 Character autonomy。
+
+正确流程是：
+
+```text
+Anon 自己决定 interact(coffee-machine-1, start_brewing)
+-> Validator 校验对象可达、机器空闲、Anon 有此 affordance
+-> 同一 World transaction：
+     coffee-machine-1.state = brewing
+     append E2: coffee_brewing_started(actor=anon)
+     world.current_version += 1
+
+DirectorRunner 消费 E2
+-> DirectorView 只暴露 coffee_brewing_completion affordance
+-> enqueue S1(session_id=session-anon, source_event_id=E2)
+-> S1.status = pending
+
+S1 到达 next_check_at
+-> World 重新读取机器状态与 release guard
+-> Director keep(S1) 或 release(S1)
+
+release(S1)
+-> Validator 再次确认：
+     S1 仍 pending
+     coffee-machine-1 仍 brewing
+     release window 已开放
+     source/cause 仍有效
+-> 同一 World transaction：
+     coffee-machine-1.state = ready
+     S1.status = released
+     append E3: coffee_ready(caused_by_event_id=E2)
+     S1.release_event_id = E3
+     world.current_version += 1
+
+AgentViewBuilder(E3)
+-> 投影给此刻确实可见的 Character
+```
+
+如果有人在完成前关闭咖啡机：
+
+```text
+E4: coffee_brewing_cancelled
+-> DirectorView(trigger=E4, selected_staff=S1)
+-> cancel(S1, caused_by_event_id=E4)
+-> 同一 transaction 提交取消所需的对象状态与 Staff 状态
+```
+
+取消本身是否需要独立 `WorldEvent`，取决于角色是否能客观观察到取消；但 Staff 状态变化和导致它的 committed Event 引用必须被持久化。
+
+## 7. EventSession merge/split 后 Staff 如何归属
+
+EventStaff 绑定稳定 `session_id`，不绑定可变 `root_session_id`。创建于 `session-anon` 的 Staff 在 UnionPart merge/split 时不搬迁、不复制。
+
+释放时才解析当前互动边界：
+
+```text
+current_root = UnionPart.rootOf(staff.session_id)
+candidate_member_ids = UnionPart.members(current_root)
+recipients = AgentViewBuilder.filterVisible(
+  released_event,
+  candidate_member_ids,
+)
+```
+
+因此：
+
+- 后来 merge 进当前 root 的 Character，只有在地点和感知渠道上真的可见时才收到；
+- 已经 split 离开的 Character 不会因为过去同组而自动收到；
+- 历史 Event 仍保存 `root_session_id_at_commit`，不会被当前 root 反向改写；
+- Director 和 Broadcast 都不是故事 Character，不拥有 UnionPart 节点。
+
+若将来确实需要“同一地点内跨 Session 的广播”，应为 Staff/Event 增加显式 `delivery_scope=location`，并由 AgentViewBuilder 校验；不能偷偷把 `session` 语义扩大为地点广播。这个扩展不进入首轮 MVP。
+
+## 8. 消费游标、事务与恢复
+
+当前 MVP 假设每个 World 只有一个逻辑 Director consumer，在 `worlds` 保存：
+
+```text
+director_event_cursor
+```
+
+处理 committed Event 时：
+
+```text
+read next event after cursor
+-> build DirectorView
+-> decide enqueue or no_op
+-> transaction:
+     insert EventStaff if needed
+     advance director_event_cursor
+```
+
+Staff 插入与 cursor 前移必须处于同一 SQLite transaction。否则：
+
+- 先前移 cursor、后插入失败，会永久漏掉后台过程；
+- 先插入、后前移失败，会在重试时重复入队。
+
+唯一键提供第二层幂等保护。DirectorRunner 还要独立查询到期的 pending Staff；事件消费游标不能代替时间唤醒队列。
+
+`release/cancel` 必须把 Staff 状态、对象当前状态、新 WorldEvent（若有）和 `worlds.current_version` 放进同一 transaction。进程崩溃后只会看到事务前或事务后，不会看到“咖啡已 ready 但 Staff 仍 pending”的半状态。
+
+## 9. “释放给角色”与 Broadcast Agent 不是一回事
+
+项目中容易混淆三个动作：
+
+```text
+Director release EventStaff
+-> 让一个客观环境结果进入 World
+
+AgentViewBuilder project WorldEvent
+-> 决定哪些 Character 可以感知这个结果
+
+Broadcast Agent project committed events
+-> 决定玩家如何看到这些结果
+```
+
+所以“咖啡煮好了广播给当前 EventSession”在精确术语中是：
+
+1. Director 请求 release；
+2. WorldUpdater 提交 `coffee_ready`；
+3. AgentViewBuilder 以当前 UnionPart 成员为候选并执行硬可见性过滤；
+4. Character 的 CognitiveController 决定是否注意、是否写入自己的 Memory；
+5. Broadcast Agent 稍后选择是否把该 Event 编进 WebGAL。
+
+Director 不能直接把一句文本 push 到每个 Character 的 Prompt 或 Memory；否则会绕过 WorldEvent、可见性和 Character attention。
+
+## 10. Broadcast 的只读输入与产物
+
+Broadcast 只读取稳定到某个 `event_watermark` 的 committed `world_events`，通过以下关系组织多条 EventSession 流：
+
+- `event_order + world_time`：客观先后；
+- `root_session_id_at_commit`：事件发生时的互动分区；
+- `in_reply_to_event_id / caused_by_event_id`：回应与因果；
+- `SessionPartitionChanged`：merge/split 的历史连接。
+
+输出至少保留：
 
 ```text
 BroadcastPlan
-  selected_event_id
+  source_event_ids
   source_world_interval
   projection_mode
-  target_render_duration
-  camera/viewpoint
-  reveal_scope
+  viewpoint
   transition
   artistic_reason
-  evidence_ids
+
+RenderArtifact
+  render_id
+  source_event_ids
+  based_on_world_version
+  structured_beats[] {
+    source_event_ids
+    truth_kind: fact | quote | inference
+  }
+  compiled_webgal_script
+  provenance_sidecar
+  content_hash
 ```
 
-`projection_mode` 至少包括：
+Broadcast 可以省略、压缩、切镜和加入明确标记的演出推断，但不能：
 
-```text
-continuous      连续演出
-omit            省略纯技术空档
-compress        压缩低信息时间
-cutaway         切至另一并发 Event
-montage         聚合赶路/重复劳动等长动作
-summarize       用旁白/摘要跨越历史
-dramatic_pause  明确艺术理由的停顿或沉默
-replay          从历史 Event Log 回放
-```
+- 制造 `coffee_ready`；
+- 改写 Character 的原话；
+- 改变 Event 顺序或因果；
+- 将展示结果写回 World 或 Character Memory。
 
-### 3.3 导播不能做什么
+## 11. 当前实现与分支复用结论
 
-- 不能改变 WorldEvent 参与者、时序和结果；
-- 不能把没发生的台词补成“更好看的剧情”；
-- 不能未经 Director Completion 就自行把纯推理 latency 翻译成角色沉默或咖啡完成；
-- 不能为了 Render Buffer 方便而宣称世界停止；
-- 不能把相机没拍到等同于 Event 没发生。
+当前主分支的 `agent_runtime/agent/director/` 仍只是边界占位，没有 EventStaff Runtime。`extensions/dynamic-render/` 仍消费 Fixture Timeline，尚未接入真实 WorldEvent feed。
 
-一句话边界：
+`origin/mvp` 的 Director 会看到完整 Snapshot 和一轮未提交 Proposals，并负责 Segment Completion。这个输入范围和权力与 D-044 冲突，因此不复用其 Director request、strategy 或调度模型。
 
-> 导播控制选择、压缩和表达；它不控制事实。
+可以选择性复用的只有：
 
-## 4. 两层不是上下级流水线
+- strict/frozen contract 和判别联合写法；
+- source/evidence/provenance 字段设计；
+- SQLite transaction、唯一约束和 rollback 测试；
+- committed Event 之后再做感知投影的原则；
+- 重启恢复、重复消费和故障注入测试思路。
 
-最危险的误解是：
+## 12. MVP 尚待验证
 
-```text
-Director 写剧情 -> Character 照演 -> Broadcast 拍出来
-```
+以下不是 Director 权限开放项，而是实现前必须用 Golden Trace 冻结的机制：
 
-这会退化为传统脚本生成，角色没有真正自治。更合理的闭环是：
+1. `world_time / next_check_at / earliest_release_at` 的具体时钟语义；
+2. 每种 object process 如何生成 enqueue/release/cancel affordance；
+3. 硬 deadline 的确定性 fallback；
+4. 同一 subject 上互斥 Staff 的约束；
+5. cancel 是否总生成可感知 WorldEvent；
+6. 单 World 单 Director cursor 的并发和恢复测试；
+7. merge/split 前后释放事件的收件人测试；
+8. Director 模型失败、超时或输出越权时的 retry/keep 策略；
+9. Broadcast 的真实 WorldEvent ingress、Viewer Cursor 和 Artifact 持久化。
 
-```text
-Character generation 返回局部角色输出
-       |
-       v
-Director Segment Completion -> Validator / Committer -> World Segment
-       |
-       +--> 下一轮 Character Agents 在局部认知下自主响应
-       +--> Narrative Director 低频观察线程并向未来施加 Constraint/Stimulus
-       +--> Broadcast 从已提交历史选择观看方式 -> Render / Viewer
-```
-
-Narrative Intervention 只能进入**未来世界条件**；Segment Completion 只能补完尚未提交的当前 generation wave；Broadcast 只能进入**展示计划**。三者都不能回写已经提交的 WorldEvent。
-
-### 4.1 Director 与 Broadcast 之间设置反馈防火墙
-
-```text
-在线允许
-  Runtime 拒绝原因 -> Director 重新选择未来机会
-  缺少 Ready Render / 播放故障 -> Broadcast 重新调度展示
-
-在线禁止
-  热度 / 弹幕 / 高潮评分 -> 当前局 Director 或 Character
-  Broadcast 精选片段 -> Character Memory
-
-局后可选
-  聚合观看指标 -> 下一局策略评估
-  但必须同时约束事实准确、角色自主、连贯性与多样性
-```
-
-否则系统会形成“观众爱看争吵 → 导演继续制造争吵 → 导播继续只拍争吵”的 spectacle feedback loop，最终世界不再自然，只剩注意力优化。
-
-若玩家投票或弹幕确实要影响世界，必须由 Runtime 把它提交为带来源、可感知、可拒绝的世界事件，而不是隐藏 Reward。
-
-### 4.2 Watermark 与事实成熟度
-
-Broadcast 只消费 Runtime 声明稳定到某一 `event_watermark` 的事实。面对迟到 Agent 结果或仍在 ACTIVE 的 Event，导播必须标记：
-
-```text
-fact       已提交客观事实
-quote      角色明确说过的话
-inference  导播/叙事解释，不能伪装为角色内心事实
-unknown    世界尚未确认
-```
-
-这样可以避免“先解说成真，后面 Runtime 又提交相反事实”。
-
-## 5. Timeline 是世界执行语义，不是 UI
-
-Timeline 同时承载：
-
-- `ActionInterval`：动作何时开始、完成或中断；
-- `InteractionSession`：邀请、接受、会话和结束；
-- `EpistemicTime`：角色何时知道某条信息；
-- `Plan/Commitment`：计划和承诺何时建立、冲突、失效；
-- `WorldTransaction`：客观事实与因果链；
-- `WorldEvent`：可被叙事理解的事件区间；
-- `BroadcastProjection`：世界区间怎样投影成演出；
-- `ViewerCursor`：玩家看到了哪里。
-
-它还必须显式保留两个来源不同的时间：
-
-- `MeasuredGenerationSpan`：Agent/工具真实花费的时间；
-- `DirectorCompletedInterval`：这段时间在世界语义中被怎样解释、哪些动作仍然开放。
-
-程序可以校验区间，却不通过通用硬编码表替 Director 决定“咖啡应在第几秒煮好”。
-
-因此核心研究对象是 Timeline-Driven Multi-Agent World Runtime；`WorldEvent -> RenderArtifact -> WebGAL DSL` 只是它的一个 Projection Adapter。
-
-## 6. 两层各自的宏观算法问题
-
-### Director Agent
-
-1. **Temporal Completion：**怎样结合真实响应耗时，补出自然的 start/continue/interrupt/complete，而不靠固定 duration？
-2. **Causal Completion：**多个 Character 的局部输出之间缺少哪些桥接事实和对象变化？
-3. **Cross-event Reconciliation：**多 Event 异步返回时，怎样形成一个没有共享角色冲突的全局 Segment？
-4. **Thread State Estimation：**哪些剧情线程活跃、停滞、过早解决或即将失效？
-5. **Narrative Constraint Planning：**怎样给未来施加时间窗和软目标，而不直接决定角色动作？
-6. **Stimulus Selection：**注入哪个可感知世界刺激，既能创造机会又不显得“作者之手”？
-7. **Autonomy/Control Trade-off：**剧情推进与角色一致性冲突时如何权衡？
-8. **Minimal Intervention：**怎样以最少刺激让场景保持可达，而不是不断重试直到角色配合？
-
-### Broadcast Agent
-
-1. **Event Selection：**并行世界中现在应该看哪一条？
-2. **Temporal Projection：**哪些时间连续展示，哪些省略、压缩或切镜？
-3. **Information Control：**如何避免通过镜头把角色不知道的秘密错误传给玩家或反过来？
-4. **Continuity：**切换地点/角色后如何保持因果、情绪和视觉连续性？
-5. **Buffer-Aware Planning：**在 Ready Render 不均衡时怎样维持体验，又不扭曲世界事实？
-6. **Truthful Narration：**如何把 fact、quote、inference 和 unknown 分开呈现？
-
-## 7. 当前建议的最小研究版本
-
-### Director MVP
-
-- 每个 generation wave 先生成一个可校验 SegmentDraft；
-- 只支持 `start / continue / interrupt / complete` 四类动作迁移和 Event `open / continue / close`；
-- 输入必须包含各 Agent latency 和当前 active Event，允许事件跨多 wave 保持 ACTIVE；
-- 用 Anon/Soyo 排队、冲咖啡和被打断的 trace 检查是否存在硬编码 duration；
-- Validator 失败返回结构化冲突，再让 Director 修补一次；
-- Director 自身 latency 的绑定策略先作为显式实验项，禁止静默忽略；
-- 以下才属于低频 Narrative Intervention：
-- 维护 3–5 条 Narrative Thread；
-- 每条只有 `state / tension / deadline / involved_characters / evidence`；
-- 动作只允许 `boost_thread / suppress_thread / inject_stimulus / set_guardrail / do_nothing`；
-- 不允许生成角色台词；
-- 每 1–5 个 WorldEvent 或线程停滞时决策一次，不逐 tick 控制；
-- Thread 结果允许 `completed / transformed / missed / expired`；角色拒绝配合不是 Runtime Failure。
-- 每场最多 2 次主动刺激，设置干预算与冷却；LLM 提候选，确定性策略过滤和选择。
-
-### Broadcast MVP
-
-- 只处理已关闭或已冻结 revision 的 WorldEvent；
-- 每次从 3 条 Event 中选 1 条；
-- 只允许 `continuous / omit / cutaway / summarize / dramatic_pause`；
-- 每个选择必须带 evidence 和 `artistic_reason`；
-- 不生成新世界事实，只生成结构化 BroadcastPlan。
-- 只消费 `event_watermark` 之前的事实；caption 明确区分 fact/quote/inference。
-- 相同 World Event Cassette 下，开启或关闭 Broadcast 不得改变世界事件序列。
-
-## 8. 仍未确定的研究问题
-
-- Director 的目标函数由作者配置、人工偏好、Judge 还是学习策略定义？
-- 硬剧情锚点应约束世界状态、Event 出现，还是只约束“创造机会”？
-- Character Agent 连续拒绝导演创造的机会时，导演如何升级压力而不操偶？
-- Broadcast 是否可以把玩家兴趣作为未来 Director 的弱反馈？怎样避免世界为了观众注意力退化成持续狗血？
-- Director Completion 应依据哪些 Character 输出、行为 evidence 和 latency trace，把区间标注为 `generation_gap / character_hesitation / environment_wait / narrative_action`？Broadcast 如何在不重新解释世界语义的前提下消费该分类？
-- Director 的补完调用本身也消耗时间，怎样避免为解释自身 latency 而递归调用？
-- Director 输出相对区间后由 Binder 拉伸到 measured span，是否会扭曲自然动作持续时间？
-- 一个 Event 应跨多少 generation wave 才能自然完成；如何避免 Director 每轮都急于闭合？
-- 多玩家同时观看不同 Event 时，是否共享一个世界、一个 Director，但各自拥有独立 Broadcast Agent？
-- Director 与 Broadcast 是否应共享基础模型但使用不同 Memory/Tool/Reward，还是彻底隔离？
-- 如何量化“剧情连贯性提高但角色自主性没有下降”：计划保留率、拒绝率、行动分布熵和反事实差异是否足够？
-- 训练与评估是否必须使用完整 Event Log，而不是 Broadcast 精选片段，以避免 spectacle selection bias？
-- 隐形观众镜头与世界内摄像/直播会造成不同 observer effect，是否需要 broadcast/no-broadcast 成对回放？
-
-这些问题是本项目高层算法研究的核心，当前不应提前冻结成实现细节。
+首条验收 Trace 应至少覆盖：只说要煮咖啡不入队、实际启动后入队、未到时间拒绝 release、完成时原子提交、途中取消、Session merge、Session split、Director 重启和 Broadcast 来源追溯。

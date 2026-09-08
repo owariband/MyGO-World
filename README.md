@@ -10,10 +10,13 @@ generative_go_world/
 │   ├── agent/
 │   │   ├── personact/
 │   │   │   ├── agent.py    # PersonActAgent 门面与 snapshot 事务
-│   │   │   └── loop.py     # typed prepare/perceive/retrieve/plan/propose
+│   │   │   ├── loop.py     # typed prepare/perceive/retrieve/plan/propose
+│   │   │   └── model_strategy.py # Skill 驱动的模型 CognitionStrategy
 │   │   ├── memory/         # scoped Agent Memory
+│   │   ├── skill.py        # 版本化 Runtime Skill 与整文件 hash pin
 │   │   ├── director/       # Director 边界；实现待补
 │   │   └── broadcast/      # Broadcast 边界；实现待补
+│   ├── model_gateway.py     # typed LangChain ChatModel/Fixture seam
 │   ├── event/              # 外部 Scheduler/Event 生命周期（边界已建，实现待补）
 │   ├── world/              # 客观事实与 Commit 权威
 │   └── rendergateway/      # RenderJob 出站边界
@@ -65,7 +68,7 @@ uv run pyright
 uv run pytest
 ```
 
-当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State 与检索基础，以及 `PersonActAgent.decide` 的 prepare/perceive/retrieve/plan/propose Slice。外部 Event Scheduler 拥有循环；`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`，需要 wire JSON 时再调用 `model_dump_json(by_alias=True)`。Proposal 使用固定 envelope + discriminated action union，不包含 `move` variant、`locationId` 或多目标 `targetIds`。Reflection/commit feedback、Director、World Commit、Event Scheduler 与 Render ingress 仍待实现。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
+当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State 与检索基础，以及 `PersonActAgent.decide` 的 prepare/perceive/retrieve/plan/propose Slice。Character Skill 由版本和整文件 SHA-256 固定，模型型 `CognitionStrategy` 通过 typed LangChain ChatModel Gateway 产出 strict Pydantic 草稿，并把 schema/Proposal 语义 repair 限制为最多一次。外部 Event Scheduler 拥有循环；`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`，需要 wire JSON 时再调用 `model_dump_json(by_alias=True)`。Proposal 使用固定 envelope + discriminated action union，不包含 `move` variant、`locationId` 或多目标 `targetIds`。Reflection/commit feedback、Director、World Commit、Event Scheduler、持久化 Generation Trace 与 Render ingress 仍待实现；当前只有离线 Fixture/Fake ChatModel 验证，不代表真实 Provider 已验收。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
 
 默认项目是 `rain-after`。开发服务器优先提供本仓库的自研 Overlay，并在文件不存在时从 `WEBGAL_ROOT` 提供 WebGAL 页面、Bundle、素材和媒体文件。
 

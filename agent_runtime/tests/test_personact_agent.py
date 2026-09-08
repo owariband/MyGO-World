@@ -36,6 +36,7 @@ from agent_runtime.agent.personact.state import (
     PersonaState,
     ScheduleItem,
 )
+from agent_runtime.agent.skill import RuntimeSkillCatalog
 from agent_runtime.world.contracts import (
     Affordance,
     AttentionTier,
@@ -49,6 +50,7 @@ from agent_runtime.world.contracts import (
 
 NOW = datetime(2026, 8, 31, 9, 5, tzinfo=UTC)
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
+SKILLS_PATH = Path(__file__).parents[2] / "content" / "skills"
 
 
 @dataclass(slots=True)
@@ -696,6 +698,7 @@ def _spec(
     catalog = Catalog(
         tools=(ToolDefinition(id="visible_location.query", version="1", mode=ToolMode.QUERY),),
         prompts=(PromptDefinition(id="personact.v1", version="1", digest="prompt-v1"),),
+        skills=RuntimeSkillCatalog.load(SKILLS_PATH).skills,
     )
     spec = compile_manifest(load_manifest(FIXTURE_PATH), catalog)[0]
     if write_policy is None:
@@ -714,6 +717,7 @@ def _spec(
         allowed_proposal_kinds=spec.allowed_proposal_kinds,
         tools=spec.tools,
         behavior=spec.behavior,
+        character_skill=spec.character_skill,
         prompt=spec.prompt,
     )
 

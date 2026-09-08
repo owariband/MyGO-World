@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, ValidationError
 
 from agent_runtime.agent.personact.errors import ManifestDecodeError
+from agent_runtime.agent.skill import RuntimeSkillReference
 from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import ProposalKind
 
@@ -105,11 +106,12 @@ class NPCDefinition(StrictModel):
     memory: MemoryDefinition
     capabilities: CapabilityRequest
     behavior: BehaviorDefinition
+    character_skill: RuntimeSkillReference
     prompt_profile: NonEmptyText
 
 
 class Manifest(StrictModel):
-    format_version: Literal[1]
+    format_version: Literal[2]
     project_id: AgentIdentifier
     agents: Annotated[tuple[NPCDefinition, ...], Field(min_length=1, max_length=128)]
 

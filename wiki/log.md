@@ -95,3 +95,28 @@
 - Python 环境管理统一使用 uv：`.python-version` 固定解释器，`pyproject.toml` 声明依赖，`uv.lock` 锁定解析结果，安装与工具执行统一走 `uv sync --frozen` / `uv run`。
 - 曾尝试把 `agent/personact/` 泛化为 `agent/character/`，并另建空的通用 loop/adk package 代表共享生命周期；用户指出这既隐藏 PersonAct，也没有让真实 loop 在目录中显式可见，因此该方案被否决。
 - 将已实现的 PersonAct 代码按真实职责拆成 `personact/agent.py + personact/loop.py`：前者保留并发、replay 与 snapshot 事务门面，后者承载 typed RunnableSequence 和五个认知阶段；算法与公开 `PersonActAgent.decide` 不变。另新增 `agent/director/`、`agent/broadcast/`、`event/` 与 `rendergateway/` 所有权目录。
+
+## 2026-09-01
+
+- 审计 `origin/mvp@febf9d1` 后确认其与 `master` 无 merge base，且 same-snapshot lockstep 与当前同 Event 逐角色提交语义冲突；新增 D-041/H-037，明确只做契约级选择性融合。
+- 融合 strict Runtime Skill、版本/整文件 SHA-256 pin、typed LangChain ChatModel/Fixture Gateway、`ModelCognitionStrategy`、transport retry、最多一次 schema/semantic repair 和有界非秘密 `ModelCallTrace`；不迁移 move、Proposal memory changes、Wave/World DB Runtime。
+- 将 Character Skill 绑定加入 Manifest v2 与 `CompiledPersonActSpec` digest，迁入 Anon/Soyo/Tomori/Rana/Taki 五份人工 Gold Skill；Anon/Soyo 是当前 Fixture 实例，其余三份暂为内容资产。
+- 明确 Manifest Persona、Character Skill 与 Prompt Profile 的分权，并保持真实 PersonAct Loop 位于 `agent/personact/loop.py`。完整 Generation Trace 持久化、生产 Provider、Director/Broadcast、Scheduler 与 World Commit 仍未实现。
+
+## 2026-09-07
+
+- 新增 [MVP 完善开发计划](design/MVP_dev.md)：将 `Ledger / Committer / PerceptionProjector` 分别改用 `WorldChangeLog / WorldUpdater / AgentViewBuilder` 等职责直观的命名，并明确 `PersonActLoop` 概念上可归入未来更广的 `CognitiveController`，但 MVP 暂不新增该抽象。
+- 以最新 `origin/mvp@05c5404` 重新分类可复用内容：选择性移植世界版本、append-only 变更、Entity revision、Snapshot、EventSession 固定成员/后继 lineage、SQLite 原子事务与故障恢复测试；继续拒绝 lockstep wave、旧 Proposal/Perception 模型和自动整组 merge 策略。
+- 将同一 EventSession 发言—回应、角色 merge/split/transfer、跨进程恢复和 Render 消费定为 MVP 核心验收，并集中记录待重设计的 response obligation、Session 转换、硬可见性、调度空转及 World/Agent Memory 一致性问题。
+- 用户进一步否决随组合变化不断创建 successor Session 的方案：EventSession 改为每 Agent 一个稳定节点，通用无业务数据结构命名为 `UnionPart[T]`，仅维护 merge/split、root mapping 与 root member set；World 只原子更新 root binding，并在 `WorldChangeLog` 中保存版本化变化。该结构解决互动组合的底层表示，但 Agent 是否加入/退出仍由可见 affordance、角色 Proposal、Validator 和 commit 共同决定。
+- 用户确认删除 MVP 冗余持久化表：首批 schema 收敛为关系型当前状态、稳定 Session root、`world_events` 与隔离 Agent Memory，不建立 `world_changes / world_versions / entity_revisions / world_snapshots`；任意历史版本重建与逐版本 checkpoint 延后。
+- 补充开场初始化与目录归属：作品 `scenario.yaml` 提供公共世界、初始 root 分区以及面向全员/指定角色的知识分配；根级 bootstrap 负责跨域装配，`world/` 只拥有公共事实/持久化/View/Update，角色稳定配置与认知信息分别归 `agent/personact`、`agent/memory`，模型常识不复制进 World DB，会影响合法动作的条件必须由 Fact/Affordance 明示。
+- 冻结互动与 Director/Broadcast 的持久化分层：`world_events` 是 Character 互动、Session 变化和已接受 Director 外部刺激的唯一客观历史；`interaction_requests` 只保存带来源 Event 的待回应/加入当前状态；Agent Memory 保存引用 `source_event_id` 的主观认知；Broadcast 通过 root-at-commit、reply/cause 与分区变化跨流编排，并让 BroadcastPlan/RenderJob 保留 `source_event_ids`，不得把 WebGAL 演出回写 World。
+- 校准现有 Dynamic Render：Fixture `timeline.json` 可编译和播放，但 `played/active/selected` 仍只在 Node 进程内存，尚未实现真实 WorldEvent feed、RenderJob ingress、Artifact 和 Viewer Cursor 持久化；列为 Phase 7 缺口。
+- 用户进一步重定义 Director：否决同日以前的 Segment Completion、Narrative Intervention、Narrative Thread、剧情压力和地点 DiscoveryPlan。Character Proposal 改为直接经 Validator/WorldUpdater 提交；Director 只在 committed Event 之后管理 EventStaff。
+- 冻结关键因果边界：“我要煮咖啡”的 utterance 只证明台词发生，不能触发 `coffee_ready`；必须先由 Character 自主提交 `coffee_brewing_started` 或等价 process-start Event，World 才能向 Director 暴露 enqueue affordance。
+- 新增 D-044/H-038 和 EventStaff 专题：DirectorView 只包含一个 committed trigger/待检查 Staff、有限因果窗口、直接对象/地点/稳定 Session 当前 root/members 和 World 计算的 affordance；排除 Character 私有认知、未提交 Proposal、无关 Session、InteractionRequest 调度和 Viewer/Broadcast 数据。
+- EventStaff 持久化为 `event_staff` queue；Director 只能 `enqueue / keep / release / cancel / no_op`。enqueue/no-op 与消费 cursor 同事务，release/cancel 与 Staff、Object、新 WorldEvent 和 world version 同事务；Staff 绑定稳定 session node，释放时再解析 UnionPart 当前 root 并由 AgentViewBuilder 过滤收件人。
+- 明确 Director release、AgentView 投影和 Broadcast 观看投影是三个动作；Director 不能直接向 Character Prompt/Memory 广播文本，Broadcast 也不能制造客观完成事件。
+- 同步修正架构、机制、Runtime 落地、地点、NPC DIY、未决问题与难点账本；地点公开信息由 AgentViewBuilder 确定性过滤，需要传播行为时由 Character/System 自己提交，Director 不再参与信息披露。
+- 代码审计发现 EventStaff 的前置阻塞：当前 `Affordance` 只有 `kind+target`，`InteractAction` 只有 `target+description`，不能稳定证明 `start_brewing`。将 World-issued `affordance_id/operation_id`（或等价 typed operation union）列入 Phase 0；自由文本 description 不得单独触发 Object state change 或 Staff。

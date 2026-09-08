@@ -2,17 +2,18 @@
 
 ## 0. 文档状态与交接入口
 
-本页是下一开发 Session 的一期执行依据，更新时间为 2026-08-31。阅读时必须区分实现事实与目标方案：
+本页是下一开发 Session 的一期执行依据，更新时间为 2026-09-07。阅读时必须区分实现事实与目标方案；更细的自由互动开发顺序以 [MVP 完善开发计划](design/MVP_dev.md) 为准：
 
 - **已实现并验证的 Render 底座：**`extensions/dynamic-render/` 已具备 Fixture Timeline、Render 校验/编译、进程内队列、Event 切换、黑屏 Host 和 `TEMP_SCENE` 注入。
 - **已实现的 PersonAct Slice：**当前 `agent_runtime/` 已有严格 Manifest/Compiler、strict/frozen Persona Memory/State、固定 ActionProposal envelope + action union，以及 `PersonActAgent.decide`。真实 Decision path 已包含 prepare、perceive、retrieve、plan、propose；同一 Agent 的调用由实例锁串行化，成功后一次替换包含 state/memory/trace 的 immutable private snapshot，并暴露只读视图。
+- **已实现的模型 Strategy seam：**Manifest/Compiler 可绑定 exact Character Skill version/hash；`ModelCognitionStrategy` 覆盖 poignancy、daily plan 与 action draft，使用 typed LangChain ChatModel/Fixture Gateway、structured output、仅 transport retry、最多一次 schema/semantic repair，以及不保存 Skill/Memory 正文的调用 provenance。当前只完成离线契约验证，尚未完成真实 Provider acceptance 或 trace 持久化。
 - **公开 PersonAct 边界：**外部 Event Scheduler 拥有循环，只调用 `PersonActAgent.decide(...)`；一次调用只为 `spec.agent_id` 对应的角色返回一个 strict/frozen `ActionProposal` 对象。需要 wire JSON 时调用 `proposal.model_dump_json(by_alias=True)`。Agent 不暴露 `Persona.move()`，不实现 Maze、path/tile movement 或 `execute`。
-- **尚未实现：**reflection/commit feedback、持久化 Memory Store、Director、Temporal Binder、World Validator/Committer、World/Event Ledger、Event Scheduler、完整咖啡 Golden Trace、Broadcast、Render ingress、真实 ChatModel 和约 30 分钟领先库存。不得把 PersonAct Slice 表述成完整 Agent Runtime。
+- **尚未实现：**reflection/commit feedback、持久化 Memory Store、EventStaff Director、WorldChangeValidator/WorldUpdater、WorldEventHistory、EventSessionRunner、AgentViewBuilder、完整咖啡 Golden Trace、Broadcast、Render ingress、真实 Provider acceptance、Generation Trace 持久化和约 30 分钟领先库存。不得把 PersonAct Slice 表述成完整 Agent Runtime。
 - **现行技术方向：**Python 3.12、`langchain-core==1.6.1`、Pydantic strict/frozen Model、pyright strict、ruff、pytest 与 uv。当前不使用 LangGraph。
 - **继续有效的领域边界：**`agent / event / world` 所有权、Memory namespace 隔离、Agent 只产出 Proposal/Plan、Event Scheduler 独占循环、同 Event 串行与隔离 Event 并行，以及 `BroadcastPlan -> RenderJob -> Dynamic Render`。
-- **Open Research：**真实 Prompt、Memory 检索权重/embedding 质量、Director 自身 latency、跨 Event 共享实体归约、30 分钟领先库存、自适应调度、Character Skill 提取与训练。
+- **Open Research：**真实 Prompt 质量、Memory 检索权重/embedding 质量、World time 与 EventStaff 唤醒时钟、跨 Event 共享实体归约、30 分钟领先库存、自适应调度、Character Skill 自动提取与训练。
 
-结论是：**PersonAct 单次认知与 Proposal 边界已经落地，但完整 Runtime 尚未实现。** 第一个完整里程碑仍是把提交后 feedback、世界提交、时间证据与多 Event 调度做成可重放 Trace，而不是先追求剧情质量。
+结论是：**PersonAct 单次认知与 Proposal 边界已经落地，但完整 Runtime 尚未实现。** 第一个完整里程碑是把 Scenario 初始化、World 提交、AgentView、EventSession 自由互动、EventStaff 和提交后 feedback 做成可重启 Trace，而不是先追求剧情质量。
 
 ## 1. 定位与技术边界
 
@@ -22,8 +23,9 @@
 Python Agent Runtime
   Event Scheduler: choose actor -> build DecisionRequest -> call decide -> consume one Proposal
   PersonActAgent.decide: DecisionRequest -> one strict/frozen ActionProposal
-  Director / Broadcast: 各自独立的 typed Runnable 或确定性策略（待实现）
-  World Validator / Committer -> Ledger（待实现）
+  WorldChangeValidator / WorldUpdater -> WorldEventHistory（待实现）
+  Director: DirectorView -> EventStaffDecision（待实现）
+  Broadcast: committed Event range -> BroadcastPlan（待实现）
               |
               | BroadcastPlan -> deterministic Render Planner -> RenderJob
               v
@@ -38,7 +40,7 @@ LangChain Runnable 是 `decide` 内部的编排工具，不是 Agent 的公共�
 
 ### 1.1 自研 NPC ADK 与 LangChain 的关系
 
-本仓库实现的是 **Generative Go World NPC ADK**：Creator Manifest、受信编译、Persona 私有 State/Memory、认知语义、ActionProposal 协议、权限校验和可重放 Trace 均由项目代码定义。LangChain Core 只是内部编排与模型接入依赖，不能替代这些领域能力，更不拥有 Scheduler 或 World Commit。
+本仓库实现的是 **Generative Go World NPC ADK**：Creator Manifest、受信编译、Persona 私有 State/Memory、认知语义、ActionProposal 协议、权限校验和 Trace 契约均由项目代码定义。LangChain Core 只是内部编排与模型接入依赖，不能替代这些领域能力，更不拥有 Scheduler 或 World Commit；当前只有内存 DecisionTrace 与 ModelCallTrace，完整可持久化重放仍待实现。
 
 ```text
 our NPC ADK = authoring contract + cognition + memory + action contract + safety boundary
@@ -63,7 +65,7 @@ PersonActAgent.decide(DecisionRequest) -> ActionProposal
 - 一次只为当前 `CompiledPersonActSpec.agent_id` 对应的角色决策；
 - 一次只返回一个 strict/frozen `ActionProposal` 对象，不在 Agent 内继续下一 tick、轮询其他角色或等待 World Commit；
 - `agentId` 由受信代码从 `spec.agent_id` 注入，CognitionStrategy、模型和创作者配置都不能提供或覆盖 actor；
-- 返回值只是一项候选意图；JSON 边界显式使用 `model_dump_json(by_alias=True)`。Scheduler 将 Proposal 交给 Director/Validator/Committer，提交后再决定后续唤醒；
+- 返回值只是一项候选意图；JSON 边界显式使用 `model_dump_json(by_alias=True)`。Scheduler 将 Proposal 交给 Validator/WorldUpdater，提交后再决定后续唤醒；
 - 不实现 `move` action，不接入 Maze、path、tile、地址解析、寻路或 `execute` 节点。
 
 迁移 Generative Agents 时只吸收 Persona 私有的 perception、memory retrieval、planning/reacting、reflection 等**认知语义**；不迁移其顶层 loop、`Persona.move()` 门面、movement 或世界副作用。
@@ -77,7 +79,7 @@ PersonActAgent.decide(DecisionRequest) -> ActionProposal
 | Python 静态类型 | 检查函数、Protocol、泛型与返回值接线 | 完整注解 + pyright strict |
 | 运行时结构边界 | 拒绝未知字段、隐式类型转换、污染实例和可变契约对象 | Pydantic `StrictModel`：`strict=True`、`extra="forbid"`、`frozen=True`、`revalidate_instances="always"`、`validate_default=True` |
 | Runnable 编排 | 组合显式输入/输出节点并传递 `RunnableConfig` | `Runnable[Input, Output]`、`RunnableLambda`、`RunnableSequence` |
-| 领域语义 | 校验 namespace、affordance、target、evidence、world version 与副作用权限 | 项目自己的 Compiler、Validator 与 Committer |
+| 领域语义 | 校验 namespace、affordance、target、evidence、world version 与副作用权限 | 项目自己的 Compiler、Validator 与 WorldUpdater |
 
 必须准确理解 `Runnable.with_types()`：它为 Runnable 绑定或暴露输入/输出类型信息，方便 Schema、工具和观测系统理解边界，**不会自动在 `invoke()` 时执行 Pydantic runtime validation**。因此：
 
@@ -87,7 +89,7 @@ PersonActAgent.decide(DecisionRequest) -> ActionProposal
 - 语义合法性仍由项目代码检查，Pydantic 只能证明结构合法；
 - 不以 `with_types()`、Python type hint 或 LangChain 泛型替代运行时校验。
 
-当前不引入 LangGraph。`decide` 是一次有界决策调用；在出现经过证据验证的复杂分支、暂停恢复或持久执行需求前，不支付 LangGraph 的状态模型、checkpoint 和迁移成本。即使未来引入，Event Scheduler 的循环、World Snapshot、Ledger 和 commit protocol 也不能交给图状态。
+当前不引入 LangGraph。`decide` 是一次有界决策调用；在出现经过证据验证的复杂分支、暂停恢复或持久执行需求前，不支付 LangGraph 的状态模型、checkpoint 和迁移成本。即使未来引入，EventSessionRunner 的循环、SQLite 当前状态、WorldEventHistory 和 commit protocol 也不能交给图状态。
 
 ### 1.4 Python 环境统一使用 uv
 
@@ -104,6 +106,7 @@ uv run pytest
 - `.python-version` 固定 Python 3.12；
 - `pyproject.toml` 是依赖与工具配置源；
 - `uv.lock` 是可重现依赖锁；
+- `pyyaml==6.0.3` 只用于读取 strict Runtime Skill frontmatter；
 - 新增依赖使用 `uv add <package>`，开发依赖使用 `uv add --dev <package>`；
 - 不维护并行的 `requirements.txt`、Poetry/Conda 环境，也不直接执行 `pip install` 改写项目环境。
 
@@ -115,8 +118,10 @@ uv run pytest
 agent_runtime/
 ├── __init__.py
 ├── model.py                         # 全局 StrictModel 策略
+├── model_gateway.py                 # typed ChatModel/Fixture structured-output seam
 ├── agent/
 │   ├── memory/                       # 共享机制，数据按 namespace 隔离
+│   ├── skill.py                      # 版本化 Runtime Skill 与整文件 hash pin
 │   ├── director/                     # Director Agent 类型边界；实现待补
 │   ├── broadcast/                    # Broadcast Agent 类型边界；实现待补
 │   └── personact/                    # 具体 Character Agent；Anon/Soyo 是实例
@@ -125,6 +130,7 @@ agent_runtime/
 │       ├── state.py                  # Persona 私有 state；不是 World State
 │       ├── agent.py                  # decide 门面、锁、replay、snapshot 事务
 │       ├── loop.py                   # typed PersonAct 认知循环与五个阶段
+│       ├── model_strategy.py         # Skill 驱动的模型 CognitionStrategy
 │       ├── errors.py
 │       └── proposal.py               # 最终 Proposal 构造与权限校验
 ├── world/
@@ -135,6 +141,7 @@ agent_runtime/
 └── tests/
     ├── test_personact.py
     ├── test_personact_agent.py
+    ├── test_model_strategy.py
     ├── test_persona_state.py
     └── test_memory.py
 ```
@@ -148,32 +155,48 @@ agent_runtime/
 ```text
 agent_runtime/
 ├── model.py
+├── model_gateway.py
+├── bootstrap.py                     # Scenario/Manifest/World/Agents/Runner 的装配入口
+├── scenario.py                      # 跨 World/Agent 的开场初始化契约与 loader
+├── sqlite.py                        # 共享 engine/session/transaction；不包含领域规则
+├── common/
+│   └── union_part.py                # 无业务语义的 merge/split 分区结构
 ├── agent/
+│   ├── skill.py
 │   ├── personact/
 │   │   ├── manifest.py
 │   │   ├── compiler.py
 │   │   ├── state.py
 │   │   ├── agent.py                 # 一次决策门面；不拥有 Scheduler loop
 │   │   ├── loop.py                  # prepare/perceive/retrieve/plan/propose
+│   │   ├── model_strategy.py         # typed model calls and bounded repair
 │   │   └── proposal.py              # Proposal authority boundary
-│   ├── director/                    # SegmentDraft；待实现
+│   ├── director/                    # DirectorView / EventStaffDecision；待实现
 │   ├── broadcast/                   # BroadcastPlan；待实现
 │   └── memory/                      # in-memory scoped stream/retriever 已实现；持久化待实现
-├── event/                           # EventSession/Scheduler/Recognizer；待实现
-├── world/                           # Snapshot/Projector/Binder/Validator/Committer/Ledger
+├── event/                           # EventSessionNode/Runner 与互动调度；待实现
+├── world/                           # 公共状态及其关系表、Initializer、Updater、AgentViewBuilder
 ├── rendergateway/                   # RenderJob 出站适配器；待实现
 ├── tests/
 └── testdata/
+content/
+└── skills/characters/              # 版本化 Character Skill 配置资产
+projects/<project-id>/
+├── agents.json                     # 本作品角色实例与稳定私有配置
+└── scenario.yaml                   # 开场公共世界、初始 Session 分区与全员/指定角色知识分配
 ```
+
+角色 Skill 内容位于仓库根目录 `content/skills/characters/`；它们是配置资产，不是 Anon/Soyo 等角色的源码 package。
 
 目录按所有权表达边界：
 
-- `agent/personact/loop.py` 显式实现 typed `prepare -> perceive -> retrieve -> plan -> propose`；`agent.py` 的 `PersonActAgent.decide` 负责串行化、proposal-id replay 与成功后的 private snapshot 原子替换。它消费本人 `PerceptionFrame`、Persona 私有 state 与 scoped Memory，只返回一个 `ActionProposal`。Anon、Soyo 等由 Manifest 编译成该类型的不同实例；
-- `agent/director/` 只读取 Snapshot、Proposal 与时间证据，返回待校验 `SegmentDraft`；
+- `agent/personact/loop.py` 显式实现 typed `prepare -> perceive -> retrieve -> plan -> propose`；`agent.py` 的 `PersonActAgent.decide` 负责串行化、proposal-id replay 与成功后的 private snapshot 原子替换。它消费本人的 `AgentView/PerceptionFrame`、Persona 私有 state 与 scoped Memory，只返回一个 `ActionProposal`。Anon、Soyo 等由 Manifest 编译成该类型的不同实例；
+- `agent/director/` 只读取按 committed Event/Staff 裁剪的 `DirectorView`，返回 `EventStaffDecision`；不读取 Character Proposal 或私有认知；
 - `agent/broadcast/` 只读取已提交 Event，返回 `BroadcastPlan`；
 - `agent/memory/` 提供共用机制，但每次访问都绑定 `agent_id + namespace`，共用实现不等于共享数据；
-- `event/` 拥有 EventSession、轮次、Scheduler、Recognizer 和 Event 生命周期；Scheduler 决定何时、为谁调用 `decide`，不进入 Agent Runnable；
-- `world/` 拥有客观状态、Location、感知投影、时间绑定、校验、提交与 Ledger，不依赖具体 Agent 内部状态；
+- `scenario.py + bootstrap.py` 负责跨域初始化编排：预先校验全部输入后，在一个初始化 transaction 内将公共客观部分交给 World，并把 knowledge assignment 按 all agents 或显式接收者展开到各自 Agent Memory；它们不解释角色认知或世界规则；
+- `event/` 拥有 EventSession、轮次、Runner 和 Event 生命周期；Runner 决定何时、为谁调用 `decide`，不进入 Agent Runnable；
+- `world/` 拥有客观当前状态、Location、SQLite transaction、初始化物化、硬可见 AgentView 与原子更新，不依赖具体 Agent 内部状态；
 - `rendergateway/` 只投递不可变 RenderJob 并接收播放状态；
 - 装配入口只连接依赖，不成为万能 facade。
 
@@ -194,8 +217,8 @@ agent/personact
   -> consume one DecisionRequest + trusted spec/private context
   -> return one ActionProposal
 agent/director
-  -> consume Snapshot + Proposal + measured span
-  -> return SegmentDraft
+  -> consume one DirectorView for committed Event or pending Staff
+  -> return enqueue | keep | release | cancel | no_op
 agent/broadcast
   -> consume committed Event
   -> return BroadcastPlan
@@ -203,10 +226,10 @@ agent/broadcast
 world
   -> 不依赖 agent 的私有 state
   -> 不依赖 MyGO/WebGAL
-  -> 只有 Committer 能分配 world_version / commit_seq
+  -> 只有 WorldUpdater 能推进 worlds.current_version 并追加 WorldEvent
 ```
 
-禁止 PersonAct 持有其他 Agent 的 live object；禁止 `PersonActAgent.decide` 自己循环、选择下一角色、移动角色或执行动作；禁止 Director 直接写 Ledger；禁止 Broadcast 直接控制播放器；禁止把完整 WorldSnapshot 塞进模型消息绕过 PerceptionProjector。
+禁止 PersonAct 持有其他 Agent 的 live object；禁止 `PersonActAgent.decide` 自己循环、选择下一角色、移动角色或执行动作；禁止 Director 直接写 World Store；禁止 Broadcast 直接控制播放器；禁止把完整 World 当前状态塞进模型消息绕过 AgentViewBuilder。
 
 ### 2.4 `decide` 内部 Runnable 组合规则
 
@@ -228,7 +251,7 @@ world
 
 - `ReverieServer.start_server()` 使用浏览器文件同步 Persona 与 Maze，再按 Persona 字典顺序执行 `move()`；该顶层循环、文件 mailbox、固定步长与顺序副作用全部不迁移；
 - `Persona.move()` 只是 `perceive -> retrieve -> plan -> reflect -> execute` 的门面，真实实现由 `import *` 注入；本项目不实现或暴露这个门面，只把其中可验证的认知语义重新组织到单次 `decide`；
-- 原 `perceive.py` 混合空间学习、候选收集、距离筛选、新颖性、embedding 与记忆写入；本项目把硬可见性放在 World Projector，把注意力与主观解释留给 PersonAct；
+- 原 `perceive.py` 混合空间学习、候选收集、距离筛选、新颖性、embedding 与记忆写入；本项目把硬可见性放在 AgentViewBuilder，把注意力与主观解释留给 PersonAct；
 - 原 `plan.py` 会直接修改另一个 Persona 的 Scratch；本项目禁止 Agent 修改其他 Agent 的 live state；
 - 原 `execute.py` 处理地址、寻路与逐 tile 移动；本项目完全不迁移该模块，不提供 `move` 或 location action，只保留“认知结果成为 Proposal，副作用留在 World”这一边界；
 - 原 associative memory 的 evidence、recency、relevance、importance 思路可借鉴，但 keyword 归一化与 retrieval 写副作用必须显式化。
@@ -242,11 +265,11 @@ world
 | `path_finder.py` | 无 | 不迁移几何寻路 |
 | `persona/persona.py` / `Persona.move()` | 无 | 不实现门面；Scheduler 直接调用 `PersonActAgent.decide` |
 | `cognitive_modules/*` | `decide` 内部领域策略 | 迁移认知语义，不按原调用链逐文件复制 |
-| `perceive.py` | World Projector + PersonAct perceive | 前者裁剪可见性，后者处理注意力/新颖性 |
+| `perceive.py` | AgentViewBuilder + PersonAct perceive | 前者裁剪可见性，后者处理注意力/新颖性 |
 | `retrieve.py` | scoped Memory Retriever | 只查本 Agent namespace |
-| `plan.py` | `CognitionStrategy.plan_action` | Fixture strategy 已接入，后续再接 ChatModel |
+| `plan.py` | `CognitionStrategy.plan_action` | Fixture 与 ModelCognitionStrategy 已共用同一 Protocol |
 | `reflect.py` | 提交后的独立 feedback 路径 | 一期可 No-op，不和 Decision Run 混写 |
-| `execute.py` | 无 | 不迁移；副作用只由 Committer/Gateway 产生 |
+| `execute.py` | 无 | 不迁移；副作用只由 WorldUpdater/Render Gateway 产生 |
 | `associative_memory.py` | `agent/memory/` | 保留领域语义，不共享 namespace |
 | `scratch.py` | PersonAct 私有 state | 不升级为公共世界状态 |
 | `spatial_memory.py` | KnownPlace/语义地点知识 | 只保存角色已经获知的地点信息 |
@@ -261,7 +284,7 @@ world
 | 原型中的自造能力 | 一期处理 | 项目仍负责 |
 |---|---|---|
 | 手写模型/策略调用接线 | `decide` 内按需使用 LangChain Runnable | 认知语义、输入权限、Proposal 契约、终止条件 |
-| 模型 SDK wrapper | 后续以 LangChain Core ChatModel 接口接入一个 provider adapter | model policy、预算、Trace 与输出校验 |
+| 模型 SDK wrapper | typed LangChain Core ChatModel Gateway 已实现；具体 Provider 尚未装配 | model policy、预算、Trace 与输出校验 |
 | 字符串 Prompt 替换 | LangChain Prompt Template | 模板内容、版本、证据选择和系统约束 |
 | 手工截 JSON | 显式 strict Pydantic parse | Schema、错误分类和领域校验 |
 | 裸异常重试 | 有界技术重试 + 单次语义 repair | 可重试分类、repair 上限与 Trace |
@@ -269,9 +292,9 @@ world
 | 手写向量 plumbing | 规模需要时再接 Retriever/VectorStore adapter | 召回融合、认知解释、namespace 与 provenance |
 | 多份 JSON 全量重写 | Fixture 保留 Golden JSON；运行存储评估 SQLite | append-only、事务和回放语义 |
 | 文件 mailbox / busy polling | typed HTTP/WebSocket adapter | RenderJob 幂等、状态机和恢复 |
-| Maze / movement / Selenium / 浏览器仿真 | 不迁移 | 语义 Scene、affordance 与 Projector |
+| Maze / movement / Selenium / 浏览器仿真 | 不迁移 | 语义 Scene、affordance 与 AgentViewBuilder |
 
-LangChain Runnable 的运行状态不能替代 World Snapshot/Ledger、`world_version`、PerceptionProjector、Event 隔离、Temporal Binder、Validator/Committer、Event Recognizer 或 Render Planner。
+LangChain Runnable 的运行状态不能替代 SQLite 当前状态、`world_version`、AgentViewBuilder、EventSession 隔离、Validator/WorldUpdater、WorldEventHistory、EventStaff queue 或 Render Planner。
 
 ### 3.3 依赖与工具链预算
 
@@ -293,29 +316,29 @@ uv 管理环境与锁文件
 
 ## 4. Runtime 主循环
 
-以下是目标主循环。循环属于外部 Event Scheduler；Director/World Commit 等仍未实现：
+以下是目标主循环。循环属于外部 EventSessionRunner；Director/World Update 等仍未实现：
 
 ```text
-load committed snapshot
--> Scheduler 选择一个可运行 EventSession
+load committed relational current state
+-> Runner 选择一个可运行 EventSession root
 -> 选择下一 Character 决策机会
--> PerceptionProjector 构造该角色的 strict PerceptionFrame
+-> AgentViewBuilder 构造该角色的 strict AgentView
 -> PersonActAgent.decide(DecisionRequest)
 -> 得到该角色唯一一个 strict/frozen ActionProposal；跨 wire 时序列化为 camelCase JSON
--> Director 对 Proposal + snapshot + measured span 生成 SegmentDraft
--> Temporal Binder 绑定完整 actual elapsed
 -> Validator 检查世界不变量与 based_on_world_version
--> Committer 原子提交 WorldSegment / Ledger
--> Event Recognizer 更新 WorldEvent
+-> WorldUpdater 原子更新当前状态/request/session，并追加 WorldEvent
 -> outcome 投影回相关 Agent 的 feedback 路径
+-> DirectorRunner 按 cursor 消费 committed Event，构造 DirectorView
+   -> enqueue/no_op 与 cursor 原子提交
+   -> 到期 Staff 的 keep/release/cancel 再经 Validator/WorldUpdater
 -> Broadcast 读取 committed Event，生成 BroadcastPlan
 -> deterministic Render Planner 生成 RenderJob
 -> RenderGateway 投递 Dynamic Render Plugin
 ```
 
-### 4.1 三类 Agent 的共享 AgentLoop 生命周期
+### 4.1 不提前抽象三类 Agent 的统一 Controller
 
-三类 Agent 共享以下生命周期语义；当前唯一真实实现是 `agent/personact/loop.py` 中的 `PersonActLoop`，由 `PersonActAgent.decide` 调用。外部 Event Scheduler 不属于 AgentLoop：
+当前唯一真实认知 loop 是 `agent/personact/loop.py` 中的 `PersonActLoop`，由 `PersonActAgent.decide` 调用：
 
 ```text
 observe/perceive -> retrieve -> plan -> propose
@@ -323,15 +346,15 @@ Runtime validate/commit
 observe_outcome -> conditional reflect
 ```
 
-三类 Agent 共享生命周期和通用 Memory/Model plumbing；typed 输入、输出、State、Strategy、Prompt、Memory namespace、触发方式和具体节点必须分开：
+三类 Agent 只共享 strict model、Model Gateway 和 Trace 等基础设施；typed 输入、输出、State、Strategy、Prompt、Memory namespace、触发方式和具体节点分开：
 
 | Agent | 输入 | 输出 | 副作用权限 |
 |---|---|---|---|
-| PersonAct | 本人 Frame、Persona、scoped Memory | `ActionProposal` | 无 |
-| Director | Snapshot、Proposal、latency、Narrative Thread | `SegmentDraft` / `DiscoveryPlan` | 无 |
+| PersonAct | 本人 AgentView、Persona、scoped Memory | `ActionProposal` | 无 |
+| Director | 一个 committed Event 或 pending Staff 的受限 `DirectorView` | `EventStaffDecision` | 无 |
 | Broadcast | committed Event range、Viewer/Buffer 状态 | `BroadcastPlan` | 无 |
 
-Character 的公共边界固定为 `decide -> one ActionProposal`。`agent.py` 保持 Agent 门面，`loop.py` 明确承载真实 sequence；Director/Broadcast 后续沿用相同生命周期，但分别实现自己的入口、Strategy、State、Prompt、namespace 和 Proposal 类型。只有第二个真实实现产生稳定重复代码后，才提取跨 Agent 的公共 runner。
+Character 的公共边界固定为 `decide -> one ActionProposal`。`agent.py` 保持 Agent 门面，`loop.py` 明确承载真实 sequence。Director/Broadcast 不预设沿用 PersonAct 拓扑；只有第二个真实实现产生稳定重复代码后，才判断是否把 PersonActLoop 纳入更宽的 `CognitiveController`。
 
 Decision Run 在一个 Proposal 后结束。World 完成校验与提交后，再以独立输入触发 `observe_outcome -> reflect`；不得让 `decide` 悬挂等待 World Commit，也不得在其中直接产生世界副作用。
 
@@ -370,21 +393,21 @@ Event 内下一位由 Scheduler 决定。被点名角色在 Frame 中收到 `add
 感知链必须固定为：
 
 ```text
-Character Proposal
-Director Stimulus / Segment Completion
+Character ActionProposal
+EventStaff release
 System / Tool / Player Input
                 |
                 v
-       Validator / Committer
+       Validator / WorldUpdater
                 |
                 v
-Committed WorldSegment / WorldEvent
+       committed WorldEvent
                 |
                 v
-       PerceptionProjector
+          AgentViewBuilder
                 |
                 v
-strict PerceptionFrame[当前 Character]
+strict AgentView[当前 Character]
                 |
                 v
 PersonActAgent.decide -> one ActionProposal
@@ -399,7 +422,7 @@ Observation      角色实际注意到的内容
 Memory           角色如何保存和主观解释
 ```
 
-`PerceptionFrame` 只能包含 Projector 判定可见的 Location Fact/Info、candidate、pending response、affordance 与 evidence；不能携带完整 `LocationView`。Pydantic 能验证 Frame 结构，却不能证明信息真的可见，硬可见性仍由 Projector 和 Golden Trace 保证。
+`AgentView` 只能包含 AgentViewBuilder 判定可见的 Location Fact/Info、candidate、pending response、affordance 与 evidence；不能携带完整 `LocationView`。Pydantic 能验证 View 结构，却不能证明信息真的可见，硬可见性仍由 AgentViewBuilder 和 Golden Trace 保证。当前源码类型仍名为 `PerceptionFrame`，实现该阶段时再做受控迁移。
 
 ## 6. 第一期最小数据契约
 
@@ -435,19 +458,24 @@ source_fact_refs / source_info_refs / visible_fields / provenance
 ### `EventSession` / `WorldEvent`
 
 ```text
-EventSession
-  event_session_id / participant_ids / location_id / status
-  owned_entity_ids / causal_dependency_ids / scheduler_cursor
-  next_wakeup_at / head_log_seq
+EventSessionNode
+  session_id / agent_id / root_session_id / updated_world_version
 
 WorldEvent
-  event_id / event_revision / event_session_id
-  world_version / world_time / event_type
-  participants / location_id / facts
-  perceptual_footprint / evidence_ids
+  event_id / world_id / world_version / event_order / event_type
+  source_kind / source_id / actor_id? / target_id? / location_id?
+  root_session_id_at_commit?
+  in_reply_to_event_id? / caused_by_event_id?
+  started_at / ended_at? / content? / details_json
+
+InteractionRequest
+  request_event_id / request_kind / requester_agent_id / recipient_agent_id
+  status / resolution_event_id? / updated_world_version
 ```
 
-EventSession 是调度容器；WorldEvent 是已提交事实，不能共用 ID 或生命周期。
+每个 Character Agent 只有一个生命周期稳定的 `EventSessionNode`；当前互动组由 `root_session_id` 等价类派生，merge/split 只重标 root，不创建 successor Session。`WorldEvent` 是单一 append-only 已提交历史，记录事件发生当时的 root、来源、actor 与因果，不能用当前 root 回写旧事件。`InteractionRequest` 只保存仍待回应/接受的当前状态与 Event 引用，不复制对话正文。
+
+Character Proposal 直接经 Validator/WorldUpdater 成为 Event；Director 不参与补写。Director 只管理由 committed process-start Event 触发的 EventStaff，release 后的新 Event 使用 `source_kind=event_staff_release`，并保留 Staff/source Event 因果。Agent 私有 Memory 通过 `source_event_id` 引用自己实际注意到的 Event；Broadcast 只读 committed Event，不读未提交 Proposal 或 Character 私有 Memory。
 
 ### `Location` / `LocationFact` / `LocationInfo` / `LocationView`
 
@@ -470,9 +498,9 @@ LocationView
   active_facts / active_info / active_event_refs / recent_event_refs
 ```
 
-Location 只保存 Event 引用，Event 正文仍由唯一 WorldEvent Ledger 持有。
+Location 不复制 Event 正文，历史直接按唯一 WorldEventHistory 的 `location_id` 查询。自由互动 MVP 先保存关系型当前 Fact/Info；逐 Fact revision 结构延期到出现真实历史查询需求后。
 
-### `PerceptionFrame` / `ActionProposal`
+### `AgentView / PerceptionFrame` / `ActionProposal`
 
 ```text
 DecisionRequest
@@ -511,52 +539,68 @@ ActionProposal
 | `act` | 本角色自身行为；不携带 target 或 location |
 | `interact` | 恰好一个 `target`，其结构为 `{kind: character|object, id}` |
 | `utter` | 恰好一个 character target 与非空 content |
-| `respond` | 恰好一个 character target 与非空 content |
+| `respond` | 恰好一个 character target、非空 content；Phase 0 增加指向 committed request Event 的 `inReplyToEventId` |
 | `wait` | 带有世界语义的等待，包含 description 与 `nextWakeup` |
 | `no_op` | Scheduler yield，只包含 `nextWakeup` |
 
 没有 `move` variant，也没有 `locationId` 或多目标 `targetIds`。`interact` 的 character/object 类型显式进入 JSON，不能靠 ID 猜测；单目标避免部分授权、部分提交与顺序歧义。`utter/respond` 不能指向 object。
 
+当前源码还有两个 Phase 0 缺口：
+
+- `RespondAction` 尚未包含 `inReplyToEventId`，不能把通用 `evidenceIds` 当作明确回复关系；
+- `Affordance` 只有 `kind+target`、`InteractAction` 只有 `target+description`，不能稳定区分同一 Object 上的 start/inspect/stop。EventStaff 前必须增加 World-issued `affordanceId/operationId` 或等价 typed operation union；自由文本 description 不得单独触发 Object mutation。
+
 `agentId` 是唯一 actor 字段，由受信 `PersonActAgent` 从 `spec.agent_id` 注入；CognitionStrategy/模型输出只允许提供 `action + evidenceIds` 等候选内容，不能选择 actor。最终 `decide` 返回经过 strict Pydantic validation 的 `ActionProposal` 对象；跨进程时再用 `model_dump_json(by_alias=True)` 生成 camelCase wire JSON。
 
 World contract 与 `PersonActAgent.decide` 已使用这组 strict/frozen 类型；这证明单次 Persona cognition 与 Proposal authority boundary 已落地，但仍只是 Agent 边界，不是 World Commit。
 
-### `SegmentDraft` / `WorldSegment`
+### `DirectorView` / `EventStaff` / `EventStaffDecision`
 
 ```text
-SegmentDraft
-  segment_draft_id / generation_id / based_on_world_version
-  character_proposal_ids / temporal_constraints / action_transitions
-  object_deltas / location_fact_changes / location_info_changes
-  bridge_events / event_candidates / perceptual_footprints / evidence_ids
+DirectorView
+  trigger: committed_event | event_staff_check
+  world_id / based_on_world_version / world_time
+  session_id as opaque delivery anchor
+  source_event_projection / bounded_causal_events
+  relevant_object_and_location_process_state
+  selected_pending_staff? / conflicting_pending_staff
+  event_staff_affordances
 
-WorldSegment
-  segment_id / generation_id / based_on_world_version / world_version
-  world_time_start / world_time_end / measured_elapsed_ms
-  ordered_facts / state_deltas / location_revision_refs
-  event_evidence / commit_seq
+EventStaff
+  event_staff_id / world_id / session_id / source_event_id
+  staff_kind / subject_type / subject_id / completion_event_type
+  status / created_world_version / created_world_time
+  next_check_at? / release_event_id? / details_json
+
+EventStaffDecision
+  enqueue(affordance_id, next_check_at?)
+  | keep(event_staff_id, next_check_at)
+  | release(event_staff_id)
+  | cancel(event_staff_id, caused_by_event_id)
+  | no_op
 ```
 
-Director 只返回 Draft；Binder 绑定时间；Validator 返回诊断；只有 Committer 分配 world version 与 commit sequence。
+DirectorView 是操作授权视图，不是完整 World Snapshot。当前 root/members 不进入 Director；World 只在 release 后解析它们并让 AgentViewBuilder 过滤收件人。Director 不能读取未提交 Proposal、Character 台词正文/私有 Memory 或 Viewer 数据，也不能输出角色行为、自由 World patch 或 Session transition。enqueue 只接受 World 给出的 affordance；release 只兑现 Staff 中已校验的 completion contract。详细边界见[EventStaff Director 与 Broadcast](director-broadcast.md)。
 
 ### `BroadcastPlan` / `RenderJob`
 
 ```text
 BroadcastPlan
-  broadcast_plan_id / event_session_id / based_on_world_version
-  source_log_seq_start / source_log_seq_end / projection_mode
+  broadcast_plan_id / based_on_world_version / event_watermark
+  source_event_ids / source_world_interval / projection_mode
   camera_viewpoint / reveal_scope / transition
   target_render_duration_ms / artistic_reason / evidence_ids
 
 RenderJob
   schema_version / producer_id / world_id / runtime_session_id
-  render_id / event_session_id / event_revision / attempt_id
-  based_on_world_version / log_seq_start / log_seq_end
-  evidence_transaction_ids / title / location / characters
-  structured_beats / estimated_play_ms / content_hash
+  render_id / attempt_id / based_on_world_version
+  source_event_ids / source_root_session_ids_at_commit
+  title / location / characters
+  structured_beats with per-beat source_event_ids + truth_kind
+  estimated_play_ms / content_hash / provenance_sidecar
 ```
 
-Render Plugin 必须对 JSON 再做自己的边界校验，并基于 canonical input 重算 `content_hash`。Python 对象的类型正确不能替代跨进程接收方验证。
+Broadcast 可以把多个 root-at-commit 事件流编排成一段观看序列，但每个计划、Render 和 dialogue/narration beat 都必须保留 `source_event_ids`；beat 还要区分 `fact / quote / inference`。WebGAL DSL 不承载的追溯元数据保存在 Artifact sidecar。EventSession root 是当时的互动边界，不是永久剧情章节 ID。Render Plugin 必须对 JSON 再做自己的边界校验，并基于 canonical input 重算 `content_hash`。Python 对象的类型正确不能替代跨进程接收方验证。
 
 ## 7. Dynamic Render Plugin 边界
 
@@ -569,6 +613,8 @@ Render Plugin 必须对 JSON 再做自己的边界校验，并基于 canonical i
 5. 保存最小 played cursor，避免进程重启后全部重播。
 
 WorldEvent 不直接进入 WebGAL Plugin。Python Runtime 内的 Broadcast 只输出 BroadcastPlan，确定性 Render Planner 读取 committed Event Log 生成 RenderJob，再由 RenderGateway 发送。
+
+当前实现必须准确校准：`DynamicTimelineRuntime.played`、selected Event 和 active Render 仍只是进程内状态，`timeline.json` 也只是手写 Fixture；真实 RenderJob ingress、Artifact/queue 落盘与 Viewer Cursor 恢复都尚未实现。
 
 ```text
 CommittedEventFeed   Runtime 内部，只暴露已提交 Event Log
@@ -585,33 +631,41 @@ ViewerCursorStore    Render 侧持久化观看游标和终态
 
 - 不受信 `agents.json` 能被 strict Pydantic loader 拒绝未知字段和错误类型；
 - Compiler 能收敛 Tool/Prompt/Proposal 能力、派生 Memory scope 并生成稳定 digest；
+- Compiler 能解析 Character Skill exact version，并把整文件 hash 纳入 spec digest；
 - strict/frozen Pydantic 基础模型、Persona 私有 Memory/State 与检索能力已经存在；
 - World-owned contract 已定义固定 `ActionProposal` envelope、六类 discriminated action union，以及 character/object typed target。
 - `PersonActAgent.decide` 已实现 prepare/perceive/retrieve/plan/propose，一次只返回一个 Proposal；
 - prepare 校验 ownership、world time/world version 并判定新日；perceive 在全 EVENT stream 上做稳定 attention/canonical novelty，并按 write policy 写本人 EVENT Memory；retrieve 将本轮全部 Observation 与历史记忆分离，再执行 literal + recency/relevance/importance 排序与显式 touch；plan 先基于本轮感知/召回生成新日私有计划，再结合 state、部分 schedule、当前 slot 剩余时长与 focus 生成 action；propose 注入 actor 并校验 capability、typed affordance 与 evidence；
 - 同一 Agent 的 `decide` 由实例锁串行化；只有最终 Proposal 校验成功后，才一次替换包含 frozen state/memory/trace 的 private snapshot。
+- `ModelCognitionStrategy` 已覆盖 poignancy、daily plan 与 action draft；Fixture 与 ChatModel adapter 共用 typed Gateway，transport retry 与单次 schema/semantic repair 分离。
 
 仍未完成：
 
 - reflection 与 commit feedback；`decide` 只累计 reflection trigger state，不在未提交阶段生成反思；
-- Event Scheduler、World commit、Director、Render 与真实模型质量；
-- 持久化 Memory adapter 与完整咖啡 Golden Trace。
+- Event Scheduler、World commit、Director、Render、生产 Provider 装配与 live evaluation；
+- 持久化 Memory adapter、完整 Generation Trace 与咖啡 Golden Trace；当前 `ModelCallTrace` 只是有界、进程内、非秘密 provenance。
 
 ### 8.2 下一条咖啡 Golden Trace
 
 ```text
 1. 编译 Anon/Soyo 的受限 Manifest，固定各自 spec digest
-2. 建立 EventSession A：Anon / Soyo 在咖啡店
-3. 建立隔离 EventSession B：Tomori 独处
-4. Projector 从 A 的 committed snapshot 为 Anon 构造 strict PerceptionFrame
-5. Fixture `PersonActAgent.decide` 返回一个 utter ActionProposal：“轮到我们了，要这个吗？”；`agentId=anon` 由 spec 注入
-6. Director Fixture 返回 SegmentDraft
-7. Binder + Validator + Committer 追加 WorldSegment
-8. Recognizer 更新 WorldEvent；Projector 只为 Soyo 生成 direct-interaction candidate
-9. Scheduler 在新 world version 调用 Soyo 的 `decide`，得到一个 respond Proposal；Tomori 不获得该 evidence
-10. Broadcast Fixture 返回 BroadcastPlan；Render Planner 生成 RenderJob
-11. RenderGateway 投递 Dynamic Render，接收完整状态
-12. 固定输入、时钟、ID 与随机源后，重放得到相同 Trace
+2. Scenario 初始化五个稳定 EventSession node；Anon/Soyo 同 root，Tomori 独处
+3. AgentViewBuilder 为 Anon 构造 strict AgentView
+4. Anon 返回 utter：“我要煮个咖啡”；WorldUpdater 提交 E1
+5. Director 消费 E1，但 World 没有 completion affordance，因此只能 no_op；cursor 与 no-op 原子推进
+6. Soyo 可感知 E1；Tomori 不获得该 evidence
+7. Anon 自主返回 interact(coffee-machine, start_brewing)
+8. Validator/WorldUpdater 原子写 coffee.state=brewing，并追加 E2 coffee_brewing_started
+9. DirectorView(E2) 只暴露 coffee_brewing_completion affordance；enqueue S1
+10. S1 未满足 release guard 时，越权 release 被拒绝；Director keep
+11. 到达 release window 后 release S1
+12. 同一 transaction 写 coffee.state=ready、S1=released、E3 coffee_ready、world version
+13. pop 时通过 S1 的稳定 session_id 解析当前 UnionPart root
+14. AgentViewBuilder 只向此刻在 root 内且满足地点/渠道条件的 Character 投影 E3
+15. Soyo 对直接互动用显式 inReplyToEventId 回应；interaction request 原子关闭
+16. Broadcast Fixture 只读 E1/E2/E3，返回带 source_event_ids 的 BroadcastPlan
+17. Render Planner 生成 RenderJob，RenderGateway 投递 Dynamic Render
+18. 固定输入、时钟、ID 与随机源后，重启仍得到相同 root、Staff、cursor 与 Event 历史
 ```
 
 ## 9. 明确延期
@@ -619,7 +673,7 @@ ViewerCursorStore    Render 侧持久化观看游标和终态
 - Memory 的持久化 adapter、生产 embedding 与 recency/relevance/importance 权重调优；
 - Reflection 阈值与真实 Prompt；
 - Character Skill 自动提取与微调；
-- Director 长期目标函数、RL 与复杂刺激策略；
+- Director 的 Narrative Thread、剧情目标函数、RL 与刺激策略（已明确不属于本项目 Director，而不是待扩权项）；
 - Broadcast 智能选镜与蒙太奇；
 - 自适应 30 分钟 Buffer；
 - 多节点、高可用与复杂鉴权；
@@ -646,7 +700,10 @@ ViewerCursorStore    Render 侧持久化观看游标和终态
 - 无 WebGAL 时 Runtime 可独立推进两个 Event 并写 append-only Event Log；
 - 同 Event 内上一角色提交后，下一角色才通过 Frame 感知；
 - 隔离 Event 可并行，共享实体时拒绝并行；
-- Director 不能直接写 Persona Memory 或 Ledger；
+- 只说“我要煮咖啡”不会创建 completion Staff；只有已提交 process-start Event 才有 enqueue affordance；
+- Director 看不到未提交 Proposal、Persona Memory、无关 Session 或 Viewer 数据；
+- EventStaff release 必须再次经过 Validator/WorldUpdater，且重复消费不会重复入队/释放；
+- merge/split 后 Staff 用稳定 session node 解析当前 root，再由 AgentViewBuilder 过滤收件人；
 - 纯 `no_op` 不产生 WorldEvent；
 - 同一 RenderJob 重试不重复入队；
 - WebGAL 可播放增量 Render 并回传状态；
@@ -662,53 +719,50 @@ ViewerCursorStore    Render 侧持久化观看游标和终态
 - 保持 `PersonActAgent.decide` 为唯一公共 Character 决策入口；
 - 保持 CognitionStrategy 输出显式 parse 为 action discriminated union，再由受信代码注入固定 envelope；
 - 保护 actor 注入、typed target、单目标、非法 variant 字段和旧扁平字段拒绝契约；
+- 为 Respond 增加 committed request Event 引用，为 Object interact 增加稳定 affordance/operation 引用；
 - 保留 Pydantic runtime validation 与 `with_types()` 非校验行为的契约测试；
 - 所有时钟、ID、Fixture CognitionStrategy 输出和随机源可注入；
 - 不引入 LangGraph。
 
 完成条件：ruff、pyright strict、pytest 与既有 npm 测试均通过。
 
-### Phase 1｜持久化 Memory 与 append-only World 存储
+### Phase 1｜Scenario 与 SQLite 权威状态
 
-- 增量实现第 6 节 strict/frozen Pydantic Model；
-- 保持已实现的 scoped in-memory stream/retriever 与 namespace 拒绝边界；
-- 增加持久化 Memory adapter；
-- 对 JSONL 与 SQLite 做小型 spike，再冻结一期 adapter；
-- 实现 World Ledger / Generation Trace append 与重放读取；
-- 保持 Manifest Compiler 为纯函数；scope 固定派生为 `project/{project_id}/persona/{agent_id}`，project/format version 纳入 spec digest，Trace 固定该 digest。
+- 实现 strict `ScenarioSeed`、引用校验、seed hash 和一次性 bootstrap；
+- SQLite 保存 World/Location/WorldFact/AgentWorldState/Object、稳定 Session root binding、`interaction_requests`、`event_staff`、append-only `world_events` 和隔离 Agent Memory；
+- 不建立重复的 WorldSegment、WorldVersion、EntityRevision、Snapshot 或 event-session-members 表；
+- 实现无效 Seed、重复初始化、事务中断和重启恢复测试。
 
-完成条件：跨 namespace 读取失败；同一输入序列化稳定；重启后能重放相同 snapshot。
+完成条件：不会留下半初始化世界；重启恢复相同 version、root、Staff/cursor 和私有 Memory namespace。
 
-### Phase 2｜补齐 feedback 并接 Fixture Runtime
+### Phase 2｜WorldUpdater、AgentView 与 feedback
 
-- 保持现有 prepare/perceive/retrieve/plan/propose 语义，不迁移 `Persona.move()` 或 `execute`；
-- 在 World Commit 之后以独立 feedback 输入实现 outcome memory 与 conditional reflection；
-- 为 Director/Broadcast 分别建立最小 typed contract 与 Fixture 策略，不复制 PersonAct 内部拓扑；
-- 用 `RunnableConfig` 统一 run name、tags、metadata 和 callback adapter；
-- 每个外部或模型边界显式 Pydantic parse。
+- 实现 expected-version Validator 与单事务 WorldUpdater；
+- 实现 AgentViewBuilder 的地点、Session、recipient、channel 和 visible-fields 硬过滤；
+- `RespondAction` 增加明确 `inReplyToEventId`，用 interaction request 表恢复待回应关系；
+- World commit 后以独立 feedback 输入实现 outcome memory 与 conditional reflection；
+- 保持现有 PersonActLoop，不迁移 `Persona.move()` 或 `execute`。
 
-完成条件：三个 Fixture 都返回各自 strict Model；无 `Any` 泄漏越过公开边界，无 `if agent_type` 万能分发。
+完成条件：Character Proposal 不能直接写 World/他人 Memory；Tomori 看不到隔离 root 的咖啡店互动；失败事务没有半状态。
 
-### Phase 3｜单 Event 咖啡 Golden Trace
+### Phase 3｜EventSession 自由互动
 
-- 实现 Snapshot、Projector、Director Fixture、Binder、Validator、Committer 与 Recognizer；
-- 跑通 Anon utter -> committed Event -> Soyo Observation -> Soyo respond；
-- 保存每步 snapshot、Observation、Memory write、retrieval、Proposal、Draft、diagnostic 与 evidence。
+- 实现无业务语义的 `UnionPart[T]` 与稳定 EventSession node；
+- 同 root 内稳定轮转，每个有效 Proposal 立即提交；不同 root 只在隔离证明成立时并行计算；
+- 业务 join/leave/merge/split 只通过受信 transition plan 调用 UnionPart；
+- 跑通 Anon/Soyo 对话、Tomori merge、Anon split 和重启恢复。
 
-完成条件：固定 seed/fixture 下 Trace 一致；Tomori 不获得咖啡店 Observation；非法知识或对象跳变被拒绝。
+完成条件：五个 Character 始终只有五个稳定节点；成员集合与 root mapping 始终一致。
 
-### Phase 3.1｜地点事实与到访前发现
+### Phase 4｜EventStaff Director 与咖啡 Golden Trace
 
-- 实现版本化 Location Fact/Info 与同 world version 查询；
-- 确定性过滤无效、已知和不可披露 Info；
-- Director 只返回 `NoOp / DiscoveryPlan`；
-- 新传播行为必须先提交 Event，再投影给 PersonAct。
+- 实现 `DirectorView / EventStaff / EventStaffDecision` strict contract；
+- DirectorRunner 以持久 cursor 消费 committed Event，并另行选择到期 Staff；
+- enqueue/no-op 与 cursor 原子提交，release/cancel 与 Object/Event/version 原子提交；
+- World 先计算 affordance；Director 只能 `enqueue / keep / release / cancel / no_op`；
+- 覆盖“只说不入队、启动后入队、提前释放拒绝、完成、取消、merge/split、重启和重复消费”。
 
-### Phase 4｜隔离多 Event 调度
-
-- 同 Event 串行，`addressed_to_me` 优先，`no_op + next_wakeup` 防空转；
-- 证明隔离后再用 `asyncio.TaskGroup` 并行 Event；
-- 共享角色、对象、资源或因果集合交集时返回 `EVENT_NOT_ISOLATED`。
+完成条件：Director 无法替 Character 行动或说话，无法读取私有认知，无法绕过 completion contract。
 
 ### Phase 5｜Broadcast 与 Dynamic Render
 
@@ -717,15 +771,15 @@ ViewerCursorStore    Render 侧持久化观看游标和终态
 - 增加 Runtime ingress 与状态回传；
 - 保持 `timeline.json` 只是 Fixture。
 
-### Phase 6｜端到端后再接真实模型
+### Phase 6｜端到端后再接生产 Provider
 
-- Python unit：strict models、Memory、Projector、Binder、Validator、Committer、Recognizer、Scheduler、PersonAct；
+- Python unit：strict models、Memory、UnionPart、AgentViewBuilder、Validator、WorldUpdater、EventSessionRunner、DirectorRunner、PersonAct；
 - Python integration：两个 Event 的 Fixture Golden Trace；
 - Node contract：RenderJob ingress、幂等、恢复和状态回传；
 - 端到端 smoke：Python Runtime -> Node Plugin -> WebGAL；
-- 只有失败能被 Trace 精确归因后，才按 PersonAct -> Director -> Broadcast 顺序接真实 ChatModel。
+- 只有失败能被 Trace 精确归因后，才分别装配 PersonAct、EventStaff Director 与 Broadcast 的生产 Provider，并做 shadow/live evaluation。
 
-真实模型接入必须保持相同 Pydantic 与语义校验边界，只替换 `decide` 内的 CognitionStrategy，不扩张 NPC Manifest 权限。
+生产 Provider 接入必须保持当前 Pydantic、Gateway 与语义校验边界，只替换受信 Runtime 装配，不扩张 NPC Manifest 权限。
 
 ## 12. 验证命令
 
@@ -742,10 +796,10 @@ npm test
 
 ## 13. 开工边界与下一 Session 指令
 
-Fixture Vertical Slice 的所有权、强类型边界、临时调度规则与验收目标已足够开工。Temporal Binder 最终算法、Director latency、跨 Event barrier、真实 Prompt 和 30 分钟库存仍未解决；若临时规则破坏已确认不变量，必须回写[未决问题](open-questions.md)和[难点账本](difficulty-ledger.md)。
+Fixture Vertical Slice 的所有权、强类型边界和开发顺序已足够开工。World time/Staff 唤醒时钟、互动参与协议、跨 Event barrier、真实 Prompt 和 30 分钟库存仍未解决；若临时规则破坏已确认不变量，必须回写[未决问题](open-questions.md)和[难点账本](difficulty-ledger.md)。
 
 执行任何 Git 写操作前仍须确认 `git rev-parse --show-toplevel` 指向本工程；未经用户明确授权，不执行 `git init`、commit 或历史改写。
 
 可复制的启动指令：
 
-> 在 `/Users/bytedance/workspace/other-project/generative_go_world` 继续实现 Agent Runtime。先完整阅读 `AGENT.md`、`wiki/index.md`、`wiki/agent-runtime-implementation.md`、`wiki/decisions.md` 和 `wiki/difficulty-ledger.md`。现行技术栈是 Python 3.12 + `langchain-core==1.6.1`；输入、输出和持久化边界使用 strict/frozen Pydantic Model，静态检查使用 pyright strict。外部 Event Scheduler 独占循环，只调用 `PersonActAgent.decide`；一次调用只为 `spec.agent_id` 返回一个固定 envelope + discriminated action union 的 strict/frozen `ActionProposal`，跨 wire 时再以 camelCase JSON 序列化。不得实现/暴露 `Persona.move()`，不得迁移 Maze/path/tile/movement/execute。LangChain `Runnable.with_types()` 不做运行时校验，当前不使用 LangGraph。所有 Agent 只产生 Proposal/Plan，只有 World Committer 和 Render Gateway 产生副作用。Reflection/commit feedback、Director、World Commit 与完整 Runtime 尚未实现。修改后按 AGENT.md 运行检查；不要擅自 commit 或改写历史。
+> 在 `/Users/bytedance/workspace/other-project/generative_go_world` 继续实现 Agent Runtime。先完整阅读 `AGENT.md`、`wiki/design/MVP_dev.md`、`wiki/index.md`、`wiki/agent-runtime-implementation.md`、`wiki/decisions.md` 和 `wiki/difficulty-ledger.md`。现行技术栈是 Python 3.12 + `langchain-core==1.6.1`；输入、输出和持久化边界使用 strict/frozen Pydantic Model，静态检查使用 pyright strict。外部 EventSessionRunner 独占循环，只调用 `PersonActAgent.decide`；一次调用只为 `spec.agent_id` 返回一个固定 envelope + discriminated action union 的 strict/frozen `ActionProposal`，跨 wire 时再以 camelCase JSON 序列化。不得实现/暴露 `Persona.move()`，不得迁移 Maze/path/tile/movement/execute。LangChain `Runnable.with_types()` 不做运行时校验，当前不使用 LangGraph。Character Proposal 直接经 Validator/WorldUpdater 提交；Director 只读取受限 DirectorView 并管理 EventStaff，不能读取未提交 Proposal 或 Character 私有认知。只有 WorldUpdater 和 Render Gateway 产生各自领域副作用。Reflection/commit feedback、EventStaff Director、WorldUpdater 与完整 Runtime 尚未实现。修改后按 AGENT.md 运行检查；不要擅自 commit 或改写历史。

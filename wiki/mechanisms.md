@@ -6,7 +6,9 @@
 
 ```text
 World / Agent Runtime
-  ActorPerformance -> Director Completion -> validated WorldSegment -> WorldEvent
+  ActionProposal -> Validator / WorldUpdater -> committed WorldEvent
+  WorldEvent -> DirectorRunner -> EventStaff queue
+  EventStaff release -> Validator / WorldUpdater -> committed WorldEvent
   WorldEvent -> Broadcast Agent -> BroadcastPlan -> deterministic Render Planner -> RenderJob
                          |
                          v
@@ -39,53 +41,53 @@ World Runtime 向 Render 侧发布不可变 `RenderJob`：
 
 ```text
 schema_version / producer_id / world_id / runtime_session_id
-render_id / event_session_id / event_revision / attempt_id
-based_on_world_version / log_seq_start / log_seq_end
-evidence_transaction_ids / title / location / characters
-structured_beats / estimated_play_ms / content_hash
+render_id / attempt_id / based_on_world_version
+source_event_ids / source_root_session_ids_at_commit
+title / location / characters
+structured_beats with per-beat source_event_ids + truth_kind
+estimated_play_ms / content_hash / provenance_sidecar
 ```
 
 Render 侧回传的只是：
 
 ```text
-attempt_id / render_id / event_session_id
+attempt_id / render_id
 accepted / validation_error / ready / playing / completed / failed / unknown
 error / viewer_cursor
 ```
 
-这些状态不能反向将未发生的 Event 写进 World Ledger。
+这些状态不能反向将未发生的 Event 写进 WorldEventHistory。
 
-### 生成完成驱动的 Actual Runtime
+### 生成耗时不是世界副作用
 
-模型推理、工具调用和 Director 补完的真实耗时可以成为 World Time，但它们不是一个独立仿真 timer 的旁路输入。Agent 尚未返回时，Runtime 不会自行提交“排队结束”“咖啡煮好”或其它故事事实；否则 Character 输出一返回就会面对一套未经它参与、已经推进到未来的世界。
-
-一次生成波次采用 post-hoc temporalization：
+模型推理、工具调用和 Director 决策的真实耗时必须进入 Generation Trace，但不能自动被解释为角色犹豫、移动或环境过程完成。Character 返回后，其 Proposal 直接经过 Validator/WorldUpdater；Director 不再做 Segment Completion。
 
 ```text
-T0: 固定 committed snapshot，开始 Character generation
-    -> 记录 Character/tool 的 started_at / returned_at
-    -> Director 读取输出与 measured latency，生成 Temporal/Causal Completion
-    -> Director 返回后，Temporal Binder 得到本波次完整 elapsed
-    -> Validator 检查时间、角色、知识、对象和因果不变量
-T1: 原子提交完整 World Segment
+T0: 基于 committed AgentView 开始 Character generation
+    -> 记录 started_at / returned_at / elapsed
+    -> Character 返回 ActionProposal
+    -> Validator 检查 version、evidence、affordance 和世界不变量
+T1: WorldUpdater 原子更新当前状态并追加 WorldEvent
 ```
 
-这不是冻结或忽略 Agent 响应时间：`T1 - T0` 可以包含真实生成耗时。区别是世界状态只在结果已知后被语义化、校验和提交，不由外部 timer 在中途猜测发生了什么。
+具体怎样用 measured elapsed 推进 `world_time` 仍待 Golden Trace 冻结。无论采用故事时间还是受控 wall clock，都不能仅因调用耗时就自动提交“咖啡好了”。
 
-Director 输出应优先表达相对顺序、并发关系、阶段和可伸缩区间，而不是依赖发起调用时还未知的最终 elapsed。Director 返回后，Binder 才能看见其自身耗时并绑定完整区间。Binder 不发明剧情，只做测量绑定；如何处理超出 Director 建议范围的剩余时间仍是 Open Research。
+### EventStaff release 与 Broadcast Projection 不同
 
-### Director Completion 与 Broadcast Projection 不同
-
-Director Completion 决定世界里**发生了什么以及这些事情之间如何占据时间**：
+Director 只决定一个**已经客观启动且得到 World affordance 的后台过程**是否继续等待、释放或取消：
 
 ```text
-角色谁先行动 / 是否并发
-排队何时获得推进 / 咖啡何时改变状态
-等待是角色选择、环境阻塞还是无叙事信息的 generation gap
-哪些输出属于同一个 Event，哪些需要桥接 Event
+committed process-start Event
+-> enqueue EventStaff
+-> release guard / next_check_at
+-> keep | release | cancel
+-> Validator / WorldUpdater
+-> committed process-completion Event
 ```
 
-Broadcast Projection 决定这些已提交时间**如何被玩家看见**。Render Compiler 不做“世界经过 4 秒，就插入 `wait 4s`”的机械转换；Broadcast Agent 先形成：
+它不能决定角色先后行动、补写桥接动作、维护剧情压力或从一句意愿台词直接制造对象结果。比如“我要煮咖啡”不等于 `coffee_brewing_started`；只有 Character 自己启动咖啡机并成功提交后，World 才能开放 `coffee_brewing_completion` affordance。
+
+Broadcast Projection 决定已提交 Event **如何被玩家看见**。Render Compiler 不做“世界经过 4 秒，就插入 `wait 4s`”的机械转换；Broadcast Agent 先形成：
 
 ```text
 source_interval / source_event_ids
@@ -93,25 +95,23 @@ projection_mode: omit | compress | cutaway | montage | summarize | dramatic_paus
 target_duration / artistic_reason / evidence_ids
 ```
 
-只有 `dramatic_pause` 等明确艺术选择会生成等待或停顿命令。被 Director 标为无叙事信息的 generation span 默认在 WebGAL 中不可见；它仍可被保留为 World Time 证据。
-
-相关问题与代价集中维护在[难点、卡点与代价账本](difficulty-ledger.md)，特别是 H-008、H-010、H-016、H-024 和 H-025。
+只有 `dramatic_pause` 等明确艺术选择会生成等待或停顿命令。模型 generation span 默认不进入 WebGAL；它只留在调用 Trace，除非存在独立、已提交的故事内等待 Event。
 
 ### 实时时钟的可测性
 
 生产运行使用 monotonic clock 测量每次 generation span，避免系统时间跳变；它是测量仪器，不是故事状态的自主推进器。离线测试使用录制好的 Agent Result Cassette 和 Latency Trace。算法需要同时验证：
 
-- Character 输出与不同 latency 组合后，Director 是否能补出自然且自洽的 Segment；
-- 同一 Cassette + Latency Trace 是否能重放同一 Transaction/Event；
+- 同一 Cassette + Latency Trace 是否能重放同一 WorldEvent；
 - 多 Event 并发生成时，共享角色、对象和跨地点因果是否发生冲突；
-- Director 自身耗时是否产生无法解释的递归尾巴；
+- 不同 latency 是否都不会越过 Staff release guard；
+- Director 超时/重试是否会重复 enqueue 或重复 release；
 - Broadcast Temporal Projection 是否保留因果与关键信息，而非机械复刻等待。
 
-### Director / Broadcast 反馈防火墙
+### Director / Broadcast 权限防火墙
 
-- Runtime 拒绝的 DirectorProposal 可以在线返回原因，供 Director 改选未来刺激；
+- Runtime 拒绝的 EventStaffDecision 只返回 Staff/affordance 诊断，供 Director 选择 `keep/no_op` 或合法项；
 - Buffer、编译和播放故障可在线反馈给 Broadcast，只用于重新选择可展示 Event；
-- 当前局的热度、弹幕和“高潮评分”默认不能在线反馈给 Director/Character，避免世界围绕注意力奖励持续制造高刺激事件；
+- 当前局的热度、弹幕和“高潮评分”不能进入 DirectorView 或 Character AgentView；
 - 局后聚合指标可以进入下一局策略评估，但必须与角色自主性、事实准确率、连贯性和多样性联合约束；
 - 若玩家输入需要影响世界，必须转成 Runtime 可提交、角色可感知且可拒绝的正式事件。
 
@@ -126,9 +126,9 @@ LocationFact
   -> Validator 验证 Proposal 是否与当前地点事实一致
 
 LocationInfo / Location Event
-  -> Director 选择是否以及怎样创造发现机会
-  -> Committer 提交传播 Event
-  -> PerceptionProjector 裁剪
+  -> AgentViewBuilder 确定性过滤现有公开信息
+  -> 若需传播行为，由 Character/System Proposal 经 WorldUpdater 提交
+  -> AgentViewBuilder 裁剪
   -> Character Observation / Memory
 ```
 
@@ -272,11 +272,11 @@ WebGAL 可在黑屏下预热。当前协议没有 ACK，MVP 只能结合连接�
 
 Event Log 是 append-only 世界事实：玩家不观看时仍可增长，用于摘要、未读数、角色记忆和恢复。WebGAL Backlog 只服务当前 Render 内回看，可被切换清空。
 
-更底层的 WorldTransaction Ledger 才是客观事实源；WorldEvent 是带 evidence 的语义聚合。Agent 对 Event 的感知和记忆是局部投影，不等于全员共享 Ledger。
+SQLite 关系型当前状态是“现在是什么样”的权威，append-only `world_events` 是“已经发生了什么”的唯一客观历史。Agent 对 Event 的感知和记忆是局部投影，不等于全员共享 WorldEventHistory。
 
 ## 8. 约 30 分钟 Warm-up 与异步补货
 
-本机制解决“Agent 生成比玩家观看慢一拍”的根本错位：作品开播前，Character、Director、Broadcast 和 Compiler 已经真实运行约 30 分钟；开播后玩家消费库存，Agent 流继续在前方生产。
+本机制解决“Agent 生成比玩家观看慢一拍”的根本错位：作品开播前，Character Runtime、EventStaff Director、Broadcast 和 Compiler 已经真实运行约 30 分钟；开播后玩家消费库存，Agent 流继续在前方生产。
 
 ```text
 Agent generation ------ committed actor script ------ ready render ------ viewer
@@ -286,7 +286,7 @@ Agent generation ------ committed actor script ------ ready render ------ viewer
 必须区分：
 
 - `warmup_wall_time`：开播前真实跑了多久，目标约 30 分钟；
-- `committed_world_lead`：已提交 World Segment 在世界时间上领先 Viewer 多少；
+- `committed_world_lead`：已提交 WorldEvent 在世界时间上领先 Viewer 多少；
 - `ready_render_playable_time`：Ready Render 按玩家播放速度还能撑多久；
 - `production_to_consumption_ratio`：后台每分钟能生产多少可播放分钟。
 
@@ -304,4 +304,3 @@ Agent generation ------ committed actor script ------ ready render ------ viewer
 | 迟到 Render | 世界版本不匹配后丢弃 |
 | WebGAL 状态异常 | 丢弃其状态，按 Plugin 状态重建 |
 | 同步协议升级失效 | 使用虚拟挂载 + iframe 重建 |
-

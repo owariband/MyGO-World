@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -29,6 +31,7 @@ from agent_runtime.agent.personact.manifest import (
     load_manifest,
 )
 from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_proposal
+from agent_runtime.agent.skill import RuntimeSkill, RuntimeSkillCatalog, load_runtime_skill
 from agent_runtime.world.contracts import (
     ActAction,
     ActionProposal,
@@ -44,6 +47,7 @@ from agent_runtime.world.contracts import (
 )
 
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
+SKILLS_PATH = Path(__file__).parents[2] / "content" / "skills"
 
 
 def test_compile_is_stable_and_derives_authority() -> None:
@@ -54,13 +58,39 @@ def test_compile_is_stable_and_derives_authority() -> None:
 
     assert first[0].digest == second[0].digest
     assert first[0].memory_scope == "project/coffee-golden/persona/anon"
+    assert first[0].character_skill.skill_id == "mygo.character.anon"
+    assert first[0].character_skill.version == "3.0.0"
+    assert first[0].character_skill.content_hash == _catalog().skills[0].content_hash
     assert first[0].seeds[0].provenance.startswith(f"manifest:{first[0].digest}#")
+
+
+def test_character_skill_content_hash_partitions_compiled_digest(tmp_path: Path) -> None:
+    manifest = load_manifest(FIXTURE_PATH)
+    catalog = _catalog()
+    original = compile_manifest(manifest, catalog)[0]
+    anon = catalog.skills[0]
+    changed_path = tmp_path / "anon.md"
+    changed_path.write_text(
+        anon.source_text.replace(anon.body, f"{anon.body} changed"),
+        encoding="utf-8",
+    )
+    changed = load_runtime_skill(changed_path)
+    changed_catalog = Catalog(
+        tools=catalog.tools,
+        prompts=catalog.prompts,
+        skills=(changed, *catalog.skills[1:]),
+    )
+
+    changed_spec = compile_manifest(manifest, changed_catalog)[0]
+
+    assert changed_spec.character_skill.content_hash == changed.content_hash
+    assert changed_spec.digest != original.digest
 
 
 def test_manifest_rejects_unknown_authority_fields(tmp_path: Path) -> None:
     manifest_path = tmp_path / "agents.json"
     manifest_path.write_text(
-        '{"formatVersion":1,"projectId":"p","provider":"creator-model","agents":[]}',
+        '{"formatVersion":2,"projectId":"p","provider":"creator-model","agents":[]}',
         encoding="utf-8",
     )
 
@@ -78,6 +108,21 @@ def test_manifest_is_strict_and_does_not_coerce_types(tmp_path: Path) -> None:
     manifest_path.write_text(raw, encoding="utf-8")
 
     with pytest.raises(ManifestDecodeError, match="valid integer"):
+        load_manifest(manifest_path)
+
+
+def test_manifest_v1_is_rejected_after_character_skill_became_required(
+    tmp_path: Path,
+) -> None:
+    raw = FIXTURE_PATH.read_text(encoding="utf-8").replace(
+        '"formatVersion": 2',
+        '"formatVersion": 1',
+        1,
+    )
+    manifest_path = tmp_path / "agents.json"
+    manifest_path.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(ManifestDecodeError, match="Input should be 2"):
         load_manifest(manifest_path)
 
 
@@ -167,6 +212,27 @@ def test_compile_rejects_unknown_prompt_profile() -> None:
 
     with pytest.raises(ManifestCompileError, match="unknown prompt profile"):
         compile_manifest(modified, _catalog())
+
+
+def test_compile_rejects_unknown_or_wrong_kind_character_skill() -> None:
+    manifest = load_manifest(FIXTURE_PATH)
+    without_skills = Catalog(
+        tools=_catalog().tools,
+        prompts=_catalog().prompts,
+    )
+    with pytest.raises(ManifestCompileError, match="unknown Character Skill"):
+        compile_manifest(manifest, without_skills)
+
+    wrong_kind = Catalog(
+        tools=_catalog().tools,
+        prompts=_catalog().prompts,
+        skills=(
+            _skill("mygo.character.anon", "3.0.0", agent_kind="director"),
+            _skill("mygo.character.soyo", "2.0.0"),
+        ),
+    )
+    with pytest.raises(ManifestCompileError, match="non-character Skill"):
+        compile_manifest(manifest, wrong_kind)
 
 
 def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
@@ -392,6 +458,7 @@ def test_no_op_needs_no_affordance_and_carries_no_evidence() -> None:
 
 
 def _catalog() -> Catalog:
+    skills = RuntimeSkillCatalog.load(SKILLS_PATH).skills
     return Catalog(
         tools=(
             ToolDefinition(
@@ -402,6 +469,34 @@ def _catalog() -> Catalog:
             ToolDefinition(id="world.commit", version="1", mode=ToolMode.MUTATE),
         ),
         prompts=(PromptDefinition(id="personact.v1", version="1", digest="prompt-v1"),),
+        skills=skills,
+    )
+
+
+def _skill(
+    skill_id: str,
+    version: str,
+    *,
+    agent_kind: Literal["character", "director", "broadcast"] = "character",
+    body: str | None = None,
+) -> RuntimeSkill:
+    skill_body = body or f"Fixture Skill for {skill_id}."
+    source_text = (
+        "---\n"
+        f"skill_id: {skill_id}\n"
+        f"version: {version}\n"
+        f"agent_kind: {agent_kind}\n"
+        "---\n"
+        f"{skill_body}\n"
+    )
+    return RuntimeSkill(
+        skill_id=skill_id,
+        version=version,
+        agent_kind=agent_kind,
+        body=skill_body,
+        content_hash=sha256(source_text.encode("utf-8")).hexdigest(),
+        source_path=f"fixture://{skill_id}@{version}",
+        source_text=source_text,
     )
 
 
@@ -438,6 +533,7 @@ def _replace_first_agent(
         memory=current.memory,
         capabilities=capabilities or current.capabilities,
         behavior=current.behavior,
+        character_skill=current.character_skill,
         prompt_profile=prompt_profile or current.prompt_profile,
     )
     return Manifest(

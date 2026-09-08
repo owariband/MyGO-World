@@ -2,6 +2,8 @@
 
 这里维护「多事件 AI Native 世界剧场」的持续架构结论。Wiki 用于沉淀讨论、决策、机制和未决问题，不替代当前仓库源码；涉及现有行为时仍以代码为准。
 
+> 最后更新：2026-09-07。当前 Director 边界以 D-044 的 EventStaff 模型为准。
+
 ## 核心模型：Agent 提案，World 提交
 
 > **这是项目最高优先级的运行边界。**`ActionProposal` 表达“角色想做什么”，不是执行结果，更不是已经发生的世界事实。
@@ -10,54 +12,64 @@
 perceive -> retrieve -> plan -> ActionProposal
                                   |
                                   v
-                    Director / Validator / Committer
+                     Validator / WorldUpdater
                                   |
                                   v
                          Committed WorldEvent
+                                  |
+                    +-------------+-------------+
+                    v                           v
+      DirectorView -> EventStaff         AgentViewBuilder
 ```
 
 - `PersonActAgent.decide` 每次只为当前角色产出一个 Action；`agentId` 由受信 `CompiledPersonActSpec` 注入。
 - `interact` 可以指向 Character 或非 Agent Object，但 target 类型必须显式进入契约；对 Character 发起交互不代表对方已接受或已经行动。
-- Director 只能补全候选世界段，Validator/Committer 才决定 Proposal 能否成为 `Committed WorldEvent`。
-- Agent 不执行 Maze 移动、不修改其他 Persona、不直接写 World/Ledger，也不控制 Render。
+- Director 不读取或补全 Character Proposal；它只在 Proposal 已提交后，通过受限 DirectorView 管理 EventStaff。
+- Agent 不执行 Maze 移动、不修改其他 Persona、不直接写 World/WorldEventHistory，也不控制 Render。
 
 ## 项目定位：自研领域型 NPC ADK
 
-当前建设的是 **Generative Go World 自己的 NPC ADK**，不是对 LangChain 的二次包装，也不是通用 Agent Builder。项目自研并拥有 Creator Manifest、受信 Compiler、Persona State/Memory、认知阶段、Action Schema、权限校验和 Trace；LangChain Core 只是内部 Runnable 与未来模型接入基础设施。当前已落地 PersonAct 单次认知 Slice，外部 Scheduler、Director、World Commit、reflection feedback 和完整 Runtime 仍按下文边界继续实现。
+当前建设的是 **Generative Go World 自己的 NPC ADK**，不是对 LangChain 的二次包装，也不是通用 Agent Builder。项目自研并拥有 Creator Manifest、受信 Compiler、Persona State/Memory、认知阶段、Action Schema、权限校验和 Trace；LangChain Core 只是内部 Runnable 与模型接入基础设施。当前已落地 PersonAct 单次认知 Slice、Runtime Skill 与模型 Strategy seam，外部 Scheduler、Director、World Commit、reflection feedback 和完整 Runtime 仍按下文边界继续实现。
 
 ## 当前结论
 
-- 世界不属于 Galgame 引擎。外部 World / Agent Runtime 才是 `world_time`、角色状态、局部认知、互动、World Transaction 和 World Event Ledger 的唯一权威；WebGAL/MyGO 不拥有也不推进世界时间。
+- 世界不属于 Galgame 引擎。外部 World / Agent Runtime 才是 `world_time`、角色状态、局部认知、互动、关系型当前状态和 WorldEventHistory 的唯一权威；WebGAL/MyGO 不拥有也不推进世界时间。
 - WebGAL/MyGO 是可替换的 Render Backend：消费已提交 World Event 的 `RenderArtifact`，动态加载背景、人物、台词和演出，并上报当前播放游标。暂停、快进、黑屏、切换和历史回放都不能反向修改世界。
 - 论文明确描述了 Sandbox time-step action loop：Agent 在每个 time step 感知、决定继续计划或反应，Sandbox Server 更新共同世界并进入下一步；`world_tick / world_version / atomic commit / canonical WorldEvent Ledger` 是本项目基于该思想补充的工程化 Runtime 契约，不是论文原字段。
-- 产品默认采用“生成完成驱动的 `World Time = Actual Runtime`”：Agent 推理、工具调用和异步生成的真实耗时可以进入世界时间，但外部 timer 不会在 Agent 尚未返回时独立提交剧情状态。Character 结果返回后，由 Director 对该轮生成做 Temporal/Causal Completion，补齐事件区间、先后关系、对象结果和桥接 Event；Broadcast 再决定这些世界时间怎样投影成 Galgame 演出。
+- Agent/Tool 的真实耗时进入 Generation Trace，但不自动解释为角色犹豫、移动或对象完成。Character Proposal 直接经 Validator/WorldUpdater 提交；已经客观启动的后台过程由 EventStaff 的检查时间和 release guard 管理。World time 的精确推进规则仍需 Golden Trace 冻结，Broadcast 再把已提交时间投影成 Galgame 演出。
 - 外置能力分成 World / Agent Runtime 与 Render Plugin/Adapter。前者负责世界模拟、Event 产出、BroadcastPlan 和 RenderJob 规划；后者负责 RenderJob 校验/编译、播放队列、Event Hub、Viewer Cursor 和黑屏等待态。原始引擎源码、压缩 Bundle、内部 Store、Backlog 和存档机制仍视为第三方黑盒。
 - 世界可同时存在多个主视角 Event，例如 `Anon / Soyo`、`Tomorin`、`Saki / Mutsumi / Uika`。玩家选择当前观察窗口并可随时切换；未被观看的 Event 仍可继续推进。
-- Agent 初步分为 Character Agent、Director Agent 和 Broadcast Agent。Character 基于 Persona 与局部认知生成行为；Director 至少承担生成结果返回后的时间/因果补完，并在更高层维护剧情约束与未解决线程；补完结果仍须经最小一致性校验后才成为客观 Event。Broadcast 只负责展示选择、摘要、镜头和时间投影。
-- Character Agent 产出结构化 `ActorPerformance / ActionProposal`；Director 基于角色输出与 measured latency 形成待校验 `SegmentDraft`；Temporal Binder、Minimal Validator 和 Committer 只负责绑定实耗、守住世界不变量并提交 Ledger；Event Recognizer 再聚合 `WorldEvent`。任何模型都不能绕过提交链直接控制播放器或宣称事实。
-- 宏观算法借鉴 Generative Agents 的 Perception、Memory、Retrieval、Planning/Reacting 与 Reflection 认知语义，再增加 Director Agent 做每轮 Temporal/Causal Completion 和低频叙事干预、Broadcast Agent 做 World Timeline → Render Timeline 的观看投影。其 Sandbox loop、`Persona.move()`、Maze/path/tile movement 和 `execute` 不迁移；Binder、Validator、Ledger、Committer 与 Event Recognizer 是最小确定性治理，但不硬编码故事时长。
+- Agent 分为 Character Agent、Director Agent 和 Broadcast Agent。Character 基于 Persona 与局部认知决定自己的行为；Director 只管理由已提交事实触发的 EventStaff；Broadcast 只负责展示选择、摘要、镜头和时间投影。
+- Character Agent 产出结构化 `ActionProposal`，Validator/WorldUpdater 守住世界不变量并原子追加 `WorldEvent`。Director 只能输出受 affordance 限制的 `enqueue / keep / release / cancel / no_op`；release 仍要再次经过同一提交链。任何模型都不能绕过 WorldUpdater 宣称事实。
+- 宏观算法借鉴 Generative Agents 的 Perception、Memory、Retrieval、Planning/Reacting 与 Reflection 认知语义，再增加 EventStaff Director 和观看投影 Broadcast。其 Sandbox loop、`Persona.move()`、Maze/path/tile movement 和 `execute` 不迁移；EventSessionRunner、AgentViewBuilder、Validator、WorldUpdater、WorldEventHistory 与 Render Planner 是项目的确定性治理。
 - Timeline 不是 Event Hub 的 UI 控件或 Render Queue，而是 Agent 世界的执行语义：它统一承载动作区间、角色认知获得时间、互动生命周期、计划/承诺变化、WorldTransaction 因果历史和 Viewer 回放位置；MyGO/WebGAL 解析只是该世界向 Galgame 媒介投影的副产物。
-- World 由一等 `LocationModel` 维护地点身份、版本化客观事实、当前有效的 LocationInfo，以及指向唯一 WorldEvent Ledger 的地点 Event 索引。地点事实不会被 Agent 文本覆盖；Director 在角色前往地点前查询该地点上下文，只能提出合法的信息传播机会，角色仍须依据已提交的 Fact/Info 或传播 Event，经 PerceptionProjector -> `perceive` 才能真正获知。
-- 后续算法方向包括从 MyGO 番剧视频中归纳带证据的 Character Skill，再用于 Character Agent 的 Persona、关系条件策略、语言风格和行为偏好；该方向尚未实现，不等于已完成 VLM/微调能力。
+- World 由一等 `LocationModel` 维护地点身份、客观事实、当前有效的 LocationInfo，并直接按唯一 WorldEventHistory 查询地点事件。地点事实不会被 Agent 文本覆盖；自由互动 MVP 先使用明确的关系型当前状态，逐 Fact/Info revision 与任意历史版本查询延后。Director 不参与信息披露；既有公开信息由 AgentViewBuilder 硬过滤，需要传播行为时由 Character/System 自己提交。
+- 已迁入五份人工 Gold Character Skill，作为版本化、hash-pinned 的稳定创作配置；从 MyGO 番剧视频自动归纳带证据 Skill 的方向仍未实现，不等于已完成 VLM/微调能力。
 - 当前固定版本的 Bundle 会自动连接同源 `/api/webgalsync`，可通过 `TEMP_SCENE` 接收完整临时场景。它允许零 Bundle 改动注入 Render，但属于内部同步协议，必须锁定版本并加契约测试。
 - 产品规则是“有 Ready Render 就加载，没有 Render 就保持黑屏”。黑屏由 Plugin Host 控制；WebGAL 可在遮罩下预热。
-- “播放前先运行约 30 分钟 Agent 流”不是普通性能优化，而是生成世界与观看世界的核心解耦机制：玩家消费已提交的演员剧本，Agent 在其前方持续生成和补完。它不代表一次性写死永久未来，但必须形成真实可消费库存，而不只是远端计划。
+- “播放前先运行约 30 分钟 Agent 流”不是普通性能优化，而是生成世界与观看世界的核心解耦机制：玩家消费已提交的演员剧本，Agent 在其前方持续生成、提交、处理 EventStaff 和编译。它不代表一次性写死永久未来，但必须形成真实可消费库存，而不只是远端计划。
 - **已实现并验证：**Dynamic Render MVP 已支持结构化 Fixture Timeline、Render 校验/编译、进程内逐段队列、Event 切换、黑屏 Host、`webgalsync / TEMP_SCENE` 注入和文件热加载；2026-08-22 本地 `npm test` 为 14/14 通过。
 - **现行 Agent Runtime 技术方案：**Python 3.12 + `langchain-core==1.6.1`。Agent 步骤使用显式类型的 `RunnableLambda / RunnableSequence` 组合；外部输入、模型/Tool 输出和跨模块契约使用 strict/frozen Pydantic Model；静态接线由 pyright strict 检查。Python 版本、虚拟环境、依赖与锁文件统一由 uv 管理，ruff/pytest 也统一通过 `uv run` 执行；当前不使用 LangGraph。
 - **NPC DIY 已形成最小边界：**创作者只提交受限 `agents.json`；Python Runtime 严格校验并收敛为 frozen `CompiledPersonActSpec`。World contract 已落地固定 `ActionProposal` envelope、六类 `action.kind` union 与 character/object typed target；配置不能声明 Memory namespace、模型密钥、任意 Tool/URL、Runnable 拓扑、World Commit 或 Render 权限。
 - **PersonAct 单次认知 Slice 已落地：**`PersonActAgent.decide` 已实现 prepare/perceive/retrieve/plan/propose；外部 Event Scheduler 独占循环，一次调用只为 `spec.agent_id` 返回一个 strict/frozen `ActionProposal`。需要 wire JSON 时显式使用 `model_dump_json(by_alias=True)`；Agent 不实现 `Persona.move()` 或 movement。
-- **基础代码不等于完整 Runtime：**reflection/commit feedback、Memory 持久化、Director、Binder、Validator/Committer、Event Scheduler/Ledger、Broadcast、真实模型与完整咖啡 Golden Trace 仍未实现。
-- **必须准确理解强类型：**`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation。真正的运行时结构校验由 Pydantic 完成，领域合法性由 Compiler、Projector、Validator 与 Committer 保证。
-- **必须在实现中验证：**Director/Broadcast 是否需要独立 Runnable、Temporal Binder 如何处理 Director 自身耗时、跨 Event 共享实体如何归约、Prompt Contract、真实模型质量和约 30 分钟领先库存。它们不阻塞 Fixture 骨架开工，但不能被表述成已经解决。
+- **远端 MVP 机制已做选择性融合：**`origin/mvp@febf9d1` 与 `master` 没有 merge base，因此不做整体 merge；只迁入版本化 Character Skill、整文件 hash pin、typed Model Gateway、structured output、transport retry、单次 schema/semantic repair 与非秘密调用 provenance。它们作为 `CognitionStrategy` 实现接入现有 PersonAct Loop，不取代 `loop.py`。
+- **明确没有迁入：**MVP 的 same-snapshot lockstep、同 Event 多角色并发、`move`、Proposal 内 `memory_changes`、Wave/World DB Runtime 和一次整轮提交；本项目继续坚持同 Event 内“一个角色 Proposal -> commit -> 下一角色读取新版本”。
+- **自由互动 MVP 的持久化已收敛：**SQLite 只保存明确的关系型当前状态、稳定 EventSession root binding、轻量 InteractionRequest、append-only `world_events` 与隔离 Agent Memory；不建立重复的 `world_changes / world_versions / entity_revisions / world_snapshots`。作品 `scenario.yaml` 初始化公共世界与初始分区，全员/指定角色知识由 bootstrap 按接收者展开到各自 Agent Memory。
+- **互动记录与演出投影已经分权：**所有已提交的 Character 互动、Session merge/split 和 EventStaff release 共用 `world_events`；`interaction_requests` 只保存仍待 Character 处理的当前状态，`event_staff` 只保存待完成的客观过程，Agent Memory 通过 `source_event_id` 保存主观认知。Broadcast 据此生成带来源的 Render Artifact，不能把 WebGAL 脚本回写为世界事实。
+- **Director 权限已经收紧：**Director 不做 Segment Completion、Narrative Thread 或剧情刺激。它只能读取一个 committed source Event/待检查 Staff 的受限 DirectorView，并从 World 提供的 affordance 中选择 `enqueue / keep / release / cancel / no_op`。一句“我要煮咖啡”不足以入队，必须先有角色自己提交的 `coffee_brewing_started`。
+- **基础代码不等于完整 Runtime：**reflection/commit feedback、Memory 持久化、EventStaff Director、Validator/WorldUpdater、EventSessionRunner/WorldEventHistory、Broadcast、真实 Provider 验收、Generation Trace 持久化与完整咖啡 Golden Trace 仍未实现。
+- **必须准确理解强类型：**`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation。真正的运行时结构校验由 Pydantic 完成，领域合法性由 Compiler、AgentViewBuilder、Validator 与 WorldUpdater 保证。
+- **必须在实现中验证：**World time/Staff 唤醒时钟、EventStaff affordance/取消规则、跨 Event 共享实体如何归约、Prompt Contract、真实模型质量和约 30 分钟领先库存。它们不阻塞 Fixture 骨架开工，但不能被表述成已经解决。
 
 ## 导航
 
 - [架构](architecture.md)：产品语义、Agent 分工、状态模型和主链路。
-- [导演与导播层](director-broadcast.md)：Generative Agents 底座之上的叙事约束、角色自治和观看投影研究框架。
+- [EventStaff Director 与 Broadcast](director-broadcast.md)：Director 的受限可见性、EventStaff 队列/释放/恢复、角色自治边界与观看投影。
 - [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `decide` 内部 perceive 的局部感知边界，并保留被否决答案、当前代价与未决部分。
 - [Agent Runtime 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Python + LangChain Core 强类型边界、`PersonActAgent.decide`、ActionProposal union、`agent / event / world` 分层、Memory 边界、Fixture Vertical Slice、分阶段 Plan 与启动指令。
+- [MVP 完善开发计划](design/MVP_dev.md)：以直观命名整理 SQLite 世界事实底座、可选择复用的 `origin/mvp` 模型、EventSession 互动/重组闭环、分阶段交付与待重新设计问题。
 - [NPC DIY](npc-diy.md)：创作者配置、Pydantic 受信编译、`PersonActAgent.decide`、Proposal contract、当前实现证据与下一步。
-- [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 挂载索引、版本化更新，以及 Director 到访前查询与角色获知链。
+- [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 查询、确定性可见性与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。
 - [决策记录](decisions.md)：已确认决策、当前建议和产品目标。
 - [未决问题](open-questions.md)：需要实现或实验回答的问题。
@@ -80,7 +92,9 @@ perceive -> retrieve -> plan -> ActionProposal
 - [World-owned Contracts](../agent_runtime/world/contracts.py)：固定 ActionProposal envelope、六类 action union 与 typed target。
 - [PersonAct Agent](../agent_runtime/agent/personact/agent.py)：`decide` 门面、并发串行化、proposal replay 与 private snapshot 原子替换。
 - [PersonAct Loop](../agent_runtime/agent/personact/loop.py)：typed RunnableSequence 与 prepare/perceive/retrieve/plan/propose 真实认知阶段。
+- [Model Cognition Strategy](../agent_runtime/agent/personact/model_strategy.py)：消费已编译 Persona、Character Skill 与局部上下文的模型型策略，以及最多一次 repair。
+- [Runtime Skill](../agent_runtime/agent/skill.py)：严格 Markdown frontmatter、版本化 Catalog 与整文件 SHA-256 pin。
+- [Model Gateway](../agent_runtime/model_gateway.py)：LangChain ChatModel/Fixture 的 typed structured-output seam 与非秘密调用 trace。
 - [Proposal Authority Boundary](../agent_runtime/agent/personact/proposal.py)：最终 Proposal 构造、actor 注入与 capability/affordance/evidence 校验。
 - [NPC DIY 契约测试](../agent_runtime/tests/test_personact.py)：类型、权限、namespace、affordance 和 evidence 拒绝路径。
 - [PersonAct 认知测试](../agent_runtime/tests/test_personact_agent.py)：attention、novelty、Memory retrieval、state 原子更新和单 Proposal 边界。
-

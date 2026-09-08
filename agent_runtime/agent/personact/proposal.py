@@ -1,6 +1,6 @@
 """Final ActionProposal construction and authority validation.
 
-The cognitive sequence lives in ``agent.py``. This module deliberately contains no
+The cognitive sequence lives in ``loop.py``. This module deliberately contains no
 placeholder perceive/retrieve nodes: it only turns a strategy draft into the
 single world-facing proposal after checking compiled and current-world grants.
 """

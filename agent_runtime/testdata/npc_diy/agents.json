@@ -1,5 +1,5 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "projectId": "coffee-golden",
   "agents": [
     {
@@ -22,6 +22,7 @@
         "tools": [{"id": "visible_location.query", "maxCallsPerRun": 1}]
       },
       "behavior": {"initiative": "balanced", "responsePriority": "addressed_first", "maxContextRounds": 1, "reflection": "off"},
+      "characterSkill": {"skillId": "mygo.character.anon", "version": "3.0.0"},
       "promptProfile": "personact.v1"
     },
     {
@@ -37,6 +38,7 @@
       "memory": {"seeds": [], "retrieval": {"recentLimit": 8, "tagLimit": 8}, "writePolicy": ["observation", "committed_outcome"]},
       "capabilities": {"proposalKinds": ["respond", "wait", "no_op"], "tools": []},
       "behavior": {"initiative": "quiet", "responsePriority": "addressed_first", "maxContextRounds": 1, "reflection": "off"},
+      "characterSkill": {"skillId": "mygo.character.soyo", "version": "2.0.0"},
       "promptProfile": "personact.v1"
     }
   ]
