@@ -51,11 +51,12 @@ def test_minimal_scenario_uses_layered_chinese_skills() -> None:
 
     assert skills["mygo.character.anon"].version == "3.0.0"
     assert skills["mygo.character.soyo"].version == "2.0.0"
-    assert skills["mygo.director.default"].version == "2.0.0"
+    assert skills["mygo.director.default"].version == "2.1.0"
     assert skills["mygo.broadcast.default"].version == "2.0.0"
     assert "核心驱动力" in skills["mygo.character.anon"].body
     assert "核心驱动力" in skills["mygo.character.soyo"].body
     assert "群像叙事" in skills["mygo.director.default"].body
+    assert "没有行动时保持世界原状" in skills["mygo.director.default"].body
     assert "视觉小说" in skills["mygo.broadcast.default"].body
 
     formal_bodies = "\n".join(item.body for item in skills.values())

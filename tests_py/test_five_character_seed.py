@@ -79,7 +79,7 @@ def test_five_character_content_loads_through_production_parsers() -> None:
         "mygo.character.tomori": "1.0.0",
         "mygo.character.rana": "1.0.0",
         "mygo.character.taki": "1.0.0",
-        "mygo.director.default": "2.0.0",
+        "mygo.director.default": "2.1.0",
         "mygo.broadcast.default": "2.0.0",
     }
     expected_headings = (
