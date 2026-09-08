@@ -34,7 +34,7 @@
 - **状态：方向保留，Director 职责已由 D-026/D-027 扩展**
 - **日期：2026-08-20**
 - **原始边界：**Character 提出角色局部行动；Director 维护剧情约束、优先级和未解决线程；Broadcast 负责展示选择、摘要和镜头入口。
-- **扩展：**Director 还承担每个 generation wave 的 Temporal/Causal Completion，但只输出窄 `DirectorResolution`；Runtime 的确定性 Segment Assembler 才能构造内部 SegmentDraft，Validator/Committer 才能把通过校验的结果变成客观事实。Broadcast 仍不能改世界事实。
+- **扩展：**Director 还承担每个非 `no_op` generation wave 的 Temporal/Causal Completion，但只输出窄 `DirectorResolution`；Runtime 的确定性 Segment Assembler 才能构造内部 SegmentDraft，Validator/Committer 才能把通过校验的结果变成客观事实。严格 `no_op` 绕过 Director，Broadcast 仍不能改世界事实。
 
 ## D-005｜Agent 与 Render 生成均使用分层结构化契约
 
@@ -274,7 +274,7 @@
 - **决策：**一期 Agent Runtime 使用 Go。Persona、Director、Broadcast 对外实现 Eino `adk.Agent`；Character 的工作名称为 `PersonActAgent`，内部使用 Eino Compose Graph 表达 Generative Agents 风格的 `perceive -> retrieve -> plan -> propose` 与有限补检索/修复回环。
 - **依据：**Eino 自身的 `adk.ChatModelAgent` 也是 ADK Agent 外壳加内部 ReAct Graph；本地 `agent_core` 也已验证 `compose.Workflow -> Runnable -> adk.Agent` 的薄适配模式。Graph 是 Agent 内部实现，不是与 ADK 对立的另一套方案。
 - **源码依据：**Eino [`adk.Agent`](https://github.com/cloudwego/eino/blob/v0.9.15/adk/interface.go#L447-L467)、[`compose.Runnable`](https://github.com/cloudwego/eino/blob/v0.9.15/compose/runnable.go#L28-L37) 与 [ADK ReAct Graph](https://github.com/cloudwego/eino/blob/v0.9.15/adk/react.go#L354-L558)；本地已有 [`WorkflowAgent`](../../../go-project/agent_core/agent/workflow/workflow_agent.go) 包装 Eino Workflow Runtime 的实现先例。
-- **运行边界：**一次 Character Decision Run 在产生 `ActionProposal` 或 `no_op` 后结束；Runtime 完成 Director Completion、Validator 与 Commit 后，再用独立 Feedback Run 触发 `observe_outcome -> conditional reflect`。一期不以 ADK interrupt 长时间挂起等待世界提交。
+- **运行边界：**一次 Character Decision Run 在产生 `ActionProposal` 或 `no_op` 后结束；非 `no_op` Proposal 由 Runtime 完成 Director Completion、Validator 与 Commit 后，再用独立 Feedback Run 触发 `observe_outcome -> conditional reflect`。严格 `no_op` 只完成运行记录并绕过 Director；一期不以 ADK interrupt 长时间挂起等待世界提交。
 - **状态边界：**Eino Graph state/checkpoint 只服务一次 Agent 执行的中断恢复；不能替代 Persona 长期 Memory、World Snapshot、World Ledger、Event scheduler cursor 或 commit protocol。
 - **后果：**原 D-031 的纯 Python Runtime 和手写 `cognitive_loop.py` 不再实施；Generative Agents 只作为认知算法与数据语义参考。
 
@@ -305,8 +305,8 @@
 - **状态：已实现**
 - **日期：2026-09-08**
 - **问题：**如何防止 Director 在复制版本、Session、来源或角色动作时犯错，并避免修复一个字段时删除已经接受的 Character Proposal Event？
-- **决策：**Director settlement 只返回 `DirectorResolution`：受限相对时长、可选结果摘要、Creative External Event、合法 Entity State Change 与 Session intent。它不返回 World Version、Session、绝对时间、Proposal Event、事件键、来源或角色 payload。
-- **组装边界：**纯确定性的 Segment Assembler 读取 Snapshot、当前 Session、已接受 Action Proposal、Director trace 身份与 Resolution，按动作类型复制权威字段、生成来源/键/绝对时间/因果引用，并为 `move` 生成角色位置变化，再把内部 SegmentDraft 交给 Segment Validator。
+- **决策：**Director settlement 只返回 `DirectorResolution`：受限相对时长、可选结果摘要、只含内容与 Scope 的 Creative External Event、无位置字段的 Entity State Patch 与 Session intent。它不返回 World Version、Session、事件时间、因果/证据引用、Proposal Event、事件键、来源、位置变化或角色 payload。
+- **组装边界：**纯确定性的 Segment Assembler 读取 Snapshot、当前 Session、已接受 Action Proposal、Director trace 身份与 Resolution，按动作类型复制权威字段，把 External Event 放在 Wave 末端，生成来源/键及对 Proposal 的直接因果/证据关系，并只为 `move` 生成角色位置变化，再把内部 SegmentDraft 交给 Segment Validator。
 - **修复边界：**只有 Director 自有字段的错误允许一次 repair，并携带上一版输出与完整诊断；Assembler 权威上下文不变量失败按 Runtime 缺陷直接失败。Assembler 的构造不是对模型完整 Draft 的事后静默覆盖。
 - **迁移与审计：**新 Generation Trace 使用 `director_resolution` / `director_resolution_repair` 并保存 Resolution；历史 `segment_draft` trace 与已提交 World Segment 继续可读，无需数据库迁移。
-- **代价：**Runtime 必须维护五种 Action 的 canonical payload、事件时序、局部引用解析和 Entity change 合并规则，但这些规则集中在一个深模块中，并由真实 `advance_world` seam 的离线回归测试保护。
+- **代价：**Runtime 必须维护五种 Action 的 canonical payload、Wave 末端事件时序、来源关系和 Entity state patch 合并规则；MVP 暂不表达 Wave 内多阶段 External Event 时间线，但这些规则集中在一个深模块中，并由真实 `advance_world` seam 的离线回归测试保护。

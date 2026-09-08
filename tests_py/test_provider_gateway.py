@@ -120,6 +120,7 @@ def test_provider_modes_validate_response_and_request_shape(mode: str) -> None:
     assert authorizations == ["Bearer super-secret"]
     assert requests[0]["model"] == "test-model"
     assert requests[0]["temperature"] == 0.2
+    assert requests[0]["thinking"] == {"type": "disabled"}
     if mode == "json_schema":
         assert requests[0]["response_format"]["json_schema"]["schema"] == (
             ActionProposal.model_json_schema()
@@ -291,6 +292,7 @@ MYGO_MODEL_PARAMETERS_JSON={"temperature":0.7}""",
         "[]",
         '{"model":"other"}',
         '{"messages":[]}',
+        '{"thinking":{"type":"enabled"}}',
         '{"api_key":"secret"}',
         '{"temperature":NaN}',
     ],

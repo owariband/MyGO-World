@@ -314,7 +314,7 @@ inside Event A:
 - 读取全局状态和活动剧情线程；
 - 在 Character Agent 结果返回后，读取本轮输出、响应耗时和起始 Snapshot，补齐 World Segment 的先后、持续、Event 边界、对象结果和必要桥接；
 - 提出 Narrative Constraint、优先级和可感知刺激，维护节奏、伏笔和角色弧；
-- 输出的是窄 `DirectorResolution / TemporalConstraintGraph`；版本、Session、绝对时间、Proposal Event、来源和角色 payload 由 Runtime 的 Segment Assembler 构造，Director 不能绕过 Validator 直接写 Ledger；
+- 输出的是窄 `DirectorResolution / TemporalConstraintGraph`；版本、Session、绝对时间、Wave 末端 External Event、Proposal 来源关系、位置变化和角色 payload 由 Runtime 的 Segment Assembler 构造，Director 不能绕过 Validator 直接写 Ledger；
 - 不负责输出 WebGAL DSL。
 
 导演层的“生成后时间/因果补完”是 Character Runtime 能闭合 Event 的基础职责，不再全部推迟到高层剧情优化之后；目标函数、线程状态、刺激选择和自治/可控权衡仍是后续研究。

@@ -495,31 +495,17 @@ class EntityStateChange(StrictModel):
         return self
 
 
-class ProposalEventReference(StrictModel):
-    kind: Literal["proposal"]
-
-
-class ExternalEventReference(StrictModel):
-    kind: Literal["external"]
-    index: int = Field(ge=0)
-
-
-CreativeEventReference = Annotated[
-    ProposalEventReference | ExternalEventReference,
-    Field(discriminator="kind"),
-]
-
-
 class CreativeExternalEvent(StrictModel):
     event_type: str = Field(min_length=1)
     actor_id: str | None = None
-    start_offset_ms: int = Field(ge=0)
-    end_offset_ms: int = Field(ge=0)
-    cause_refs: list[CreativeEventReference] = Field(default_factory=list)
-    evidence_refs: list[CreativeEventReference] = Field(default_factory=list)
     location_id: str = Field(min_length=1)
     scope_key: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DirectorEntityStateChange(StrictModel):
+    entity_id: str = Field(min_length=1)
+    state_patch: dict[str, Any] = Field(default_factory=dict)
 
 
 class DirectorResolution(StrictModel):
@@ -527,7 +513,7 @@ class DirectorResolution(StrictModel):
     elapsed_ms: int = Field(ge=0)
     outcome_summary: str | None = Field(default=None, min_length=1, max_length=2000)
     external_events: list[CreativeExternalEvent] = Field(default_factory=list)
-    entity_changes: list[EntityStateChange] = Field(default_factory=list)
+    entity_changes: list[DirectorEntityStateChange] = Field(default_factory=list)
     session_intent: Literal["keep_open", "resolved"] = "keep_open"
 
 

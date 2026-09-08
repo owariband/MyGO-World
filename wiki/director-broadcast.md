@@ -51,7 +51,7 @@ Persona、Director、Broadcast 对外使用同一个 Eino `adk.Agent` 协议、R
 2026-08-21 的修正进一步把 Director 拆成两种运行频率：
 
 ```text
-每个 generation wave 必经
+每个非 `no_op` generation wave 必经
   Segment Completion：在角色响应后补齐该段时间、因果、对象结果和 Event 边界
 
 低频、可 NoOp
@@ -92,12 +92,12 @@ Character Agent 返回的是局部角色表演、意图、台词或对环境的�
 DirectorResolution
   elapsed_ms               受限的相对语义时长
   outcome_summary          可观察结果摘要
-  creative_external_events 环境反应及局部因果引用
-  entity_state_changes     合法的对象状态结果
+  creative_external_events 环境反应的内容与 Scope
+  entity_state_changes     无位置字段的对象状态结果
   session_intent           keep_open / resolved
 ```
 
-Runtime 的 Segment Assembler 再从 Snapshot、当前 Session、已接受 ActionProposal、Director trace 身份与 Resolution 确定性构造内部 SegmentDraft，注入版本、绝对时间、Proposal Event、事件键、来源、角色 payload 和 `move` 位置结果。
+Runtime 的 Segment Assembler 再从 Snapshot、当前 Session、已接受 ActionProposal、Director trace 身份与 Resolution 确定性构造内部 SegmentDraft，注入版本、绝对时间、Wave 末端 External Event、事件键、Proposal 来源关系、角色 payload 和 `move` 位置结果。
 
 具体持续时间不能由程序的通用 `duration=120s` 表替剧情作答。Director 可以把排队或冲煮保持为 `ACTIVE` 跨越多个 generation wave；当后续实际运行时间和新输出足以支持完成时，再在后续 Segment 中关闭。因此 Event duration 可以由 `ended_at - started_at` 事后得到，而不是在开始时硬编码。
 
@@ -339,7 +339,7 @@ Timeline 同时承载：
 
 ### Director MVP
 
-- 每个 generation wave 先生成一个可校验 DirectorResolution，再由 Segment Assembler 构造内部 SegmentDraft；
+- 每个非 `no_op` generation wave 先生成一个可校验 DirectorResolution，再由 Segment Assembler 构造内部 SegmentDraft；严格 `no_op` 绕过 Director；
 - 只支持 `start / continue / interrupt / complete` 四类动作迁移和 Event `open / continue / close`；
 - 输入必须包含各 Agent latency 和当前 active Event，允许事件跨多 wave 保持 ACTIVE；
 - 用 Anon/Soyo 排队、冲咖啡和被打断的 trace 检查是否存在硬编码 duration；

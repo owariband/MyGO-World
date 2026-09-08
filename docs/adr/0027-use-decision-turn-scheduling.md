@@ -6,7 +6,8 @@
 
 同一 Event Session 中的多个 Character 不再从同一个 Snapshot 同时提案。每个
 Generation Wave 先由 `TurnScheduler` 授予一名 Character 一个 Decision Turn，该角色
-基于当前已提交 World Version 产生至多一个 Action Proposal，Director 结算后原子提交。
+基于当前已提交 World Version 产生至多一个 Action Proposal；非 `no_op` Proposal 经
+Director 结算后原子提交，严格 `no_op` 则绕过 Director。
 因此下一名角色能通过新的 PerceptionFrame 观察上一小步已提交的结果。
 
 选择优先级固定为：`pending_response_ids` 中的被点名角色优先；没有点名时由
@@ -28,7 +29,9 @@ Version 在 World Committer 的同一事务中更新；`no_op` 和失败则分�
 Session 最新已完成（`no_op` 或 `committed`）记录的选中角色恢复游标；失败的机会不
 推进游标，也不能依赖进程内变量、UUID 或数据库 `rowid`。
 
-Generation Wave 继续作为 Proposal、Director 结算和 World Commit 的原子边界，但每个
-Wave 最多只有一个 Character Proposal。该方案牺牲同一时刻的群体联合提案，以换取
+Generation Wave 继续作为 Proposal、非 `no_op` Proposal 的 Director 结算和 World
+Commit 的原子边界，但每个 Wave 最多只有一个 Character Proposal。严格 `no_op` 绕过
+Director，不产生 World Event、实体变化或 World Time 推进；未到上限时只完成运行记录，
+到 `max_waves` 时由 Runtime 提交无事件的 `limit_reached` 控制 Segment。该方案牺牲同一时刻的群体联合提案，以换取
 逐步可观察性，避免多人同时对同一发言作出彼此不可见的重复回应。异步长行动、显式
 continuation、Turn Bid 和跨 Session 并发留待后续决策。

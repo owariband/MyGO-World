@@ -182,6 +182,7 @@ MYGO_MODEL_PARAMETERS_JSON={{"temperature":0}}
     assert receipt["provider_request_count"] == request_count == 7
     assert all(item["model"] == "offline-test-model" for item in request_bodies)
     assert all(item["temperature"] == 0 for item in request_bodies)
+    assert all(item["thinking"] == {"type": "disabled"} for item in request_bodies)
     director_request = next(
         item
         for item in request_bodies

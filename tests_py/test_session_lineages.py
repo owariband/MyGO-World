@@ -119,10 +119,6 @@ class SplitGateway:
                     {
                         "event_type": "environment_change",
                         "actor_id": None,
-                        "start_offset_ms": 200,
-                        "end_offset_ms": 200,
-                        "cause_refs": [{"kind": "proposal"}],
-                        "evidence_refs": [{"kind": "proposal"}],
                         "location_id": "location-live-house",
                         "scope_key": "lounge",
                         "payload": {"description": "A door closes in the lounge."},
@@ -204,7 +200,11 @@ class ResolvingNoOpGateway:
     model_id = "resolve-fixture"
     network_request_count = 0
 
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     def generate(self, request: ModelRequest, response_type: type[Any]) -> Any:
+        self.calls.append(request.call_kind)
         if request.agent_type == "character":
             frame = request.input_payload["perception_frame"]
             raw = {
@@ -785,15 +785,16 @@ def test_explicit_question_creates_pending_response() -> None:
     assert outcome.value.pending_response_ids == ["character-b"]
 
 
-def test_no_op_then_resolved_uses_one_event_free_control_segment(
+def test_no_op_limit_reached_uses_one_event_free_control_segment(
     worlds_dir: Path,
 ) -> None:
     initialize_world(MINIMAL_SEED, "resolved-control", worlds_dir)
 
+    gateway = ResolvingNoOpGateway()
     receipt = advance_world(
         "resolved-control",
         worlds_dir,
-        gateway=ResolvingNoOpGateway(),
+        gateway=gateway,
         max_waves=2,
     )
 
@@ -801,6 +802,8 @@ def test_no_op_then_resolved_uses_one_event_free_control_segment(
     assert receipt["wave_count"] == 2
     assert receipt["end_world_version"] == 2
     assert receipt["world_event_count"] == 0
+    assert receipt["model_call_count"] == 2
+    assert gateway.calls == ["action_proposal", "action_proposal"]
     database = worlds_dir / "resolved-control" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         assert connection.execute(
@@ -808,7 +811,7 @@ def test_no_op_then_resolved_uses_one_event_free_control_segment(
         ).fetchall() == [("no_op",), ("committed",)]
         assert connection.execute(
             "SELECT status, closure_reason FROM event_sessions"
-        ).fetchone() == ("closed", "resolved")
+        ).fetchone() == ("closed", "limit_reached")
         assert connection.execute("SELECT count(*) FROM world_segments").fetchone() == (
             2,
         )

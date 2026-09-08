@@ -9,6 +9,6 @@ Director 可以在满足 Session 关闭前置条件时提议正常结束；Runti
 
 正常达到 `max_waves` 时，Runtime 以 `limit_reached` 关闭当前 Session，Generation Batch 成功结束并返回警告；这与 Provider 请求预算耗尽或模型最终失败不同，后两者使 Batch 失败并以非零状态退出。
 
-任一 Character Agent 在传输层重试后仍然超时或失败时，整个 Wave 和 Batch 失败且不提交，技术失败不能转换为角色的 `no_op`。当所有角色都主动返回 `no_op` 时，Director 仍可判断 Session 是否自然结束，但不能凭空创造 World Event；若未结束，本轮不提交 World Event，并继续运行到确定性上限。
+任一 Character Agent 在传输层重试后仍然超时或失败时，整个 Wave 和 Batch 失败且不提交，技术失败不能转换为角色的 `no_op`。被选中角色主动返回 `no_op` 时绕过 Director，不产生 World Event、实体变化或 World Time 推进，并继续运行到确定性上限。
 
-全员 `no_op` 且 Session 保持开放时只持久化 Batch/Wave bookkeeping 与 Generation Trace，不创建 World Segment 或推进 World Version。若 Director 合法提议 `resolved`，或 Runtime 应用 `limit_reached`，Session/Queue 生命周期变化通过一个不含 World Event 的控制 Segment 提交并推进 World Version。
+未到上限的 `no_op` 只持久化 Batch/Wave bookkeeping、Decision Turn 与 Generation Trace，不创建 World Segment 或推进 World Version。到 `max_waves` 时，Runtime 确定性构造一个零时长、不含 World Event 的 `limit_reached` 控制 Segment，提交 Session/Queue 生命周期变化并推进 World Version。

@@ -601,7 +601,7 @@ TemporalConstraint
   subject_ref / object_ref / lower_bound_ms / upper_bound_ms / evidence_ids
 ```
 
-Director 只返回 Resolution 的创意判断；Segment Assembler 从 Snapshot、Session、Proposal 与 Director trace 确定性构造 SegmentDraft，注入版本、绝对时间、Proposal Event、来源与 `move` 位置变化。Director 不分配事件键或 commit sequence，也不直接写 Ledger。
+Director 只返回 Resolution 的创意判断；Segment Assembler 从 Snapshot、Session、Proposal 与 Director trace 确定性构造 SegmentDraft，注入版本、绝对时间、Wave 末端 External Event、Proposal 来源关系与 `move` 位置变化。Director 不分配事件键、事件 offset、局部引用或 commit sequence，也不直接写 Ledger。
 
 ### `WorldSegment` / `ValidationDiagnostic`
 

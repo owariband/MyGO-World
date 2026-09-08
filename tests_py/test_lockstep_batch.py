@@ -112,6 +112,14 @@ class RepairGateway(ObservingGateway):
                     and request.call_kind == "action_proposal"
                 ),
             )
+            raw["intent_summary"] = "Greets the other participant."
+            raw["action"] = {
+                "kind": "utterance",
+                "text": "Hello.",
+                "addressee_ids": [],
+                "expects_response": False,
+                "response_to_event_id": None,
+            }
         else:
             raw = _director(
                 request, invalid_time=request.call_kind == "director_resolution"
@@ -180,11 +188,11 @@ def test_batch_grants_one_character_a_persisted_decision_turn(
 
     assert gateway.max_active == 1
     assert gateway.character_contexts == [(1, 0)]
-    assert gateway.director_saw == {"character-anon"}
+    assert gateway.director_saw == set()
     assert receipt["run_id"]
     assert receipt["status"] == "completed"
     assert receipt["wave_count"] == 1
-    assert receipt["model_call_count"] == 2
+    assert receipt["model_call_count"] == 1
     assert receipt["warnings"] == ["MAX_WAVES_REACHED"]
     assert receipt["error_code"] is None
 
@@ -206,7 +214,7 @@ def test_batch_grants_one_character_a_persisted_decision_turn(
             "FROM decision_turn_records WHERE run_id=?",
             (receipt["run_id"],),
         ).fetchone()
-    assert batch == ("completed", 1, 2, 1, 2)
+    assert batch == ("completed", 1, 2, 1, 1)
     assert wave == ("committed", 1, 2, 0)
     assert decision == (
         "character-anon",
@@ -234,9 +242,8 @@ def test_provider_director_selects_character_and_records_trace(
     assert gateway.calls == [
         "turn_selection",
         "action_proposal",
-        "director_resolution",
     ]
-    assert receipt["model_call_count"] == 3
+    assert receipt["model_call_count"] == 2
     database = worlds_dir / "provider-turn" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         decision = connection.execute(
@@ -358,8 +365,8 @@ def test_schema_failure_raw_response_is_traced_before_one_repair(
 
     receipt = advance_world("schema-repair", worlds_dir, gateway=gateway, max_waves=1)
 
-    assert receipt["model_call_count"] == 3
-    assert len(gateway.calls) == 3
+    assert receipt["model_call_count"] == 2
+    assert len(gateway.calls) == 2
     database = worlds_dir / "schema-repair" / "world.sqlite3"
     with sqlite3.connect(database) as connection:
         failed = connection.execute(
@@ -398,7 +405,7 @@ def test_retryable_transport_error_recovers_within_two_retries(
 
     assert gateway.attempts["character-anon"] == 3
     assert receipt["status"] == "completed"
-    assert receipt["model_call_count"] == 4
+    assert receipt["model_call_count"] == 3
 
 
 def test_later_wave_failure_preserves_prior_wait_commit(worlds_dir: Path) -> None:
@@ -621,6 +628,8 @@ def test_all_no_op_waves_only_commit_limit_reached_control_segment(
 
     class NoOpGateway(ObservingGateway):
         def generate(self, request: ModelRequest, response_type: type[Any]) -> Any:
+            with self.lock:
+                self.calls.append(request.call_kind)
             raw = (
                 _proposal(request)
                 if request.agent_type == "character"
@@ -633,16 +642,19 @@ def test_all_no_op_waves_only_commit_limit_reached_control_segment(
                 structured=structured,
             )
 
+    gateway = NoOpGateway()
     receipt = advance_world(
         "no-op",
         worlds_dir,
-        gateway=NoOpGateway(),
+        gateway=gateway,
         max_waves=2,
         director_turn_policy=DeterministicDirectorFixture("not-a-participant"),
     )
     shown = show_world("no-op", worlds_dir)
 
     assert receipt["wave_count"] == 2
+    assert receipt["model_call_count"] == 2
+    assert gateway.calls == ["action_proposal", "action_proposal"]
     assert receipt["warnings"] == ["MAX_WAVES_REACHED"]
     assert shown["world_version"] == 2
     assert shown["world_time_ms"] == 0

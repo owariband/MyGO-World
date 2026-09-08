@@ -134,10 +134,6 @@ def _default_fixture_responses(
             {
                 "event_type": "environment_change",
                 "actor_id": None,
-                "start_offset_ms": 2_000,
-                "end_offset_ms": 2_000,
-                "cause_refs": [{"kind": "proposal"}],
-                "evidence_refs": [{"kind": "proposal"}],
                 "location_id": _character(snapshot, actor_id)["location_id"],
                 "scope_key": _character(snapshot, actor_id)["scope_key"],
                 "payload": {
@@ -149,8 +145,6 @@ def _default_fixture_responses(
             {
                 "entity_id": _character(snapshot, actor_id)["location_id"],
                 "state_patch": {"lighting": "warm"},
-                "location_id": None,
-                "scope_key": None,
             }
         ],
         "session_intent": "keep_open",
@@ -1349,6 +1343,68 @@ def advance_world(
                         committer.record_generation_traces(trace_records)
 
                     proposals = [character_result.value]
+                    all_no_op = all(item.action.kind == "no_op" for item in proposals)
+                    if all_no_op and wave_number < max_waves:
+                        _finish_decision_turn(
+                            engine,
+                            decision_id=active_decision_id,
+                            status="no_op",
+                            resulting_world_version=snapshot["world_version"],
+                            error_code=None,
+                            clock=clock,
+                        )
+                        _finish_wave(
+                            engine,
+                            wave_id=active_wave_id,
+                            status="no_op",
+                            end_version=snapshot["world_version"],
+                            error_code=None,
+                            clock=clock,
+                        )
+                        active_decision_id = None
+                        active_wave_id = None
+                        continue
+
+                    if all_no_op:
+                        control_resolution = DirectorResolution(
+                            elapsed_ms=0,
+                            outcome_summary=None,
+                            external_events=[],
+                            entity_changes=[],
+                            session_intent="keep_open",
+                        )
+                        control_trace_id = id_generator()
+                        assembly = SegmentAssembler().assemble(
+                            snapshot=snapshot,
+                            session_id=session_id,
+                            proposal=proposals[0],
+                            resolution=control_resolution,
+                            director_trace_id=control_trace_id,
+                        )
+                        assert assembly.ok and assembly.value is not None
+                        control_outcome = SegmentValidator().validate(
+                            world_id=world_id,
+                            snapshot=snapshot,
+                            proposals=proposals,
+                            draft=assembly.value,
+                            source_trace_id=control_trace_id,
+                            completed_wave_count=completed_wave_count,
+                            pending_response_ids=pending_response_ids,
+                            has_unresolved_key_commitments=(
+                                has_unresolved_key_commitments
+                            ),
+                        )
+                        assert control_outcome.ok and control_outcome.value is not None
+                        plan = control_outcome.value.model_copy(
+                            update={
+                                "session_intent": "limit_reached",
+                                "closed_session_ids": [session_id],
+                                "pending_response_ids": [],
+                            }
+                        )
+                        warnings.append("MAX_WAVES_REACHED")
+                    else:
+                        plan = None
                     director_trace_id = id_generator()
                     director_request = ModelRequest(
                         agent_type="director",
@@ -1381,60 +1437,65 @@ def advance_world(
                         model_config=_gateway_model_config(selected_gateway),
                         skill_body=director_skill.body,
                     )
-                    try:
-                        plan, director_attempts, director_schema_attempts = (
-                            _generate_director_resolution(
-                                gateway=selected_gateway,
-                                request=director_request,
-                                world_id=world_id,
-                                snapshot=snapshot,
-                                session_id=session_id,
-                                proposals=proposals,
-                                trace_id=director_trace_id,
-                                budget=budget,
-                                cancellation_event=cancel,
-                                retries=transport_retries,
-                                completed_wave_count=completed_wave_count,
-                                pending_response_ids=pending_response_ids,
-                                has_unresolved_key_commitments=(
-                                    has_unresolved_key_commitments
-                                ),
-                            )
-                        )
-                    except WorldError as exc:
-                        director_attempts = exc.trace_attempts
-                        director_schema_attempts = exc.schema_attempts
-                        if director_attempts or director_schema_attempts:
-                            failed_director_records = [
-                                _invalid_trace_record(
-                                    trace_id=id_generator(),
+                    director_attempts = ()
+                    director_schema_attempts = ()
+                    if plan is None:
+                        try:
+                            plan, director_attempts, director_schema_attempts = (
+                                _generate_director_resolution(
+                                    gateway=selected_gateway,
+                                    request=director_request,
                                     world_id=world_id,
+                                    snapshot=snapshot,
                                     session_id=session_id,
-                                    error=error,
-                                    attempt=attempt,
+                                    proposals=proposals,
+                                    trace_id=director_trace_id,
+                                    budget=budget,
+                                    cancellation_event=cancel,
+                                    retries=transport_retries,
+                                    completed_wave_count=completed_wave_count,
+                                    pending_response_ids=pending_response_ids,
+                                    has_unresolved_key_commitments=(
+                                        has_unresolved_key_commitments
+                                    ),
                                 )
-                                for error, attempt in director_schema_attempts
-                            ]
-                            failed_director_records.extend(
-                                [
-                                    _trace_record(
-                                        trace_id=(
-                                            director_trace_id
-                                            if index == len(director_attempts)
-                                            else id_generator()
-                                        ),
+                            )
+                        except WorldError as exc:
+                            director_attempts = exc.trace_attempts
+                            director_schema_attempts = exc.schema_attempts
+                            if director_attempts or director_schema_attempts:
+                                failed_director_records = [
+                                    _invalid_trace_record(
+                                        trace_id=id_generator(),
                                         world_id=world_id,
                                         session_id=session_id,
-                                        generation=generation,
-                                        validation=validation,
+                                        error=error,
+                                        attempt=attempt,
                                     )
-                                    for index, (generation, validation) in enumerate(
-                                        director_attempts, start=1
-                                    )
+                                    for error, attempt in director_schema_attempts
                                 ]
-                            )
-                            committer.record_generation_traces(failed_director_records)
-                        raise
+                                failed_director_records.extend(
+                                    [
+                                        _trace_record(
+                                            trace_id=(
+                                                director_trace_id
+                                                if index == len(director_attempts)
+                                                else id_generator()
+                                            ),
+                                            world_id=world_id,
+                                            session_id=session_id,
+                                            generation=generation,
+                                            validation=validation,
+                                        )
+                                        for index, (generation, validation) in enumerate(
+                                            director_attempts, start=1
+                                        )
+                                    ]
+                                )
+                                committer.record_generation_traces(
+                                    failed_director_records
+                                )
+                            raise
                     director_records = [
                         _invalid_trace_record(
                             trace_id=id_generator(),
@@ -1463,7 +1524,8 @@ def advance_world(
                             )
                         ]
                     )
-                    committer.record_generation_traces(director_records)
+                    if director_records:
+                        committer.record_generation_traces(director_records)
 
                     if wave_number == max_waves and plan.session_intent == "keep_open":
                         plan = plan.model_copy(
@@ -1482,28 +1544,6 @@ def advance_world(
                             }
                         )
                         warnings.append("MAX_WAVES_REACHED")
-                    all_no_op = all(item.action.kind == "no_op" for item in proposals)
-                    if all_no_op and plan.session_intent == "keep_open":
-                        _finish_decision_turn(
-                            engine,
-                            decision_id=active_decision_id,
-                            status="no_op",
-                            resulting_world_version=snapshot["world_version"],
-                            error_code=None,
-                            clock=clock,
-                        )
-                        _finish_wave(
-                            engine,
-                            wave_id=active_wave_id,
-                            status="no_op",
-                            end_version=snapshot["world_version"],
-                            error_code=None,
-                            clock=clock,
-                        )
-                        active_decision_id = None
-                        active_wave_id = None
-                        continue
-
                     if cancel.is_set():
                         raise WorldError(
                             "BATCH_CANCELLED", "Generation Batch was cancelled"

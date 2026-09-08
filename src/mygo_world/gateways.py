@@ -32,6 +32,7 @@ _RESERVED_MODEL_PARAMETERS = frozenset(
         "n",
         "response_format",
         "stream",
+        "thinking",
         "tool_choice",
         "tools",
     }
@@ -542,6 +543,7 @@ class OpenAICompatibleGateway:
         body: dict[str, Any] = {
             **request.model_config,
             "model": request.model_id,
+            "thinking": {"type": "disabled"},
             "messages": [
                 {
                     "role": "system",

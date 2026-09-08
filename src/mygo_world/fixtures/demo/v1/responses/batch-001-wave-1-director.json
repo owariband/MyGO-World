@@ -6,14 +6,6 @@
     {
       "event_type": "environment_change",
       "actor_id": null,
-      "start_offset_ms": 1000,
-      "end_offset_ms": 1000,
-      "cause_refs": [
-        {"kind": "proposal"}
-      ],
-      "evidence_refs": [
-        {"kind": "proposal"}
-      ],
       "location_id": "location-live-house",
       "scope_key": "lounge",
       "payload": {

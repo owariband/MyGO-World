@@ -8,7 +8,6 @@ from mygo_world.contracts import (
     DirectorResolution,
     EntityStateChange,
     ExternalEventCandidate,
-    ExternalEventReference,
     ProposalEventCandidate,
     SegmentDraft,
     ValidationDiagnostic,
@@ -221,24 +220,9 @@ class SegmentAssembler:
         world_time: int,
         diagnostics: list[ValidationDiagnostic],
     ) -> list[ExternalEventCandidate]:
-        keys = [
-            f"external:{proposal_id}:{index}"
-            for index in range(len(resolution.external_events))
-        ]
         result: list[ExternalEventCandidate] = []
         for index, event in enumerate(resolution.external_events):
             path = f"external_events.{index}"
-            if (
-                event.end_offset_ms < event.start_offset_ms
-                or event.end_offset_ms > resolution.elapsed_ms
-            ):
-                diagnostics.append(
-                    _diagnostic(
-                        "DIRECTOR_RESOLUTION_EVENT_TIME_INVALID",
-                        path,
-                        "External Event offsets must be ordered within the Wave",
-                    )
-                )
             if not self._scope_exists(snapshot, event.location_id, event.scope_key):
                 diagnostics.append(
                     _diagnostic(
@@ -247,73 +231,23 @@ class SegmentAssembler:
                         "External Event Location/Interaction Scope does not exist",
                     )
                 )
-            cause_keys = self._resolve_refs(
-                event.cause_refs,
-                current_index=index,
-                proposal_key=(proposal_event.event_key if proposal_event else None),
-                external_keys=keys,
-                path=f"{path}.cause_refs",
-                diagnostics=diagnostics,
-            )
-            evidence_keys = self._resolve_refs(
-                event.evidence_refs,
-                current_index=index,
-                proposal_key=(proposal_event.event_key if proposal_event else None),
-                external_keys=keys,
-                path=f"{path}.evidence_refs",
-                diagnostics=diagnostics,
-            )
+            proposal_key = proposal_event.event_key if proposal_event else None
             result.append(
                 ExternalEventCandidate(
-                    event_key=keys[index],
+                    event_key=f"external:{proposal_id}:{index}",
                     event_type=event.event_type,
                     actor_id=event.actor_id,
-                    start_time_ms=world_time + event.start_offset_ms,
-                    end_time_ms=world_time + event.end_offset_ms,
-                    cause_event_keys=cause_keys,
+                    start_time_ms=world_time + resolution.elapsed_ms,
+                    end_time_ms=world_time + resolution.elapsed_ms,
+                    cause_event_keys=[] if proposal_key is None else [proposal_key],
                     source_kind="director",
                     source_ref=director_trace_id,
-                    evidence_refs=evidence_keys,
+                    evidence_refs=[] if proposal_key is None else [proposal_key],
                     location_id=event.location_id,
                     scope_key=event.scope_key,
                     payload=event.payload,
                 )
             )
-        return result
-
-    def _resolve_refs(
-        self,
-        refs: list[Any],
-        *,
-        current_index: int,
-        proposal_key: str | None,
-        external_keys: list[str],
-        path: str,
-        diagnostics: list[ValidationDiagnostic],
-    ) -> list[str]:
-        result: list[str] = []
-        for index, reference in enumerate(refs):
-            if isinstance(reference, ExternalEventReference):
-                if reference.index >= current_index:
-                    diagnostics.append(
-                        _diagnostic(
-                            "DIRECTOR_RESOLUTION_EVENT_REFERENCE_INVALID",
-                            f"{path}.{index}",
-                            "External Event references must point to an earlier event",
-                        )
-                    )
-                    continue
-                result.append(external_keys[reference.index])
-            elif proposal_key is None:
-                diagnostics.append(
-                    _diagnostic(
-                        "DIRECTOR_RESOLUTION_EVENT_REFERENCE_INVALID",
-                        f"{path}.{index}",
-                        "A no_op Wave has no Proposal Event to reference",
-                    )
-                )
-            else:
-                result.append(proposal_key)
         return result
 
     def _entity_changes(
@@ -341,27 +275,6 @@ class SegmentAssembler:
                     )
                 )
                 continue
-            if (
-                entity.get("entity_type") == "character"
-                and change.location_id is not None
-            ):
-                diagnostics.append(
-                    _diagnostic(
-                        "DIRECTOR_RESOLUTION_CHARACTER_MOVE_FORBIDDEN",
-                        path,
-                        "Character position is derived only from an accepted move",
-                    )
-                )
-            if change.location_id is not None and not self._scope_exists(
-                snapshot, change.location_id, str(change.scope_key)
-            ):
-                diagnostics.append(
-                    _diagnostic(
-                        "DIRECTOR_RESOLUTION_ENTITY_CHANGE_INVALID",
-                        path,
-                        "Entity destination Location/Interaction Scope does not exist",
-                    )
-                )
             current = merged.get(change.entity_id)
             if current is None:
                 current = {
@@ -371,17 +284,6 @@ class SegmentAssembler:
                 }
                 merged[change.entity_id] = current
                 order.append(change.entity_id)
-            if change.location_id is not None and current["location_id"] is not None:
-                diagnostics.append(
-                    _diagnostic(
-                        "DIRECTOR_RESOLUTION_ENTITY_CHANGE_CONFLICT",
-                        path,
-                        "An Entity may have at most one position change",
-                    )
-                )
-            elif change.location_id is not None:
-                current["location_id"] = change.location_id
-                current["scope_key"] = change.scope_key
             for key, value in change.state_patch.items():
                 if (
                     key in current["state_patch"]

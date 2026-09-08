@@ -2,7 +2,7 @@
 
 MVP 将模型输出视为不可信候选：Pydantic 只校验结构，Proposal Validator 根据对应 PerceptionFrame 检查单个 Character 提案的版本、所有权、可见性、可达性和单行动约束。Director 随后只返回 Director Resolution，不再返回它无权决定的 World Version、Session、绝对时间、Proposal Event、来源和角色 payload。
 
-Runtime 把共同 Snapshot、当前 Session、已接受 Action Proposal、Director trace 身份和 Resolution 交给纯确定性的 Segment Assembler。Assembler 按字段所有权构造完整 Segment Draft：它注入权威上下文、复制角色动作、生成事件键与来源、解析局部因果引用，并为 `move` 生成位置变化。这是从权威输入进行构造，不是先让模型返回完整 Draft 后再静默覆盖错误字段。Segment Validator 再依据 Snapshot、原始 Proposal 和 Session 规则检查意图保真、状态迁移、资源冲突、语义时间、因果和分区。Proposal Validator、Segment Assembler 与 Segment Validator 都无副作用，不调用模型也不写数据库。
+Runtime 把共同 Snapshot、当前 Session、已接受 Action Proposal、Director trace 身份和 Resolution 交给纯确定性的 Segment Assembler。Assembler 按字段所有权构造完整 Segment Draft：它注入权威上下文、复制角色动作、生成事件键与来源，把 External Event 放在 Wave 末端并派生其对 Proposal 的直接因果/证据关系，并只为 `move` 生成角色位置变化。这是从权威输入进行构造，不是先让模型返回完整 Draft 后再静默覆盖错误字段。Segment Validator 再依据 Snapshot、原始 Proposal 和 Session 规则检查意图保真、状态迁移、资源冲突、语义时间、因果和分区。Proposal Validator、Segment Assembler 与 Segment Validator 都无副作用，不调用模型也不写数据库。
 
 Generation Wave 只有 Segment Validator 产出的 Validated Commit Plan 可以进入 World Committer；初始化则只接受由完整校验后的 Scenario Seed 构造的 Genesis Commit Plan，不为 Genesis 虚构 Segment Validator。对于 Generation Wave，Committer 在一个 SQLite 事务中暂存 World Segment、Entity Revision 和 Session/Queue 变化，运行 Event Recognizer 与 PerceptionProjector，写入 World Event、Observation、被接受的 Belief/Commitment changes、Snapshot 和新 World Version 后整体提交；Genesis 使用同一事务写入者，但不创建普通 World Event 或 Observation。任何一步失败都会回滚。
 

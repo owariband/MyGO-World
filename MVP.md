@@ -11,7 +11,7 @@
 - **工程工具：**使用本机已有的 `uv`、Python 3.13、`pyproject.toml` 和锁文件管理 Python Runtime。
 - **数据契约：**Pydantic v2，用于定义和校验结构化领域模型。
 - **模型边界：**不使用 PydanticAI；项目定义显式 `ModelGateway`，分别提供确定性 Fixture 和一个真实 Provider SDK 适配器。
-- **模型配置：**首个真实适配器使用 OpenAI-compatible API，由全局运行环境提供 Base URL、API Key、默认 model ID 与模型参数，Character、Director 和 Broadcast 共用；密钥不进入仓库，后续可以按 Agent 类型增加 Provider 或模型覆盖配置。
+- **模型配置：**首个真实适配器使用 OpenAI-compatible API，由全局运行环境提供 Base URL、API Key、默认 model ID 与模型参数，Character、Director 和 Broadcast 共用；所有 Chat Completions 请求固定携带 `thinking: {"type":"disabled"}`，且 `MYGO_MODEL_PARAMETERS_JSON` 不能覆盖该保留字段；密钥不进入仓库，后续可以按 Agent 类型增加 Provider 或模型覆盖配置。
 - **结构化输出：**Provider 支持时使用原生 JSON Schema；否则解析 JSON 文本并使用同一 Pydantic Schema 校验，失败时仍只允许一次带诊断的语义修复。
 - **环境来源：**进程环境变量是模型配置与密钥的权威来源，并可选加载未纳入版本控制的本地 `.env`；仓库只提供不含秘密的 `.env.example`。
 - **持久化存储：**SQLite，适合 MVP 的单 Runtime 与串行提交，也便于本地重放。
@@ -79,7 +79,7 @@
   ```
 
 - **校验边界：**Pydantic/JSON Schema 只负责结构校验；纯确定性的 Proposal Validator 依据生成时的 PerceptionFrame 检查单行动、版本、角色所有权、可见目标和可达目的地，Segment Validator 再依据共同 Snapshot、原始提案与 Session 规则检查意图保真、资源冲突、状态迁移、语义时间、因果和 Session 分区，并输出唯一可交给 Committer 的 `ValidatedCommitPlan`。无主体事件还必须检查来源证据、事件类型、影响范围，并拒绝借环境事件伪造 Character 行动。Validator 不调用模型、不修改候选事实、不写数据库。
-- **语义修复：**Validator 返回稳定诊断码与字段路径；Proposal 错误只交回对应 Character 修复一次，SegmentDraft 错误只交回 Director 修复一次。再次失败时终止 Batch，不能由 Runtime 静默改写或降级成 `no_op`。
+- **语义修复：**Validator 返回稳定诊断码与字段路径；Proposal 错误只交回对应 Character 修复一次，Director 自有的 Resolution 错误只交回 Director 修复一次。Runtime 组装的权威字段失败属于实现错误，不交给模型改写；再次失败时终止 Batch，不能由 Runtime 静默降级成 `no_op`。
 
 - **CLI：**统一入口为 `mygo-world`，MVP 提供 `init`、`advance`、`render`、`demo` 和 `skill-bind`；`demo` 只为新 World 串联前三步，重名时安全失败，测试仍由 pytest 负责。默认输出人类摘要，`--json` 输出稳定 Receipt。
 
@@ -88,13 +88,13 @@
 - **单角色决策：**同一 Generation Wave 只授予一名 Character 一个 Decision Turn，并只生成该角色的一个 Action Proposal。成功提交后，下一个 Wave 从新 World Version 重新投影感知；同一时间点不再向全体角色并发征集彼此不可见的提案。
 - **调度规则：**`TurnScheduler` 是确定性 Runtime 模块而非 Agent。它按“`pending_response_ids` 中的点名角色优先 → 无点名时 Director 从其余合法参与者中选择 → Director 缺失或非法时稳定 round-robin fallback”决定角色。多人 Session 的普通候选默认排除上一位已完成 Decision Turn 的角色；多名待回应者在同一稳定 participant ID 环上选择；round-robin 游标由持久 `DecisionTurnRecord` 恢复。首期不实现 continuation 或 `TurnBid`。
 - **Director 选择：**真实 Provider 使用独立 `turn_selection` 结构化调用；Fixture 使用 `DeterministicDirectorFixture` 固定选择，二者都不能选择 Runtime 给定候选集合以外的角色。选择只授予机会，不强制说话或行动。
-- **空行动：**`wait` 是有意等待并可推进剧情时间；`no_op` 不产生角色行动或独立 Event。被选中角色 `no_op` 且 Session 不结束时只记录 Batch、Wave、Trace 与状态为 `no_op` 的 Decision Turn，不推进 World Version；若 Director 合法提议 `resolved`，或 Runtime 应用 `limit_reached`，则以不含 WorldEvent 的控制 Segment 原子提交 Session/Queue 变化并推进 World Version。
+- **空行动：**`wait` 是有意等待并可推进剧情时间；`no_op` 是角色让出本次 Decision Turn，不产生角色行动、独立 Event、实体变化或 World Time 推进，也不调用 Director Resolution。未到批次上限时只记录 Batch、Wave、Trace 与状态为 `no_op` 的 Decision Turn，不推进 World Version；若该 Wave 已到 `max_waves`，Runtime 确定性构造不含 WorldEvent 的零时长 `limit_reached` 控制 Segment，原子关闭 Session 并推进 World Version。
 - **Session 队列：**Runnable Session Queue 是 `status=runnable` 的 Event Session 按其不可变 `queue_order` 排出的逻辑 FIFO 集合，不是独立物理表；每个 Batch 取队首并只跟随一条 lineage。分裂时全部后继按参与者 ID 确定性取得新序号，当前 Batch 继续队首后继，其余留给后续 Batch；不使用 focus character 或模型决定顺序。
 - **空间模型：**Location 是持久 Entity，可拥有多个带稳定 `scope_key` 的 Interaction Scope，并用显式边描述可达性；Character 位置由 `location_id + scope_key` 表示，MVP 不实现坐标或寻路。
 - **人物可感知性：**同一 Interaction Scope 中可见的 Character 会连同其 Character Presentation 一起进入 PerceptionFrame。MVP 将其中的稳定声音描述视为同场角色可获得的基础线索；具体一次发言的音量、颤抖或哽咽属于对应 utterance Event，观察者对此的解释进入自己的 Agent Memory。
 - **话语可见性：**`utterance.addressee_ids` 标记主要接收者和待回应关系，但同一 Scope 内其他角色仍可听见；MVP 不支持耳语。
 - **分裂时点：**移动在当前 Wave 内按事件时间参与感知；Runtime 在最终提交前依据 Wave 结束位置计算分区，并在同一事务中提交角色位置、关闭旧 Session、创建全部后继 Session 和确定性入队，只有事务完成后才对外可见。
-- **Wave 内时间：**被选中 Character 只观察 Wave 起始时的已提交事实；Director 为该角色提案及合法环境后果安排语义时间，Runtime 校验时间、因果和角色所有权。
+- **Wave 内时间：**被选中 Character 只观察 Wave 起始时的已提交事实；对非 `no_op` Proposal，Director 只决定相对 Wave 时长和合法环境后果，Segment Assembler 将 External Event 确定性放在 Wave 末端，并建立其与 Proposal Event 的直接来源、原因和证据关系；Runtime 再校验时间、因果和角色所有权。
 - **Wave 时长：**Scenario 可以覆盖单个 Wave 的最大剧情时长，默认上限为 5 分钟；超限输出按语义错误修复一次，仍失败则终止 Batch。
 - **并发边界：**一个 Event Session 的单个 Wave 内没有 Character 并发；现有全局信号量只保留为不同 Runtime 调用共享 Provider 容量的兼容保护，不影响谁取得 Decision Turn。
 - **World 锁：**同一 World 的 `init`、`advance` 和 `skill-bind` 获取世界变更独占文件锁；`render` 使用独立的每 World Render 锁，使两个 Render 串行，但可基于固定 World Version 与 `advance` 并存。Render 对 Ledger/Snapshot 只读，对 Trace、Render 元数据和 Broadcast Disposition 有写入，最终使用短 SQLite 事务与唯一约束避免重复消费；进程退出时文件锁自动释放。
@@ -845,6 +845,28 @@ ActionProposal {
   memory_changes: MemoryChangeCandidate[] = []
 }
 
+DirectorEntityStateChange {
+  entity_id: str[1..],
+  state_patch: object = {}
+}
+
+CreativeExternalEvent {
+  event_type: str[1..],
+  actor_id: str? = null,
+  location_id: str[1..],
+  scope_key: str[1..],
+  payload: object = {}
+}
+
+DirectorResolution {
+  schema_version: Literal[1] = 1,
+  elapsed_ms: int[0..],
+  outcome_summary: str? = null,
+  external_events: CreativeExternalEvent[] = [],
+  entity_changes: DirectorEntityStateChange[] = [],
+  session_intent: Literal["keep_open", "resolved"] = "keep_open"
+}
+
 EntityStateChange {
   entity_id: str[1..],
   state_patch: object = {},
@@ -924,7 +946,9 @@ ValidationDiagnostic {
 }
 ```
 
-跨字段不变量：Memory change 中仅 Commitment 可有状态，终态必须 supersede；Entity 位置字段成对出现；Candidate Event 必须至少有 `source_ref` 或 `evidence_refs`；Proposal Event 的 `source_ref` 必须指向原 Proposal，且 payload 必须保留非空 `intent_summary`。Pydantic 只保证这些结构规则，版本、所有权、可见性、可达性、时间、因果、冲突和 Session 分区仍由 Proposal/Segment Validator 校验。
+`DirectorEntityStateChange` 刻意不暴露 `location_id / scope_key`；角色位置只由 Segment Assembler 从已接受的 `move` Proposal 派生。`CreativeExternalEvent` 也不暴露时间和因果/证据引用；Assembler 将其放在 Wave 末端，并自动建立本轮 Proposal 的直接来源关系。
+
+跨字段不变量：Memory change 中仅 Commitment 可有状态，终态必须 supersede；内部 Entity 位置字段成对出现；Candidate Event 必须至少有 `source_ref` 或 `evidence_refs`；Proposal Event 的 `source_ref` 必须指向原 Proposal，且 payload 必须保留非空 `intent_summary`。Pydantic 只保证这些结构规则，版本、所有权、可见性、可达性、时间、因果、冲突和 Session 分区仍由 Proposal/Segment Validator 校验。
 
 #### 素材、Broadcast 与 Render
 

@@ -86,3 +86,4 @@
 - 新增纯确定性的 Segment Assembler：从 Snapshot、当前 Session、已接受 ActionProposal 和 Director trace 身份构造版本、绝对时间、Proposal Event、来源、因果引用及 `move` 位置变化，再交给 Segment Validator。
 - 修复按字段所有权分流：Director 自有字段可携带上一版输出和完整诊断修复一次，Assembler 权威上下文失败直接视为 Runtime 缺陷；Generation Trace 新调用名为 `director_resolution` / `director_resolution_repair`，历史记录继续可读。
 - 用真实爱音 60 秒 `wait` 失败模式及五种 Action 的离线 `advance_world` 流程建立回归证据，并同步版本化 Demo fixture 与输入哈希。
+- 继续收窄 DirectorResolution：Creative External Event 不再携带 offset 或局部因果/证据引用，Entity State Patch 不再携带位置；Segment Assembler 将环境事件放在 Wave 末端并派生 Proposal 来源关系，消除真实 Provider 的时间越界、因果重叠和越权角色移动。

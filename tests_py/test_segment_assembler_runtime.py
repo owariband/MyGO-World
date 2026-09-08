@@ -263,10 +263,6 @@ def test_runtime_resolves_creative_external_event_provenance_and_cause(
             {
                 "event_type": "environment_change",
                 "actor_id": None,
-                "start_offset_ms": 1_000,
-                "end_offset_ms": 1_000,
-                "cause_refs": [{"kind": "proposal"}],
-                "evidence_refs": [{"kind": "proposal"}],
                 "location_id": "location-live-house",
                 "scope_key": "lounge",
                 "payload": {"description": "排练灯亮起。"},
@@ -290,58 +286,28 @@ def test_runtime_resolves_creative_external_event_provenance_and_cause(
     assert external_event["payload"]["evidence_refs"] == [
         "proposal:proposal-anon-utterance"
     ]
+    assert proposal_event["end_time_ms"] == external_event["start_time_ms"]
+    assert external_event["start_time_ms"] == external_event["end_time_ms"] == 1_000
+
+
+def test_director_resolution_excludes_deterministic_event_and_position_fields() -> None:
+    schema = DirectorResolution.model_json_schema()
+    definitions = schema["$defs"]
+    event_properties = definitions["CreativeExternalEvent"]["properties"]
+    change_properties = definitions["DirectorEntityStateChange"]["properties"]
+
+    assert {
+        "start_offset_ms",
+        "end_offset_ms",
+        "cause_refs",
+        "evidence_refs",
+    }.isdisjoint(event_properties)
+    assert {"location_id", "scope_key"}.isdisjoint(change_properties)
 
 
 @pytest.mark.parametrize(
     ("resolution", "code"),
     [
-        (
-            _resolution(
-                elapsed_ms=500,
-                external_events=[
-                    {
-                        "event_type": "environment_change",
-                        "start_offset_ms": 0,
-                        "end_offset_ms": 501,
-                        "location_id": "location-live-house",
-                        "scope_key": "lounge",
-                        "payload": {},
-                    }
-                ],
-            ),
-            "DIRECTOR_RESOLUTION_EVENT_TIME_INVALID",
-        ),
-        (
-            _resolution(
-                elapsed_ms=500,
-                external_events=[
-                    {
-                        "event_type": "environment_change",
-                        "start_offset_ms": 0,
-                        "end_offset_ms": 500,
-                        "cause_refs": [{"kind": "external", "index": 0}],
-                        "location_id": "location-live-house",
-                        "scope_key": "lounge",
-                        "payload": {},
-                    }
-                ],
-            ),
-            "DIRECTOR_RESOLUTION_EVENT_REFERENCE_INVALID",
-        ),
-        (
-            _resolution(
-                elapsed_ms=500,
-                entity_changes=[
-                    {
-                        "entity_id": "character-soyo",
-                        "state_patch": {},
-                        "location_id": "location-live-house",
-                        "scope_key": "lounge",
-                    }
-                ],
-            ),
-            "DIRECTOR_RESOLUTION_CHARACTER_MOVE_FORBIDDEN",
-        ),
         (
             _resolution(
                 elapsed_ms=500,
