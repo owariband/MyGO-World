@@ -79,3 +79,10 @@
 - 新增[世界、互动、时间与实体建模调研](world-interaction-time-entity-modeling-research.md)：精读 EvolvingWorld 论文与官方实现，并与 BookWorld、CharacterBox、IBSEN、StoryVerse、Generative Agents 对照。
 - 核准 EvolvingWorld 的时间仅为场景步与场内轮次，“实体级”状态嵌入地点状态，官方实现由 LLM 完整覆盖内存状态；记录其单一客观世界、无角色主观世界的论文限制。
 - 提出“强类型内核 + 版本化开放语义 facet”、Proposal/Attempt/Outcome/Commit、实体提升判据、语义时间区间和 trait evidence/Skill overlay 等建模建议；这些仍是建议，尚未写入冻结决策。
+
+## 2026-09-08
+
+- 将 Director settlement 契约从完整 SegmentDraft 缩窄为 DirectorResolution；模型只拥有相对时长、结果摘要、Creative External Event、合法 Entity State Change 与 Session intent。
+- 新增纯确定性的 Segment Assembler：从 Snapshot、当前 Session、已接受 ActionProposal 和 Director trace 身份构造版本、绝对时间、Proposal Event、来源、因果引用及 `move` 位置变化，再交给 Segment Validator。
+- 修复按字段所有权分流：Director 自有字段可携带上一版输出和完整诊断修复一次，Assembler 权威上下文失败直接视为 Runtime 缺陷；Generation Trace 新调用名为 `director_resolution` / `director_resolution_repair`，历史记录继续可读。
+- 用真实爱音 60 秒 `wait` 失败模式及五种 Action 的离线 `advance_world` 流程建立回归证据，并同步版本化 Demo fixture 与输入哈希。

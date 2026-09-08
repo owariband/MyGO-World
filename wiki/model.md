@@ -188,8 +188,9 @@ World Ledger
 
 ```text
 Character Agent -> ActionProposal
-Director Agent  -> SegmentDraft + StateMutation candidates
-Validator       -> ValidationResult
+Director Agent  -> DirectorResolution
+Assembler       -> SegmentDraft + deterministic StateMutation candidates
+Validator       -> ValidatedCommitPlan / diagnostics
 Committer       -> WorldSegment + Entity Revisions
 Event Recognizer-> WorldEvent
 Broadcast Agent -> BroadcastPlan
@@ -197,7 +198,7 @@ Render Planner  -> RenderJob
 ```
 
 - Character 决定角色想做什么，不能替其他角色决定结果。
-- Director 补全时间、因果、对象变化和环境事件候选，不能直接提交事实。
+- Director 只补全相对时长、结果、对象变化和环境事件候选；Runtime 的 Assembler 注入权威字段并构造内部 Draft，二者都不能直接提交事实。
 - Validator 是无状态规则组件；只持久化必要的校验结果和诊断。
 - Committer 是世界事实的唯一写入入口。
 

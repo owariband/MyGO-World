@@ -110,7 +110,9 @@ WebGAL/MyGO 是可替换的黑盒 Render Backend：
 ```text
 Character Agent 产生 Actor Performance / ActionProposal
   -> Director 对本轮结果做 Temporal/Causal Completion
-  -> Temporal Binder / Minimal Validator 绑定实耗并校验不变量
+  -> DirectorResolution
+  -> Segment Assembler 按权限构造内部 SegmentDraft
+  -> Minimal Validator 校验不变量
   -> World Committer 原子提交 WorldSegment / WorldTransaction
   -> Event Recognizer 从 Segment 形成/更新 WorldEvent
   -> Render Planner 生成 RenderArtifact
@@ -312,7 +314,7 @@ inside Event A:
 - 读取全局状态和活动剧情线程；
 - 在 Character Agent 结果返回后，读取本轮输出、响应耗时和起始 Snapshot，补齐 World Segment 的先后、持续、Event 边界、对象结果和必要桥接；
 - 提出 Narrative Constraint、优先级和可感知刺激，维护节奏、伏笔和角色弧；
-- 输出的是待校验 `SegmentDraft / TemporalConstraintGraph`，不能绕过 Validator 直接写 Ledger；
+- 输出的是窄 `DirectorResolution / TemporalConstraintGraph`；版本、Session、绝对时间、Proposal Event、来源和角色 payload 由 Runtime 的 Segment Assembler 构造，Director 不能绕过 Validator 直接写 Ledger；
 - 不负责输出 WebGAL DSL。
 
 导演层的“生成后时间/因果补完”是 Character Runtime 能闭合 Event 的基础职责，不再全部推迟到高层剧情优化之后；目标函数、线程状态、刺激选择和自治/可控权衡仍是后续研究。
@@ -550,4 +552,3 @@ production_to_consumption     后台产出速度 / 玩家消费速度
 - Event Log 与 Viewer Cursor；
 - 约 30 分钟真实 Warm-up、领先库存维持与多 Event 产消比；
 - 玩家介入后的跨 Event 重规划。
-

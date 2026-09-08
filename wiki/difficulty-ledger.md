@@ -55,7 +55,7 @@
 | H-021 | 2026-08-20 | DECIDED | 如何让项目的核心成为对标 JD 的 Agent 算法，而不是只剩 DSL 解析和动态加载？ | 必须投入真正的 World Runtime、Memory、Planning、Event、时间补完和 Eval，而不是只做演示层 | 解析被定位为算法体系的副产物，核心追求是 Timeline-Driven Agent World Runtime |
 | H-022 | 2026-08-20 | PARTIAL | 如何区分 Generative Agents 论文事实、官方源码行为和本项目新增机制，避免把设计冒充论文结论？ | 写论文学习、简历或设计时需要持续做证据分类，表达成本更高 | 明确 `论文 Confirmed / 源码 Confirmed / 本项目 Decision / Open Research` |
 | H-023 | 2026-08-20 | PARTIAL | 动态注入依赖固定 Bundle 的内部协议时，如何控制版本漂移、无 ACK、鉴权和重连风险？ | 上游升级可能失效，且缺 request ID、ACK、鉴权和可靠重连 | 版本锁定、契约测试、黑屏保护和 iframe/虚拟文件降级 |
-| H-024 | 2026-08-21 | OPEN | 不硬编码故事时长后，如何防止 Director 补完产生资源冲突、对象跳变和不可重放结果？ | 需要日志、Validator、Golden Trace 和修复循环；一致性不能再天然来自固定状态机 | 只硬编码不变量，不硬编码故事时长；提交前做约束检查，失败则让 Director 修补 |
+| H-024 | 2026-08-21 | PARTIAL | 不硬编码故事时长后，如何防止 Director 补完产生资源冲突、对象跳变和不可重放结果？ | 需要日志、Assembler、Validator、Golden Trace 和修复循环；一致性不能再天然来自固定状态机 | Director 只返回创意 Resolution；Runtime 确定性组装权威字段并校验，仍需继续扩展资源冲突规则 |
 | H-025 | 2026-08-21 | OPEN | Director 自己的补完调用也消耗时间时，如何避免为解释自身 latency 而无限递归？ | 若再次调用去解释这段耗时会形成递归；若忽略又违反“Agent 响应时间可计时” | 提交器先记录未解释的 Director latency；是否下一波闭合、两阶段补完或只交给 Broadcast 省略，待实验 |
 | H-026 | 2026-08-21 | PARTIAL | 去掉 Maze 后，`Persona.perceive()` 如何获得外部信息，同时避免上帝视角、串行先手偏差和过度物理模拟？ | 必须新增语义场景、感知通道、字段裁剪、注意力与 provenance；认知链比扫描附近 tile 更显式 | `Committed WorldSegment -> PerceptionProjector -> PerceptionFrame -> Persona attention -> Observation/Memory`；待咖啡与对话 Trace 验证 |
 | H-027 | 2026-08-21 | DECIDED | 一期如何调度 Persona，既先把流程串起来，又允许角色知道何时回应或选择什么都不做？ | 同一 Event 吞吐受串行限制；跨 Event 并行必须识别共享角色、对象和因果依赖 | 同一 Event 内稳定串行并逐步提交；隔离 Event 并行；Scheduler 给决策机会，Frame 给待回应信号，Agent 可 `no_op` |
@@ -64,6 +64,7 @@
 | H-030 | 2026-08-22 | DECIDED | Generative Agents 自造的 Loop、模型调用、Prompt、解析、重试和存储，哪些应继续自研，哪些应交给成熟库？ | 引入 Eino 及 adapter 会增加依赖与版本升级成本，但能删除大量重复且脆弱的 plumbing | Eino 接管 Agent 执行与模型基础设施；MyGO 只自研认知语义、Memory 权限/融合和 World/Event 治理 |
 | H-031 | 2026-08-22 | DECIDED | 地点事实、地点关联信息和发生于该地点的 Event 如何持久化，才能防止 Agent 杜撰或前后口径漂移？ | 需要增加版本化 Location 模型、Fact/Info CAS、地点索引和额外查询成本 | Location 是 World 层一等模型；Fact/Info append-only，Event 只挂 Ledger 引用，只有 Committer 可修改 |
 | H-032 | 2026-08-22 | PARTIAL | 角色前往某地点时，Director 如何利用地点已有 Info 决定其获知方式，又不把全局知识直接灌进角色 Memory？ | 每次到访多一次候选查询；有歧义时增加 Director 调用，并需验证披露与时空条件 | Runtime 查询 LocationView 并先确定性过滤；Director 返回 NoOp/DiscoveryPlan，已有信息由 Projector 投影，新传播行为先提交 Event，最终由 Persona 决定实际获知 |
+| H-033 | 2026-09-08 | DECIDED | 如何防止 Director 修复一个复制错误时删除已接受的 Character Proposal Event？ | Runtime 必须维护 Action-specific canonical assembly、局部引用和 Entity change 合并规则，并迁移 fixtures/trace 名称 | 缩窄为 DirectorResolution；Segment Assembler 从权威输入构造 Draft，只有创意字段可请求 Director repair |
 
 ## 关键卡点详述
 
@@ -230,7 +231,7 @@ Committed WorldSegment / WorldEvent
 - `Observation`：该角色本轮实际注意到了什么；
 - `Memory`：角色如何长期保存、解释或误解这次 Observation。
 
-当前建议的最小感知通道只有五类：`self`、`direct_interaction`、`same_scene`、`targeted_message`、`commitment_update`。不模拟像素视线；用 `location_id / participant / recipient / modality / visible_fields` 表达写作层面的可感知范围。`scene_id` 只用于 Render/WebGAL 场景资源。Director 可以在 SegmentDraft 中提出 `perceptual_footprint`，但 Validator/Projector 负责防止地点、隐私和字段越权。
+当前建议的最小感知通道只有五类：`self`、`direct_interaction`、`same_scene`、`targeted_message`、`commitment_update`。不模拟像素视线；用 `location_id / participant / recipient / modality / visible_fields` 表达写作层面的可感知范围。`scene_id` 只用于 Render/WebGAL 场景资源。Director 可以在 Creative External Event 中提出授权的感知内容，但 Segment Assembler 与 Validator/Projector 负责防止地点、隐私和字段越权。
 
 原版 `perceive()` 还会把附近地点和物体写入 spatial memory，后续 `plan()` 再据此挑选 sector/arena/object。无 Maze 版本不能把这条依赖留空：`PerceptionFrame` 应直接携带当前可执行的语义 affordances，例如 `talk_to(soyo)`、`join_queue(counter)`、`pick_up(coffee#42)`、`leave_scene(cafe)`；角色只有在亲自到访、看到地图或被告知后才新增 `KnownPlace`。因此 `plan()` 最终也应从 Frame/DecisionContext 选择 affordance，而不是继续读取 Maze address。
 
@@ -393,6 +394,23 @@ Location identity
 角色形成前往地点的有效意图后，Runtime 查询对应 LocationView，先确定性过滤无效、已知或不可披露信息；有候选时 Director 只能提出 `NoOp / DiscoveryPlan`。既有公开 Fact/Info 可在校验后由 Projector 直接产生 Candidate；消息/告知等改变世界的传播必须先由 Committer 提交 WorldEvent。PersonAct 最终决定是否注意和记住。完整设计见[地点 World Model](location-world-model.md)。
 
 已支付的代价是：World 模型新增 Fact/Info revision、地点查询索引与 disclosure 校验；还需要确定 pre-arrival 与 post-arrival 两种 hook、周期 wakeup、地点历史窗口及 SQLite/JSONL 存储选择。
+
+### H-033｜如何防止 Director 修复一个复制错误时删除已接受的 Character Proposal Event？
+
+真实 Provider trace 暴露了宽接口的非局部失败：爱音已经提出并通过校验的 60 秒 `wait`，Director 第一次完整保留 Proposal Event 但把 World Version 抄成下一版；修复调用纠正版本时却清空了 Proposal Event。旧 repair 只有诊断，没有上一版输出，而且模型仍拥有删除角色事件、改写来源或角色 payload 的结构权限。
+
+当前答案不是在完整 SegmentDraft 返回后覆盖几个字段，而是缩窄模型接口：
+
+```text
+ActionProposal + DirectorResolution
+  -> deterministic Segment Assembler
+  -> Segment Validator
+  -> World Committer
+```
+
+DirectorResolution 只含相对时长、结果摘要、Creative External Event、合法 Entity State Change 和 Session intent。Assembler 从 Snapshot、Session、Proposal 与 Director trace 身份生成版本、绝对时间、Proposal Event、事件键、来源、因果引用和 `move` 位置变化。只有 Resolution 自有字段错误可修复一次，repair 同时携带上一版输出与完整诊断；权威上下文失败直接视为 Runtime 缺陷。
+
+得到的是角色意图保真和可归因修复，付出的代价是 Runtime 必须明确维护五种 Action 的 canonical payload 与合并规则，并在契约变更时同步 fixture 输入哈希和 trace 名称。历史 `segment_draft` trace 保留可读，避免用迁移抹掉失败证据。对应决策见 [D-037](decisions.md#d-037director-契约缩窄segment-由-runtime-按权限确定性组装)。
 
 ## 后续维护要求
 

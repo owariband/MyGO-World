@@ -34,7 +34,7 @@
 - **状态：方向保留，Director 职责已由 D-026/D-027 扩展**
 - **日期：2026-08-20**
 - **原始边界：**Character 提出角色局部行动；Director 维护剧情约束、优先级和未解决线程；Broadcast 负责展示选择、摘要和镜头入口。
-- **扩展：**Director 还承担每个 generation wave 的 Temporal/Causal Completion，但只输出待校验 SegmentDraft；Validator/Committer 才能把它变成客观事实。Broadcast 仍不能改世界事实。
+- **扩展：**Director 还承担每个 generation wave 的 Temporal/Causal Completion，但只输出窄 `DirectorResolution`；Runtime 的确定性 Segment Assembler 才能构造内部 SegmentDraft，Validator/Committer 才能把通过校验的结果变成客观事实。Broadcast 仍不能改世界事实。
 
 ## D-005｜Agent 与 Render 生成均使用分层结构化契约
 
@@ -129,7 +129,7 @@
 - **状态：宏观方向已确认，Director 基础职责由 D-026 细化**
 - **日期：2026-08-20**
 - **决策：**以 Generative Agents 的 Perception、Memory、Planning、Reflection、Action 和 Sandbox Loop 作为 Character Agent 认知底座；新增 Director Agent 做每轮 Segment Completion 及低频 Narrative Intervention；新增 Broadcast Agent 负责 Event 选择、视角和观看时间投影。
-- **边界：**Binder、Validator、Committer、Transaction Ledger 和 Event Recognizer 仍是确定性治理组件；它们校验和提交 Director 草稿，但不替 Director 用固定规则决定故事时长。
+- **边界：**Segment Assembler、Validator、Committer、Transaction Ledger 和 Event Recognizer 仍是确定性治理组件；Assembler 只按字段所有权构造 Draft，不替 Director 用固定规则决定故事时长。
 
 ## D-018｜MyGO 番剧到 Character Skill 作为后续算法方向
 
@@ -253,7 +253,7 @@
 - **日期：2026-08-21**
 - **问题：**Persona、Director、Broadcast 是否应该共同使用 `perceive -> retrieve -> plan -> reflect -> execute`，从而决定 cognitive、memory、prompt 三类目录是否通用？
 - **决策：**三类 Agent 对外共享 Eino `adk.Agent` 协议、Runner、AgentEvent 与模型基础设施；概念上共享 `observe/perceive -> retrieve -> plan -> propose` 以及提交后的 `observe_outcome -> reflect`，但不要求共享同一张 Graph。
-- **执行边界：**`execute` 不进入 Agent Graph。Persona 输出 ActionProposal，Director 输出 SegmentDraft/DirectorProposal，Broadcast 只输出 BroadcastPlan；确定性 Render Planner 再把 BroadcastPlan 编译为 RenderJob。副作用由 World Committer 或 Render Gateway 完成。
+- **执行边界：**`execute` 不进入 Agent Graph。Persona 输出 ActionProposal，Director 输出 DirectorResolution/DirectorProposal，Runtime 的 Segment Assembler 构造内部 SegmentDraft，Broadcast 只输出 BroadcastPlan；确定性 Render Planner 再把 BroadcastPlan 编译为 RenderJob。副作用由 World Committer 或 Render Gateway 完成。
 - **目录边界：**Memory Store/Retriever 提升为 `agent/memory/`；具体 Graph/strategy 与 prompt templates 保留在 `personact / director / broadcast` 各自目录。
 - **实现方式：**Character 使用自定义 `PersonActAgent`，内部 Compose Graph 承载认知节点与有界回环；Director/Broadcast 可分别使用 Chain、Graph 或规则实现，不建立万能 BaseAgent，也不使用 `adk.NewLoopAgent` 把认知阶段伪装成多个子 Agent。
 - **待验证：**三类 Fixture Agent 均可由 ADK Runner 驱动，且 Memory、Prompt、权限和副作用完全隔离。
@@ -283,7 +283,7 @@
 - **状态：已确认**
 - **日期：2026-08-22**
 - **决策：**Eino ADK/Compose 负责 Agent/Runner、Graph/Chain、AgentEvent、取消、Callback、模型与 Tool 接口、Prompt Template 和可选 checkpoint；使用 `adk.ChatModelAgent` 时复用其 retry/failover，自定义 Graph 的模型节点只允许增加一层经过测试的公共 adapter。Eino Embedder/Indexer/Retriever 作为后续检索后端的适配接口。禁止复制 Stanford 原型中的旧 OpenAI wrapper、手工 Prompt 占位替换、字符串截 JSON、裸异常重试、文件 mailbox、全量 JSON memory 重写和几何寻路。
-- **保留自研：**PerceptionProjector 的硬可见性、PersonAct 各认知节点语义、Memory namespace/provenance 与召回融合、World/Event Scheduler、world version、Temporal Binder、Validator/Committer、Ledger、Event Recognizer，以及 BroadcastPlan 到 RenderJob 的确定性转换。
+- **保留自研：**PerceptionProjector 的硬可见性、PersonAct 各认知节点语义、Memory namespace/provenance 与召回融合、World/Event Scheduler、world version、Segment Assembler、Validator/Committer、Ledger、Event Recognizer，以及 BroadcastPlan 到 RenderJob 的确定性转换。
 - **原则：**外部库替代 plumbing，不替代决定“角色知道什么、为什么行动、哪些事实可以提交”的项目算法。
 - **一期取舍：**Fixture 阶段使用 Fake Agent/Model 与严格 typed contract；不急于接真实 LLM、Embedding 或向量数据库。真实模型接入时再启用 ChatModel provider、structured output、有限 repair 与调用级 Trace。
 
@@ -300,3 +300,13 @@
 - **后果：**LocationModel 不是 Location Agent，也不是 Prompt 拼接缓存；它属于 World 权威。Director 可以读取全局地点上下文，但不能跳过 disclosure、时空条件和认知投影。详细模型见[地点 World Model](location-world-model.md)。
 - **标识边界：**World/Event 契约统一使用 `location_id`；`scene_id` 仅属于 Render/WebGAL 场景资源，由 Render Planner 映射，不再作为第二套世界地点 ID。
 
+## D-037｜Director 契约缩窄，Segment 由 Runtime 按权限确定性组装
+
+- **状态：已实现**
+- **日期：2026-09-08**
+- **问题：**如何防止 Director 在复制版本、Session、来源或角色动作时犯错，并避免修复一个字段时删除已经接受的 Character Proposal Event？
+- **决策：**Director settlement 只返回 `DirectorResolution`：受限相对时长、可选结果摘要、Creative External Event、合法 Entity State Change 与 Session intent。它不返回 World Version、Session、绝对时间、Proposal Event、事件键、来源或角色 payload。
+- **组装边界：**纯确定性的 Segment Assembler 读取 Snapshot、当前 Session、已接受 Action Proposal、Director trace 身份与 Resolution，按动作类型复制权威字段、生成来源/键/绝对时间/因果引用，并为 `move` 生成角色位置变化，再把内部 SegmentDraft 交给 Segment Validator。
+- **修复边界：**只有 Director 自有字段的错误允许一次 repair，并携带上一版输出与完整诊断；Assembler 权威上下文不变量失败按 Runtime 缺陷直接失败。Assembler 的构造不是对模型完整 Draft 的事后静默覆盖。
+- **迁移与审计：**新 Generation Trace 使用 `director_resolution` / `director_resolution_repair` 并保存 Resolution；历史 `segment_draft` trace 与已提交 World Segment 继续可读，无需数据库迁移。
+- **代价：**Runtime 必须维护五种 Action 的 canonical payload、事件时序、局部引用解析和 Entity change 合并规则，但这些规则集中在一个深模块中，并由真实 `advance_world` seam 的离线回归测试保护。

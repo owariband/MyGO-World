@@ -11,7 +11,7 @@
 - 外置能力分成 World / Agent Runtime 与 Render Plugin/Adapter。前者负责世界模拟、Event 产出、BroadcastPlan 和 RenderJob 规划；后者负责 RenderJob 校验/编译、播放队列、Event Hub、Viewer Cursor 和黑屏等待态。原始引擎源码、压缩 Bundle、内部 Store、Backlog 和存档机制仍视为第三方黑盒。
 - 世界可同时存在多个主视角 Event，例如 `Anon / Soyo`、`Tomorin`、`Saki / Mutsumi / Uika`。玩家选择当前观察窗口并可随时切换；未被观看的 Event 仍可继续推进。
 - Agent 初步分为 Character Agent、Director Agent 和 Broadcast Agent。Character 基于 Persona 与局部认知生成行为；Director 至少承担生成结果返回后的时间/因果补完，并在更高层维护剧情约束与未解决线程；补完结果仍须经最小一致性校验后才成为客观 Event。Broadcast 只负责展示选择、摘要、镜头和时间投影。
-- Character Agent 产出结构化 `ActorPerformance / ActionProposal`；Director 基于角色输出与 measured latency 形成待校验 `SegmentDraft`；Temporal Binder、Minimal Validator 和 Committer 只负责绑定实耗、守住世界不变量并提交 Ledger；Event Recognizer 再聚合 `WorldEvent`。任何模型都不能绕过提交链直接控制播放器或宣称事实。
+- Character Agent 产出结构化 `ActorPerformance / ActionProposal`；Director 只返回它有权决定的 `DirectorResolution`；Runtime 的确定性 Segment Assembler 注入 Snapshot/Session/绝对时间、复制角色动作并构造内部 `SegmentDraft`，Segment Validator 和 Committer 再守住世界不变量并提交 Ledger；Event Recognizer 最后聚合 `WorldEvent`。任何模型都不能绕过提交链直接控制播放器或宣称事实。
 - 宏观算法以 Generative Agents 的 Character Agent / Memory / Planning / Reflection / Sandbox Action Loop 为认知底座，再增加 Director Agent 做每轮 Temporal/Causal Completion 和低频叙事干预、Broadcast Agent 做 World Timeline → Render Timeline 的观看投影；Binder、Validator、Ledger、Committer 与 Event Recognizer 是最小确定性治理，但不硬编码故事时长。
 - Timeline 不是 Event Hub 的 UI 控件或 Render Queue，而是 Agent 世界的执行语义：它统一承载动作区间、角色认知获得时间、互动生命周期、计划/承诺变化、WorldTransaction 因果历史和 Viewer 回放位置；MyGO/WebGAL 解析只是该世界向 Galgame 媒介投影的副产物。
 - World 由一等 `LocationModel` 维护地点身份、版本化客观事实、当前有效的 LocationInfo，以及指向唯一 WorldEvent Ledger 的地点 Event 索引。地点事实不会被 Agent 文本覆盖；Director 在角色前往地点前查询该地点上下文，只能提出合法的信息传播机会，角色仍须依据已提交的 Fact/Info 或传播 Event，经 PerceptionProjector -> `perceive` 才能真正获知。

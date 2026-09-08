@@ -112,7 +112,7 @@ event
 agent/personact
   -> 只消费 PerceptionFrame / 输出 ActionProposal
 agent/director
-  -> 只消费 Snapshot + Proposal / 输出 SegmentDraft
+  -> 只消费 Snapshot + Proposal / 输出 DirectorResolution
 agent/broadcast
   -> 只消费 committed Event / 输出 BroadcastPlan
   -> 内部确定性 render_planner 消费 Plan + Event Log / 输出 RenderJob
@@ -137,8 +137,8 @@ rendergateway
 
 为避免包循环，数据所有权进一步约束为：
 
-- `world/models.go` 持有跨边界的 `PerceptionFrame / ActionProposal / SegmentDraft / WorldSegment`，Character/Director 只依赖并返回这些值；`agent/models.go` 只放 GenerationTrace、AgentOutcome 与 MemoryWriteIntent，避免 `world <-> agent` 循环依赖；
-- `agent/director` 返回 `SegmentDraft`，但不引用具体存储实现；
+- `world/models.go` 持有跨边界的 `PerceptionFrame / ActionProposal / DirectorResolution / SegmentDraft / WorldSegment`；Character 返回 Proposal，Director 只返回 Resolution，SegmentDraft 由 World/Runtime 的 Assembler 内部构造；`agent/models.go` 只放 GenerationTrace、AgentOutcome 与 MemoryWriteIntent，避免 `world <-> agent` 循环依赖；
+- `agent/director` 返回 `DirectorResolution`，不引用 Segment Assembler 或具体存储实现；
 - `agent/personact / director / broadcast` 依赖 `agent/memory` 的公开接口，`agent/memory` 不依赖具体 Agent；
 - 三类 Agent 实现统一 `adk.Agent` 边界，但不共享一张万能 Graph；PersonAct、Director、Broadcast 的内部拓扑分别装配；
 - `event` 定义 `EventSession / WorldEvent` 并驱动单 Event 轮次；
@@ -232,7 +232,7 @@ broadcast/continuity
 | `!<INPUT n>!` 模板替换 | 用 Eino ChatTemplate；静态模板可由 Go `embed` 装载 | Persona/Director/Broadcast 的模板内容与版本 |
 | 数十个 `run_gpt_prompt_*` 包装函数 | 合并为少量按输出契约组织的 typed model nodes | 每个决策需要哪些证据、哪些字段由代码确定而非交给模型 |
 | 手工拼接长历史上下文 | 后续按需使用 ADK history rewrite / summarization / reduction middleware | 长期语义 Memory、evidence ID 和不可删系统约束；上下文摘要不能冒充事实存储 |
-| 手工截取 JSON、`split()`/`literal_eval` 解析 | provider structured output + Go typed decode；失败显式返回 | ActionProposal/SegmentDraft/BroadcastPlan Schema 与业务校验 |
+| 手工截取 JSON、`split()`/`literal_eval` 解析 | provider structured output + Go typed decode；失败显式返回 | ActionProposal/DirectorResolution/BroadcastPlan Schema 与业务校验；SegmentDraft 只作 Runtime 内部契约 |
 | 固定次数、裸异常重试 | 使用 `adk.ChatModelAgent` 时复用其 model retry/failover；自定义 Graph 则只做一层可测试的 provider retry adapter | 哪类错误可重试、语义 repair 上限及其 Trace |
 | 模型/工具调用日志 | 用 Eino Callback 和 AgentEvent 采集 | 世界版本、evidence、实际耗时和提交结果关联 |
 | 手写 embedding 请求 | 后续使用 Eino Embedder | 何时 embedding、模型版本与费用策略 |
@@ -325,15 +325,18 @@ func (r *Runtime) runEvent(ctx context.Context, eventID EventID) error {
             continue
         }
 
-        draft, directorTrace, err := r.runDirector(ctx, r.director,
+        resolution, directorTrace, err := r.runDirector(ctx, r.director,
             CompletionRequest{Snapshot: snapshot, Proposal: proposal, Trace: characterTrace})
         if err != nil { return r.failTurn(eventID, directorTrace, err) }
 
-        bound := r.temporalBinder.Bind(draft, characterTrace, directorTrace)
-        diagnostics := r.validator.Validate(snapshot, bound)
+        draft, diagnostics := r.segmentAssembler.Assemble(
+            snapshot, eventID, proposal, resolution, directorTrace)
+        if diagnostics.HasInternalErrors() { return r.failTurn(eventID, directorTrace, diagnostics) }
+        if diagnostics.HasDirectorErrors() { return r.repairDirector(eventID, diagnostics) }
+        plan, diagnostics := r.validator.Validate(snapshot, proposal, draft)
         if diagnostics.HasErrors() { return r.rejectTurn(eventID, diagnostics) }
 
-        segment := r.committer.Commit(snapshot, bound)
+        segment := r.committer.Commit(snapshot, plan)
         events := r.recognizer.Apply(segment)
         r.observeOutcome(ctx, r.personas[actorID], segment, characterTrace)
         r.observeOutcome(ctx, r.director, segment, directorTrace)
@@ -378,7 +381,7 @@ Runtime：validate -> commit / render
 | perceive | 角色 Observation、待回应和 affordance | WorldSnapshot、Character Proposal、线程状态 | committed Event、Viewer Cursor、Buffer |
 | retrieve | 人物经历、关系、信念、承诺 | Narrative Thread、补完历史、失败诊断 | 已覆盖区间、连续性、未揭示信息 |
 | plan | 下一动作、台词或等待 | Segment Completion 或未来 Stimulus | Event 选择、Temporal Projection、镜头计划 |
-| propose | `ActionProposal` | `SegmentDraft / DirectorProposal` | `BroadcastPlan` |
+| propose | `ActionProposal` | `DirectorResolution / DirectorProposal` | `BroadcastPlan` |
 | reflect | 更新人物理解、关系与目标 | 复盘线程推进和干预效果 | 复盘重复、断裂和覆盖效果 |
 
 不将 `execute()` 放入通用 Agent 基座。Agent 只负责 `propose()`：Persona 不执行世界动作，Director 不提交 Ledger，Broadcast 不直接控制 WebGAL。真正副作用分别由 World Committer 和 Render Gateway 执行。
@@ -403,7 +406,7 @@ START -> perceive -> retrieve -> plan -> propose -> proposal_check
 难点不是先写漂亮 Prompt，而是让每个阶段只看到被授权的信息，并稳定输出可校验对象：
 
 - Persona Prompt 只能看到自身 PerceptionFrame、私有 Memory 与 affordance；
-- Director Prompt 可看世界快照和 Character Proposal，但输出必须是 SegmentDraft，不得直接写 Memory/Ledger；
+- Director Prompt 可看世界快照和 Character Proposal，但输出必须是窄 DirectorResolution，不得返回 Proposal Event 的权威字段，也不得直接写 Memory/Ledger；
 - Broadcast Prompt 只看 committed Event、Viewer Cursor 与 Buffer，输出 BroadcastPlan；
 - 所有 Prompt 必须记录 template version、model、输入 evidence IDs、原始输出和 repair 次数。
 
@@ -579,9 +582,14 @@ based_on_world_version / kind / target_ids
 location_id / content / evidence_ids / next_wakeup
 ```
 
-### `SegmentDraft` / `TemporalConstraint`
+### `DirectorResolution` / `SegmentDraft`
 
 ```text
+DirectorResolution
+  elapsed_ms / outcome_summary / creative_external_events
+  entity_state_changes / session_intent
+
+SegmentDraft（仅 Runtime 内部）
 segment_draft_id / generation_id / based_on_world_version
 character_proposal_ids / temporal_constraints / action_transitions
 object_deltas / location_fact_changes / location_info_changes
@@ -593,7 +601,7 @@ TemporalConstraint
   subject_ref / object_ref / lower_bound_ms / upper_bound_ms / evidence_ids
 ```
 
-Director 只返回 Draft 与相对时间/因果约束；不分配 commit sequence，也不直接写 Ledger。
+Director 只返回 Resolution 的创意判断；Segment Assembler 从 Snapshot、Session、Proposal 与 Director trace 确定性构造 SegmentDraft，注入版本、绝对时间、Proposal Event、来源与 `move` 位置变化。Director 不分配事件键或 commit sequence，也不直接写 Ledger。
 
 ### `WorldSegment` / `ValidationDiagnostic`
 
@@ -665,8 +673,8 @@ ViewerCursorStore    Render 侧：持久化 event_id、last_viewed_log_seq、ren
 2. 建立 EventSession B：Tomori 独处
 3. Projector 从 Event A 的 committed snapshot 为 Anon 生成 PerceptionFrame；Event B 内容不可见
 4. Eino Runner 调用 Fixture `PersonActAgent`，输出 utter：“轮到我们了，要这个吗？”并落 Character GenerationTrace
-5. Eino Runner 调用 Director Stub Agent，输出 SegmentDraft 并落 Director GenerationTrace
-6. Temporal Binder 用测试注入的 measured elapsed 绑定 Segment；Validator 校验后由 Committer 追加 WorldSegment
+5. Eino Runner 调用 Director Stub Agent，输出 DirectorResolution 并落 Director GenerationTrace
+6. Segment Assembler 由 Snapshot、Session、Proposal、Resolution 与 trace 身份构造内部 SegmentDraft；Validator 校验后由 Committer 追加 WorldSegment
 7. Event Recognizer 形成/更新 WorldEvent；Projector 只为 Soyo 准备带 addressed_to_me 的 PerceptionFrame，Tomori 无候选 Observation
 8. `observe_outcome` 只把 Anon 与 Director 的已提交结果写入各自 namespace；不能替尚未运行的 Soyo 决定她注意到了什么
 9. Scheduler 选中 Soyo；Soyo 的 `perceive` 决定注意该 direct interaction，PersonAct Graph 才把 Observation 写入 persona/soyo namespace，并输出 respond；随后重复 completion -> bind -> validate -> commit
@@ -733,7 +741,7 @@ ViewerCursorStore    Render 侧：持久化 event_id、last_viewed_log_seq、ren
 - 实现 `PersonActAgent` 的 `adk.Agent` adapter，并以 typed Compose Graph 编排 `perceive -> retrieve -> plan -> propose`；
 - 使用 ADK Runner、AgentEvent、Callback 和 context/cancel，映射统一 GenerationTrace、timeout、结构化错误和 `observe_outcome`；
 - 用 PersonAct 专属 `AgentRunOption` 传递 DecisionRequest，输出使用不可变 typed value 或稳定 JSON string，验证 callback fan-out 不共享可变对象；
-- Persona/Director/Broadcast 分别返回 ActionProposal、SegmentDraft、BroadcastPlan；
+- Persona/Director/Broadcast 分别返回 ActionProposal、DirectorResolution、BroadcastPlan；SegmentDraft 只由 Runtime 内的 Segment Assembler 构造；
 - Fixture 不访问网络，避免把调度错误和模型随机性混在一起。
 
 完成条件：三个 Fixture 实现均可由 ADK Runner 驱动；PersonAct Graph 的回环有上限，`go test -race ./...` 无跨 Run 状态竞争，且没有 `if agent_type` 分发、越权 Memory 写入或 Agent 直接副作用。

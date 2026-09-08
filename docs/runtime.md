@@ -42,9 +42,11 @@ World 数据库不会被覆盖。除初始化以外的命令都会检查数据�
 `advance --gateway fixture` 会在当前进程内执行确定性的 Generation Wave，且不会建立
 网络连接。每个 Wave 先按“点名、确定性 Director fixture、round-robin fallback”的
 顺序授予一名 Character 一个 Decision Turn，再投影该角色有权读取的 Snapshot 与私有
-Memory，依次校验 Character Proposal、Director 生成的客观结果和无主体环境候选，最后
-原子提交新的 World Version。`show --json` 会输出已提交的 World Event 与 Observation，
-Canonical Export 另含 Decision Turn 运行记录，便于其他进程核验。
+Memory。Character Proposal 通过门禁后，Director 只返回相对时长、结果、环境候选、
+Entity change 与 Session intent；Runtime 的 Segment Assembler 从 Snapshot、Session 和
+原 Proposal 确定性构造版本、绝对时间、角色 Event、来源、因果引用与移动结果，再经
+Segment Validator 后原子提交新的 World Version。`show --json` 会输出已提交的 World
+Event 与 Observation，Canonical Export 另含 Decision Turn 运行记录，便于其他进程核验。
 
 ## Render 与 WebGAL 发布
 

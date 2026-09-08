@@ -49,7 +49,7 @@ _Avoid_: Snapshot、World Event
 _Avoid_: Snapshot、Agent Memory、Generation Trace
 
 **Generation Wave**:
-一个 Event Session 的单轮原子决策周期；Turn Scheduler 从某个已提交 World Version 为一名 Character 授予 Decision Turn，该角色至多提出一个 Action Proposal，Director 补全结果后由 Runtime 原子提交。下一 Wave 因而能观察上一 Wave 已提交的行动。
+一个 Event Session 的单轮原子决策周期；Turn Scheduler 从某个已提交 World Version 为一名 Character 授予 Decision Turn，该角色至多提出一个 Action Proposal，Director 返回创意 Resolution，Runtime 确定性组装并校验后原子提交。下一 Wave 因而能观察上一 Wave 已提交的行动。
 _Avoid_: Fixed-duration Tick、Event Session、World Event
 
 **Decision Turn**:
@@ -81,12 +81,16 @@ _Avoid_: Generation Batch、Render Revision
 _Avoid_: World Ledger、Scenario Seed、Entity Revision
 
 **World Time**:
-由 Director 提议并经 Runtime 校验后提交的剧情语义时间，以 Scenario 起点后的整数毫秒表示；可选日历锚点只用于显示，模型调用的真实耗时只进入 Generation Trace。
+由 Director 以受限相对时长提议、再由 Runtime 根据 Snapshot 绝对时间确定性组装并校验后提交的剧情语义时间，以 Scenario 起点后的整数毫秒表示；可选日历锚点只用于显示，模型调用的真实耗时只进入 Generation Trace。
 _Avoid_: Wall-clock Time、Model Latency、Presentation Time
 
 **Action Proposal**:
 Character Agent 在一次 Generation Wave 中提出的唯一原子候选行动，包含简短意图摘要，类型限于 `utterance`、`move`、`interact`、`wait` 或 `no_op`；只有经过 Director 补全和 Runtime 校验提交后才成为世界事实。`utterance` 以 `expects_response` 显式声明是否要求收件人回应，并以 `response_to_event_id` 引用本次正在回应的已感知 World Event；`wait` 是有意等待并可推进 World Time，`no_op` 不产生行动或独立事件。
 _Avoid_: World Event、World Segment
+
+**Director Resolution**:
+Director 对单个已接受 Action Proposal 返回的窄创意结果，只包含相对语义时长、可选结果摘要、Creative External Event、合法 Entity State Change 与 Event Session 收束意图；它不拥有 World Version、Session、绝对时间、Proposal Event、事件键、来源或角色动作 payload。
+_Avoid_: Segment Draft、Validated Commit Plan、Action Proposal
 
 **Player Event Request**:
 玩家针对尚未提交的未来世界，以自然语言请求发生某个外部事件的版本绑定输入；它本身不是世界事实，由 Director 解释成候选后仍须通过 Runtime 校验与提交。
@@ -100,9 +104,13 @@ _Avoid_: Action Proposal、World Event、Validated Commit Plan
 Runtime 中针对单个 Action Proposal 的确定性门禁，依据该角色实际收到的 PerceptionFrame 检查行动唯一性、来源版本、角色所有权、目标可见性与目的地可达性；它只返回有效候选或稳定诊断，不修改提案、不调用模型也不持久化状态。
 _Avoid_: Pydantic Schema、Director、Segment Validator
 
+**Segment Assembler**:
+Runtime 中的纯确定性深模块，以 Snapshot、当前 Event Session、已接受 Action Proposal、Director trace 身份和 Director Resolution 为小接口，集中组装完整 Segment Draft；它注入版本、Session 与绝对时间，逐动作复制角色字段，生成事件键、来源、因果引用及 `move` 位置变化，但不校验提交资格、不写入 World，也不事后覆盖模型原本有权输出的字段。
+_Avoid_: Director、Segment Validator、World Committer
+
 **Segment Validator**:
-Runtime 中针对完整 Segment Draft 的确定性门禁，依据共同 Snapshot、原始 Action Proposal 和 Session 规则检查意图保真、状态迁移、资源冲突、时间、因果与分区，并产出可提交计划或稳定诊断；它不能创造结果、修复内容或写入 World。
-_Avoid_: Proposal Validator、Director、World Committer
+Runtime 中针对 Segment Assembler 产出的完整 Segment Draft（或测试中手工构造的恶意 Draft）的确定性门禁，依据共同 Snapshot、原始 Action Proposal 和 Session 规则检查意图保真、状态迁移、资源冲突、时间、因果与分区，并产出可提交计划或稳定诊断；它不能组装、创造结果、修复内容或写入 World。
+_Avoid_: Proposal Validator、Segment Assembler、World Committer
 
 **World Committer**:
 权威世界状态的唯一事务写入模块；初始化时接收由已校验 Scenario Seed 构造的 Genesis Commit Plan，Generation Wave 时接收 Segment Validator 产出的 Validated Commit Plan。
@@ -153,7 +161,7 @@ _Avoid_: World Ledger、Agent Memory
 _Avoid_: Director、World Committer、Broadcast
 
 **Director**:
-在没有待回应点名时可从 Scheduler 给出的合法候选中建议下一位行动者，并在 Character Agent 提案后补全环境反应、对象结果、时间、因果关系与 Event Session 生命周期的 Agent；它可以提出无主体桥接事件，但不能替角色作出重要选择、发言或改变动机，也不能提交世界事实或编排演出。
+在没有待回应点名时可从 Scheduler 给出的合法候选中建议下一位行动者，并在 Character Agent 提案后以 Director Resolution 提出环境反应、对象结果、相对时长、因果关系与 Event Session 收束意图的 Agent；它可以提出无主体桥接事件，但不能构造或改写 Proposal Event 的版本、来源、绝对时间与角色 payload，不能替角色作出重要选择、发言或改变动机，也不能提交世界事实或编排演出。
 _Avoid_: Broadcast、World Committer
 
 **Broadcast**:
