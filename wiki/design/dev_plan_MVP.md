@@ -1,8 +1,8 @@
 # MVP 分阶段执行计划
 
-> 状态：M1 开发与自动验收完成，待用户 Review；M2–M7 尚未执行。
-> 更新日期：2026-09-08
-> 开发基线：`master@fc1d402`，已推送；不是可运行 World Runtime 的验收版本。
+> 状态：M1 已完成并推送；M2 实现与自动验收完成，当前未提交、待用户 Review；M3–M7 尚未执行。
+> 更新日期：2026-09-09
+> 开发基线：`master@37c250e`（M1，已推送）；M2 位于未提交 worktree。
 > 设计依据：[MVP_dev.md](MVP_dev.md)。该文档解释模型与规则，本文负责执行顺序、review 单元、验收与进度追踪。
 
 ## 1. 执行方式与完成边界
@@ -26,7 +26,7 @@
 - 已有 PersonAct 单次认知链、进程内 Memory、Character Skill、ModelGateway 和制作层工具；不要重做这些模块。
 - `fc1d402` 的验证记录：Python 64 项、Node 14 项通过，Ruff 与 Pyright 通过；这是基线记录，不代替后续阶段测试。
 - 基线曾有 Gateway 兼容问题：标准解析器将 JSON 数组变成 list，与 strict tuple 冲突。M1.1 已修复并加入标准 parser 回归；基线全绿不是实网 Provider 已验收。源码：[model_gateway.py](../../agent_runtime/model_gateway.py)、[test_model_strategy.py](../../agent_runtime/tests/test_model_strategy.py)。
-- 复用分支以设计调研过的 `05c5404` 为参考版本；当前 `origin/mvp` 已是 `fe8fd22`，不将后续变化视为已审查。每次复用记录实际来源 commit，不直接整分支 merge。
+- M2 以 `origin/mvp@fe8fd22` 复核 Seed/事务/故障测试机制；该分支与 master 无共同祖先，只迁移机制，不直接 merge 或复制旧 schema。
 
 ## 2. 阶段总览
 
@@ -85,7 +85,7 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 ## M1. 基础契约与现有接入修正
 
-实际接口、文件清单与测试证据见 [M1_dev_log.md](M1_dev_log.md)；ModelGateway 保留单一 `generate` 入口。实现位于当前 worktree，等待用户 Review，不伪造提交记录。
+实际接口、文件清单与测试证据见 [M1_dev_log.md](M1_dev_log.md)；ModelGateway 保留单一 `generate` 入口。M1 已以 `37c250e` 提交并推送。
 
 **开发目标：** 保住当前 PersonAct 能力，为后续存储与运行建立最小公共基础，不提前定义 Director/Broadcast 全套模型。
 
@@ -93,9 +93,9 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M1.1 | 修复结构化 JSON 与 strict tuple 的适配；统一 Gateway 验证边界 | 标准 parser 路径与完整 Agent 调用链；合法 tuple 通过，错误输出失败，repair 有界与诊断脱敏 | REVIEW · 已实现，[测试证据](M1_dev_log.md#6-自动测试与验收证据) |
-| M1.2 | daily → 普通 Plan queue；WorldRef 身份传播；PerceptionFrame → AgentView 一次迁移 | World/Agent/scope 错配先于 replay/认知；JSON 重建保持队列；不把 Proposal 当完成 | REVIEW · 已实现，[实现与测试](M1_dev_log.md#4-m12身份角色状态与兼容边界) |
-| M1.3 | 不带业务语义的 UnionPart：merge/split 与只读查询 | 完整覆盖、无重复、root 自指、双索引一致；非法输入无半更新；480 步确定性序列 | REVIEW · 32 tests passed，[实现记录](M1_dev_log.md#5-m13unionpart) |
+| M1.1 | 修复结构化 JSON 与 strict tuple 的适配；统一 Gateway 验证边界 | 标准 parser 路径与完整 Agent 调用链；合法 tuple 通过，错误输出失败，repair 有界与诊断脱敏 | DONE · `37c250e`，[测试证据](M1_dev_log.md#6-自动测试与验收证据) |
+| M1.2 | daily → 普通 Plan queue；WorldRef 身份传播；PerceptionFrame → AgentView 一次迁移 | World/Agent/scope 错配先于 replay/认知；JSON 重建保持队列；不把 Proposal 当完成 | DONE · `37c250e`，[实现与测试](M1_dev_log.md#4-m12身份角色状态与兼容边界) |
+| M1.3 | 不带业务语义的 UnionPart：merge/split 与只读查询 | 完整覆盖、无重复、root 自指、双索引一致；非法输入无半更新；480 步确定性序列 | DONE · `37c250e`，[实现记录](M1_dev_log.md#5-m13unionpart) |
 
 **阶段门禁：** 现有回归通过；新增基础能力有独立测试。M1 不要求 SQLite、调度器或真实付费 Provider；标准解析路径回归不是实网模型验收。
 
@@ -105,12 +105,14 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 **落点：** 新增 `agent_runtime/sqlite.py`、`scenario.py`、`bootstrap.py`、`world/state.py`、`world/storage.py`、`world/initializer.py`；Agent State/Memory 存储留在 `agent/` 所属层；作品内容放 `projects/<id>/`。
 
+实际接口、九表 schema、带标注文件树、行数和测试证据见 [M2_dev_log.md](M2_dev_log.md)。实现位于当前未提交 worktree；自动门禁已通过，不伪造 commit 记录。
+
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M2.1 | Project 数据库工厂与初始迁移；project_database/worlds、公共状态和稳定 Session 行 | `.runtime/<project-id>/world.sqlite` 路径受控；文件身份绑定、外键开启、World 内复合关联；两个 Project 及同 Project 两个 World 均不串读写 | TODO |
-| M2.2 | ScenarioSeed/loader；正式 agents.json；初始地点、对象、分组与 knowledge assignments | project/manifest/scenario 身份一致，引用/接收者/hash 严格校验；公开知识和私密知识明确分流，不把完整 Scenario 交给每个 Agent | TODO |
-| M2.3 | 一个初始化事务写公共状态、PersonaState 和完整 Memory；重建 UnionPart | 任一点失败不留半存档；每 Agent 一个稳定节点；重复创建不覆盖，初始分组可由 singleton 合并而来，Genesis 不伪造普通剧情 Entry | TODO |
-| M2.4 | create/load 分流与最小可调用装配入口；加载默认 paused | 关闭连接/进程后重读得到同一状态；不存在的存档报错，seed/spec 不匹配不自动 bootstrap；加载不调用 Agent | TODO |
+| M2.1 | Project 数据库工厂与初始迁移；project_database/worlds、公共状态和稳定 Session 行 | `.runtime/<project-id>/world.sqlite` 路径受控；文件身份绑定、外键开启、World 内复合关联；两个 Project 及同 Project 两个 World 均不串读写 | REVIEW · 已实现，[数据库与 schema 证据](M2_dev_log.md#3-m21project-sqlite-与公共-world) |
+| M2.2 | ScenarioSeed/loader；正式 agents.json；初始地点、对象、分组与 knowledge assignments | project/manifest/scenario 身份一致，引用/接收者/hash 严格校验；公开知识和私密知识明确分流，不把完整 Scenario 交给每个 Agent | REVIEW · 已实现，[Scenario 与 Fixture](M2_dev_log.md#4-m22scenario-与两份正式-project-配置) |
+| M2.3 | 一个初始化事务写公共状态、PersonaState 和完整 Memory；重建 UnionPart | 任一点失败不留半存档；每 Agent 一个稳定节点；重复创建不覆盖，初始分组可由 singleton 合并而来，Genesis 不伪造普通剧情 Entry | REVIEW · 已实现，[初始化与隔离测试](M2_dev_log.md#5-m23m24原子初始化与可信加载) |
+| M2.4 | create/load 分流与最小可调用装配入口；加载默认 paused | 关闭连接/进程后重读得到同一状态；不存在的存档报错，seed/spec 不匹配不自动 bootstrap；加载不调用 Agent | REVIEW · 已实现，[自动验收](M2_dev_log.md#6-自动测试与独立-review) |
 
 **复用：** 参考旧分支 Seed 校验、初始化事务、WorldRow 和迁移/失败测试。沿用当前 Agent contract，不搬旧私有状态所有权和 successor Session。
 
@@ -236,6 +238,8 @@ git diff --check
 
 ## 5. 交付记录
 
-2026-09-08：M1.1 / M1.2 / M1.3 已在 worktree 实现；Python **193 passed**、Ruff 格式/静态检查、Pyright、diff whitespace 检查全部通过；独立 Review 的诊断字段名泄漏问题已修复并回归。实际文件/行数、测试映射与命令结果统一登记在 [M1_dev_log.md](M1_dev_log.md)。未 commit / push；本文状态为 REVIEW，用户 Review 后再标 DONE。M1 不代表数据库隔离或多角色 World Runtime 已实现。
+2026-09-08：M1.1 / M1.2 / M1.3 完成自动验收，实际文件、行数与测试映射见 [M1_dev_log.md](M1_dev_log.md)。随后连同 DeepSeek Provider 与轻量 Trace 以 `37c250e` 提交并推送；M1 不代表数据库隔离或多角色 World Runtime 已实现。
 
-**下一工作单元：Review M1；通过后进入 M2.1。** 不在本次任务自动启动数据库或后续 Runtime 开发。
+2026-09-09：M2.1–M2.4 已在 worktree 实现；M2 新增测试 **95 passed**，完整 Python **367 passed**，Ruff、Pyright、Node 14 项、diff whitespace、Alembic 独立入口与 wheel migration 资源检查通过。独立 Review 发现的非有限浮点与指数溢出、首次建库半发布、业务/迁移 legacy 事务、并发 World 锁升级、Memory scope / Session 身份与顺序漏验、重复/非法 JSON 及全量私有读取命名问题均已修复并补反例。实际范围和限制见 [M2_dev_log.md](M2_dev_log.md)。当前未 commit / push，状态为 REVIEW；M2 只证明 Project World 可隔离创建和加载，不代表 Agent 已可运行互动。
+
+**下一工作单元：Review M2；通过后进入 M3.1。** M3 先定义 EventEntry 与受限 World 操作契约，不在 M2 预建 Director、Broadcast 或 Runner。

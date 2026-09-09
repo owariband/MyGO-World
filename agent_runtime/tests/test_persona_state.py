@@ -138,6 +138,23 @@ def test_persona_state_rejects_naive_time_and_mutable_collections() -> None:
         PersonaState.model_validate({**raw, "known_place_ids": ["cafe"]}, strict=True)
 
 
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_persisted_cognitive_scores_must_be_finite(value: float) -> None:
+    config = _state().cognitive_config.model_dump(by_alias=False)
+    with pytest.raises(ValidationError, match="finite"):
+        CognitiveConfig.model_validate(
+            {**config, "recency_weight": value},
+            strict=True,
+        )
+
+    state = _state().model_dump(by_alias=False)
+    with pytest.raises(ValidationError, match="finite"):
+        PersonaState.model_validate(
+            {**state, "reflection_remaining": value},
+            strict=True,
+        )
+
+
 def _state(
     *,
     plan_queue: tuple[PlanItem, ...] = (),

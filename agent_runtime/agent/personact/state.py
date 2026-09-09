@@ -10,8 +10,8 @@ from agent_runtime.world.contracts import Identifier, WorldRef, WorldVersion
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 PositiveCount = Annotated[int, Field(ge=1)]
 NonNegativeCount = Annotated[int, Field(ge=0)]
-NonNegativeScore = Annotated[float, Field(ge=0.0)]
-Decay = Annotated[float, Field(ge=0.0, le=1.0)]
+NonNegativeScore = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+Decay = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 
 
 class CognitiveConfig(StrictModel):
@@ -23,7 +23,7 @@ class CognitiveConfig(StrictModel):
     relevance_weight: NonNegativeScore
     importance_weight: NonNegativeScore
     recency_decay: Decay
-    reflection_threshold: Annotated[float, Field(gt=0.0)]
+    reflection_threshold: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
     reflection_count: PositiveCount
 
 

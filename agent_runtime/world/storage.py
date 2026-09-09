@@ -1,0 +1,455 @@
+"""World-owned relational rows and WorldRef-bound persistence."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    select,
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Mapped, Session, mapped_column
+
+from agent_runtime.sqlite import (
+    Base,
+    ProjectDatabaseIdentityError,
+    require_session_project,
+)
+from agent_runtime.world.contracts import WorldRef
+from agent_runtime.world.state import (
+    AgentWorldState,
+    EventSessionNode,
+    LocationState,
+    ObjectState,
+    PublicWorldState,
+    WorldFact,
+    WorldState,
+    WorldStatus,
+)
+
+
+class WorldStorageError(RuntimeError):
+    """Base error for one World-bound relational operation."""
+
+
+class WorldAlreadyExistsError(WorldStorageError):
+    """The requested World ID already has persisted state."""
+
+
+class WorldNotFoundError(WorldStorageError):
+    """The requested World ID has no persisted state."""
+
+
+class WorldOwnershipError(WorldStorageError):
+    """Input state does not belong to the Store's bound WorldRef."""
+
+
+class ProjectDatabaseRow(Base):
+    __tablename__ = "project_database"
+    __table_args__ = (
+        CheckConstraint("singleton_id = 1", name="ck_project_database_singleton"),
+        UniqueConstraint("project_id", name="uq_project_database_project"),
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WorldRow(Base):
+    __tablename__ = "worlds"
+    __table_args__ = (
+        CheckConstraint("seed_version >= 1", name="ck_worlds_seed_version"),
+        CheckConstraint(
+            "length(seed_hash) = 64 AND seed_hash NOT GLOB '*[^0-9a-f]*'",
+            name="ck_worlds_seed_hash",
+        ),
+        CheckConstraint("current_version >= 1", name="ck_worlds_current_version"),
+        CheckConstraint("status IN ('paused', 'running', 'ended')", name="ck_worlds_status"),
+    )
+
+    world_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("project_database.project_id", name="fk_worlds_project_database"),
+        nullable=False,
+    )
+    seed_id: Mapped[str] = mapped_column(Text, nullable=False)
+    seed_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    seed_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    world_time: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class LocationRow(Base):
+    __tablename__ = "locations"
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id", name="fk_locations_world"), primary_key=True
+    )
+    location_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class AgentWorldStateRow(Base):
+    __tablename__ = "agent_world_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "location_id"],
+            ["locations.world_id", "locations.location_id"],
+            name="fk_agent_world_states_location",
+        ),
+        Index("ix_agent_world_states_location", "world_id", "location_id"),
+    )
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id", name="fk_agent_world_states_world"),
+        primary_key=True,
+    )
+    agent_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    location_id: Mapped[str] = mapped_column(Text, nullable=False)
+    public_status: Mapped[str | None] = mapped_column(Text)
+
+
+class ObjectRow(Base):
+    __tablename__ = "objects"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["world_id", "location_id"],
+            ["locations.world_id", "locations.location_id"],
+            name="fk_objects_location",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "owner_agent_id"],
+            ["agent_world_states.world_id", "agent_world_states.agent_id"],
+            name="fk_objects_owner",
+        ),
+        Index("ix_objects_location", "world_id", "location_id"),
+    )
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id", name="fk_objects_world"), primary_key=True
+    )
+    object_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    location_id: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_agent_id: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WorldFactRow(Base):
+    __tablename__ = "world_facts"
+    __table_args__ = (
+        CheckConstraint(
+            "(location_id IS NOT NULL) + (agent_id IS NOT NULL) + (object_id IS NOT NULL) <= 1",
+            name="ck_world_facts_one_owner",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "location_id"],
+            ["locations.world_id", "locations.location_id"],
+            name="fk_world_facts_location",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agent_world_states.world_id", "agent_world_states.agent_id"],
+            name="fk_world_facts_agent",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "object_id"],
+            ["objects.world_id", "objects.object_id"],
+            name="fk_world_facts_object",
+        ),
+    )
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id", name="fk_world_facts_world"), primary_key=True
+    )
+    fact_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    location_id: Mapped[str | None] = mapped_column(Text)
+    agent_id: Mapped[str | None] = mapped_column(Text)
+    object_id: Mapped[str | None] = mapped_column(Text)
+    predicate: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str | None] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EventSessionRow(Base):
+    __tablename__ = "event_sessions"
+    __table_args__ = (
+        CheckConstraint("topology_version >= 1", name="ck_event_sessions_topology_version"),
+        CheckConstraint(
+            "updated_world_version >= 1",
+            name="ck_event_sessions_updated_world_version",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "agent_id"],
+            ["agent_world_states.world_id", "agent_world_states.agent_id"],
+            name="fk_event_sessions_agent",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "root_session_id"],
+            ["event_sessions.world_id", "event_sessions.session_id"],
+            name="fk_event_sessions_root",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        UniqueConstraint("world_id", "agent_id", name="uq_event_sessions_agent"),
+        Index("ix_event_sessions_root", "world_id", "root_session_id"),
+    )
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.world_id", name="fk_event_sessions_world"), primary_key=True
+    )
+    session_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    root_session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    topology_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_world_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class WorldStore:
+    """Read and write public rows for exactly one immutable WorldRef."""
+
+    def __init__(self, world_ref: WorldRef) -> None:
+        self._world_ref = WorldRef.model_validate(world_ref, strict=True)
+
+    @property
+    def world_ref(self) -> WorldRef:
+        return self._world_ref
+
+    def exists(self, session: Session) -> bool:
+        self._require_database_project(session)
+        statement = select(WorldRow.world_id).where(
+            WorldRow.world_id == self._world_ref.world_id,
+            WorldRow.project_id == self._world_ref.project_id,
+        )
+        return session.scalar(statement) is not None
+
+    def insert_initial(self, session: Session, state: PublicWorldState) -> None:
+        """Stage one complete public Genesis in the caller's transaction."""
+
+        validated = PublicWorldState.model_validate(state, strict=True)
+        self._require_owner(validated.world.world_ref)
+        if validated.world.current_version != 1:
+            raise ValueError("an initial World must start at version 1")
+        if validated.world.status is not WorldStatus.PAUSED:
+            raise ValueError("an initial World must start paused")
+        self._require_database_project(session)
+
+        world = validated.world
+        session.add(
+            WorldRow(
+                world_id=world.world_ref.world_id,
+                project_id=world.world_ref.project_id,
+                seed_id=world.seed_id,
+                seed_version=world.seed_version,
+                seed_hash=world.seed_hash,
+                current_version=world.current_version,
+                world_time=world.world_time.isoformat(),
+                status=world.status.value,
+                created_at=world.created_at.isoformat(),
+            )
+        )
+        try:
+            session.flush()
+        except IntegrityError as error:
+            raise WorldAlreadyExistsError(
+                f'World "{self._world_ref.world_id}" already exists'
+            ) from error
+        session.add_all(
+            LocationRow(
+                world_id=self._world_ref.world_id,
+                location_id=row.location_id,
+                name=row.name,
+                description=row.description,
+            )
+            for row in validated.locations
+        )
+        session.flush()
+        session.add_all(
+            AgentWorldStateRow(
+                world_id=self._world_ref.world_id,
+                agent_id=row.agent_id,
+                location_id=row.location_id,
+                public_status=row.public_status,
+            )
+            for row in validated.agents
+        )
+        session.flush()
+        session.add_all(
+            ObjectRow(
+                world_id=self._world_ref.world_id,
+                object_id=row.object_id,
+                name=row.name,
+                kind=row.kind,
+                description=row.description,
+                location_id=row.location_id,
+                owner_agent_id=row.owner_agent_id,
+                state=row.state,
+            )
+            for row in validated.objects
+        )
+        session.flush()
+        session.add_all(
+            WorldFactRow(
+                world_id=self._world_ref.world_id,
+                fact_id=row.fact_id,
+                location_id=row.location_id,
+                agent_id=row.agent_id,
+                object_id=row.object_id,
+                predicate=row.predicate,
+                value=row.object,
+                content=row.content,
+            )
+            for row in validated.facts
+        )
+        session.flush()
+        session.add_all(
+            EventSessionRow(
+                world_id=self._world_ref.world_id,
+                session_id=row.session_id,
+                agent_id=row.agent_id,
+                root_session_id=row.root_session_id,
+                topology_version=row.topology_version,
+                updated_world_version=row.updated_world_version,
+            )
+            for row in validated.sessions
+        )
+        session.flush()
+
+    def load(self, session: Session) -> PublicWorldState:
+        """Load and revalidate all current public rows for the bound World."""
+
+        self._require_database_project(session)
+        world_row = session.scalar(
+            select(WorldRow).where(
+                WorldRow.world_id == self._world_ref.world_id,
+                WorldRow.project_id == self._world_ref.project_id,
+            )
+        )
+        if world_row is None:
+            raise WorldNotFoundError(f'World "{self._world_ref.world_id}" does not exist')
+
+        world = WorldState(
+            world_ref=self._world_ref,
+            seed_id=world_row.seed_id,
+            seed_version=world_row.seed_version,
+            seed_hash=world_row.seed_hash,
+            current_version=world_row.current_version,
+            world_time=_load_datetime(world_row.world_time),
+            status=WorldStatus(world_row.status),
+            created_at=_load_datetime(world_row.created_at),
+        )
+        world_id = self._world_ref.world_id
+        locations = tuple(
+            LocationState(
+                world_ref=self._world_ref,
+                location_id=row.location_id,
+                name=row.name,
+                description=row.description,
+            )
+            for row in session.scalars(
+                select(LocationRow)
+                .where(LocationRow.world_id == world_id)
+                .order_by(LocationRow.location_id)
+            )
+        )
+        agents = tuple(
+            AgentWorldState(
+                world_ref=self._world_ref,
+                agent_id=row.agent_id,
+                location_id=row.location_id,
+                public_status=row.public_status,
+            )
+            for row in session.scalars(
+                select(AgentWorldStateRow)
+                .where(AgentWorldStateRow.world_id == world_id)
+                .order_by(AgentWorldStateRow.agent_id)
+            )
+        )
+        objects = tuple(
+            ObjectState(
+                world_ref=self._world_ref,
+                object_id=row.object_id,
+                name=row.name,
+                kind=row.kind,
+                description=row.description,
+                location_id=row.location_id,
+                owner_agent_id=row.owner_agent_id,
+                state=row.state,
+            )
+            for row in session.scalars(
+                select(ObjectRow)
+                .where(ObjectRow.world_id == world_id)
+                .order_by(ObjectRow.object_id)
+            )
+        )
+        facts = tuple(
+            WorldFact(
+                world_ref=self._world_ref,
+                fact_id=row.fact_id,
+                location_id=row.location_id,
+                agent_id=row.agent_id,
+                object_id=row.object_id,
+                predicate=row.predicate,
+                object=row.value,
+                content=row.content,
+            )
+            for row in session.scalars(
+                select(WorldFactRow)
+                .where(WorldFactRow.world_id == world_id)
+                .order_by(WorldFactRow.fact_id)
+            )
+        )
+        sessions = tuple(
+            EventSessionNode(
+                world_ref=self._world_ref,
+                session_id=row.session_id,
+                agent_id=row.agent_id,
+                root_session_id=row.root_session_id,
+                topology_version=row.topology_version,
+                updated_world_version=row.updated_world_version,
+            )
+            for row in session.scalars(
+                select(EventSessionRow)
+                .where(EventSessionRow.world_id == world_id)
+                .order_by(EventSessionRow.session_id)
+            )
+        )
+        return PublicWorldState(
+            world=world,
+            locations=locations,
+            agents=agents,
+            objects=objects,
+            facts=facts,
+            sessions=sessions,
+        )
+
+    def _require_owner(self, world_ref: WorldRef) -> None:
+        if world_ref != self._world_ref:
+            raise WorldOwnershipError(
+                f"state belongs to {world_ref!r}, not Store {self._world_ref!r}"
+            )
+
+    def _require_database_project(self, session: Session) -> None:
+        try:
+            require_session_project(session, self._world_ref.project_id)
+        except ProjectDatabaseIdentityError as error:
+            raise WorldOwnershipError(
+                f"Store Project {self._world_ref.project_id!r} does not match database identity"
+            ) from error
+
+
+def _load_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value)

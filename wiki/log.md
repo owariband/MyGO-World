@@ -120,3 +120,9 @@
 - 明确 Director release、AgentView 投影和 Broadcast 观看投影是三个动作；Director 不能直接向 Character Prompt/Memory 广播文本，Broadcast 也不能制造客观完成事件。
 - 同步修正架构、机制、Runtime 落地、地点、NPC DIY、未决问题与难点账本；地点公开信息由 AgentViewBuilder 确定性过滤，需要传播行为时由 Character/System 自己提交，Director 不再参与信息披露。
 - 代码审计发现 EventStaff 的前置阻塞：当前 `Affordance` 只有 `kind+target`，`InteractAction` 只有 `target+description`，不能稳定证明 `start_brewing`。将 World-issued `affordance_id/operation_id`（或等价 typed operation union）列入 Phase 0；自由文本 description 不得单独触发 Object state change 或 Staff。
+
+## 2026-09-09
+
+- 完成 M2 Project World 实现与自动验收：每 Project 独立 SQLite、严格 Scenario 与 canonical hash、九表首版 schema、公共/私有初始状态单事务、五稳定 EventSession 节点、UnionPart 重建及跨 Python 进程 paused load；当前仍是未提交 worktree。
+- M2 新增测试 95 项、完整 Python 367 项、Node 14 项及 Ruff/Pyright 全部通过；首次建库采用完整临时 DB 后不可覆盖原子发布，业务与 Alembic 均使用现代 SQLite 事务语义，并发 Genesis 不再发生读锁升级冲突。
+- 新增 [M2 开发记录](design/M2_dev_log.md) 并更新总计划；M3 才实现 EventEntry、AgentViewBuilder 与 World/Agent 单步提交，M2 不宣称 Agent 已能自由互动。

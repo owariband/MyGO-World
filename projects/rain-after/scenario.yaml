@@ -1,0 +1,90 @@
+formatVersion: 1
+projectId: rain-after
+seedId: rainy-ring-opening
+version: 1
+worldTime: "2026-09-08T19:05:00+08:00"
+
+locations:
+  - id: ring-entrance
+    name: RiNG 门口
+    description: 排练结束后的傍晚，雨势正在变大。
+  - id: ring-rehearsal
+    name: RiNG 排练室
+    description: 大部分人已经离开，室内仍亮着灯。
+
+objects:
+  - id: umbrella-rack
+    name: 雨伞架
+    kind: fixture
+    description: 放在 RiNG 门口、供来客暂存雨伞的架子。
+    locationId: ring-entrance
+    state: empty
+
+publicFacts:
+  - id: rain-is-heavy
+    subject:
+      kind: world
+    predicate: weather
+    object: heavy_rain
+    content: RiNG 附近正在下大雨。
+  - id: umbrella-rack-empty
+    subject:
+      kind: object
+      id: umbrella-rack
+    predicate: inventory
+    object: empty
+    content: 伞架上目前没有可借用的雨伞。
+
+agents:
+  - agentId: anon
+    locationId: ring-entrance
+    sessionId: session-anon
+    publicStatus: 正站在屋檐下看向雨里
+  - agentId: taki
+    locationId: ring-entrance
+    sessionId: session-taki
+    publicStatus: 刚从排练室追出来
+  - agentId: tomori
+    locationId: ring-rehearsal
+    sessionId: session-tomori
+    publicStatus: 暂时独自在排练室整理思绪
+
+initialPartitions:
+  - rootSessionId: session-anon
+    memberSessionIds: [session-anon, session-taki]
+  - rootSessionId: session-tomori
+    memberSessionIds: [session-tomori]
+
+knowledge:
+  - id: practice-ended-before-rain
+    kind: thought
+    subject: MyGO!!!!!
+    predicate: completed
+    object: 今天的排练
+    content: 三个人都知道排练刚刚结束，而且外面的雨突然变大了。
+    poignancy: 2.0
+    tags: [band, rain]
+    recipients:
+      kind: all
+  - id: anon-heard-taki-criticism
+    kind: event
+    subject: taki
+    predicate: criticized
+    object: tomori
+    content: 爱音听见立希在排练结束前严厉指出灯今天的演奏不对。
+    poignancy: 5.0
+    tags: [practice, relationship]
+    recipients:
+      kind: explicit
+      agentIds: [anon]
+  - id: tomori-returned-unseen
+    kind: thought
+    subject: tomori
+    predicate: returned_to
+    object: ring-rehearsal
+    content: 灯没有回家，而是独自回到排练室；门口的爱音和立希目前不知道这件事。
+    poignancy: 6.0
+    tags: [private, return]
+    recipients:
+      kind: explicit
+      agentIds: [tomori]

@@ -1,6 +1,27 @@
-"""World-owned contracts and, later, deterministic world governance.
+"""World-owned contracts, public state, and Project-bound persistence."""
 
-The current NPC DIY PoC only implements contracts.py. PerceptionProjector,
-Validator, Committer, Ledger, LocationModel, and the world loop remain future
-work; this package is not a second Agent and currently stores no world state.
-"""
+from agent_runtime.world.initializer import initialize_public_world
+from agent_runtime.world.state import (
+    AgentWorldState,
+    EventSessionNode,
+    LocationState,
+    ObjectState,
+    PublicWorldState,
+    WorldFact,
+    WorldState,
+    WorldStatus,
+)
+from agent_runtime.world.storage import WorldStore
+
+__all__ = [
+    "AgentWorldState",
+    "EventSessionNode",
+    "LocationState",
+    "ObjectState",
+    "PublicWorldState",
+    "WorldFact",
+    "WorldState",
+    "WorldStatus",
+    "WorldStore",
+    "initialize_public_world",
+]

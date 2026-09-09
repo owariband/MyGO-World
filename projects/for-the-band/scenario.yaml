@@ -1,0 +1,100 @@
+formatVersion: 1
+projectId: for-the-band
+seedId: rehearsal-opening
+version: 1
+worldTime: "2026-09-08T18:10:00+08:00"
+
+locations:
+  - id: ring-rehearsal
+    name: RiNG 排练室
+    description: 晚间排练刚结束，乐器和谱架仍留在原位。
+
+objects:
+  - id: metronome
+    name: 节拍器
+    kind: instrument
+    description: 一台留在谱架旁、可供排练使用的电子节拍器。
+    locationId: ring-rehearsal
+    state: stopped
+
+publicFacts:
+  - id: rehearsal-finished
+    subject:
+      kind: location
+      id: ring-rehearsal
+    predicate: rehearsal_status
+    object: finished
+    content: 今天的正式排练已经结束。
+  - id: metronome-available
+    subject:
+      kind: object
+      id: metronome
+    predicate: availability
+    object: available
+    content: 节拍器可以被在场成员使用。
+
+agents:
+  - agentId: anon
+    locationId: ring-rehearsal
+    sessionId: session-anon
+    publicStatus: 正在收拾吉他
+  - agentId: soyo
+    locationId: ring-rehearsal
+    sessionId: session-soyo
+    publicStatus: 正在整理贝斯包
+  - agentId: tomori
+    locationId: ring-rehearsal
+    sessionId: session-tomori
+    publicStatus: 抱着笔记本留意爱音和爽世的谈话
+  - agentId: rana
+    locationId: ring-rehearsal
+    sessionId: session-rana
+    publicStatus: 独自在音箱旁拨弄吉他
+  - agentId: taki
+    locationId: ring-rehearsal
+    sessionId: session-taki
+    publicStatus: 独自在谱架旁检查记录
+
+initialPartitions:
+  - rootSessionId: session-anon
+    memberSessionIds: [session-anon, session-soyo]
+  - rootSessionId: session-rana
+    memberSessionIds: [session-rana]
+  - rootSessionId: session-taki
+    memberSessionIds: [session-taki]
+  - rootSessionId: session-tomori
+    memberSessionIds: [session-tomori]
+
+knowledge:
+  - id: band-finished-rehearsal
+    kind: thought
+    subject: MyGO!!!!!
+    predicate: completed
+    object: 今天的排练
+    content: 五个人都知道今天的正式排练已经结束，现在可以自由交谈或继续处理自己的事。
+    poignancy: 1.0
+    tags: [band, rehearsal]
+    recipients:
+      kind: all
+  - id: anon-notices-distance
+    kind: thought
+    subject: anon
+    predicate: notices
+    object: soyo
+    content: 爱音感觉爽世今天比平常更客气，但不知道具体原因。
+    poignancy: 4.0
+    tags: [relationship, soyo]
+    recipients:
+      kind: explicit
+      agentIds: [anon]
+  - id: soyo-hides-tension
+    kind: thought
+    subject: soyo
+    predicate: conceals
+    object: tension
+    content: 爽世不想让爱音和立希立刻看出自己仍在介意下午的争执。
+    poignancy: 5.0
+    tags: [private, relationship]
+    recipients:
+      kind: explicit
+      agentIds: [soyo]

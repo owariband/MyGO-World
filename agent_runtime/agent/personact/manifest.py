@@ -1,13 +1,15 @@
 """Strict creator-facing NPC manifest."""
 
+import json
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, ValidationError
+from pydantic import Field, StringConstraints
 
 from agent_runtime.agent.personact.errors import ManifestDecodeError
 from agent_runtime.agent.skill import RuntimeSkillReference
+from agent_runtime.common.strict_json import loads_strict_json
 from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import ProposalKind
 
@@ -121,16 +123,22 @@ def load_manifest(path: Path) -> Manifest:
 
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise ManifestDecodeError(f"read NPC manifest {path}: {error}") from error
 
     try:
+        decoded = loads_strict_json(raw)
         return Manifest.model_validate_json(
-            raw,
+            json.dumps(
+                decoded,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ),
             strict=True,
             extra="forbid",
             by_alias=True,
             by_name=False,
         )
-    except ValidationError as error:
+    except (TypeError, ValueError) as error:
         raise ManifestDecodeError(f"decode NPC manifest {path}: {error}") from error
