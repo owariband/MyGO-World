@@ -123,6 +123,11 @@
 
 ## 2026-09-09
 
-- 完成 M2 Project World 实现与自动验收：每 Project 独立 SQLite、严格 Scenario 与 canonical hash、九表首版 schema、公共/私有初始状态单事务、五稳定 EventSession 节点、UnionPart 重建及跨 Python 进程 paused load；当前仍是未提交 worktree。
+- 完成 M2 Project World 实现与自动验收：每 Project 独立 SQLite、严格 Scenario 与 canonical hash、九表首版 schema、公共/私有初始状态单事务、五稳定 EventSession 节点、UnionPart 重建及跨 Python 进程 paused load。
 - M2 新增测试 95 项、完整 Python 367 项、Node 14 项及 Ruff/Pyright 全部通过；首次建库采用完整临时 DB 后不可覆盖原子发布，业务与 Alembic 均使用现代 SQLite 事务语义，并发 Genesis 不再发生读锁升级冲突。
 - 新增 [M2 开发记录](design/M2_dev_log.md) 并更新总计划；M3 才实现 EventEntry、AgentViewBuilder 与 World/Agent 单步提交，M2 不宣称 Agent 已能自由互动。
+- M2 以 `5d2f496`（`feat(M2): add project-isolated world bootstrap`）提交并推送至 `origin/master`；同步将阶段状态从 REVIEW 更新为 DONE。
+- 完成 M3 需求、当前代码和 `origin/mvp@fe8fd22` 的只读审计，在 [M3 开发记录](design/M3_dev_log.md) 中形成 M3.1–M3.4 的详细设计、预计文件树与验收门禁；只复用纯 Plan、单事务、source/reply、append-only 和故障测试机制，不复制旧 lockstep/重 Ledger/successor Session/PerceptionProjector。
+- M3 设计草案采用唯一 `EventEntry` 客观历史、Scenario-owned Object operation、稳定 affordance、recipient snapshot、World/Agent CAS 事务及 disposable PersonAct work instance；M3 代码尚未开始，六个行为冻结点等待 Review。
+- 用户确认阶段日志必须从设计阶段建立：M3 新增独立 `M3_dev_log.md`；总计划只保留阶段摘要、状态、依赖与门禁，后续实现差异和测试继续原位追加到同一日志，不另建同义 `M3_dev_plan.md`。
+- 按用户要求重写 `master` 的两条旧提交元数据，删除不需要的 CLI co-author trailer；六个提交的文件树、作者、提交者、时间和标题均保持不变，新 tip 为 `5d2f496`。同步修正 Wiki 中失效的 M1/M2 commit 引用；MVP 与 feature 分支未改写。

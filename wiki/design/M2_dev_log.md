@@ -1,8 +1,9 @@
 # M2 开发记录：Project 世界创建与加载
 
-> 状态：实现与自动验收完成，当前未提交，等待用户 Review。
+> 状态：DONE；实现与自动验收完成，已提交并推送。
 > 日期：2026-09-09
-> 开发基线：`master@37c250e`（M1 已推送）。
+> 开发基线：`master@907a8a6`（M1 已推送）。
+> 阶段提交：`5d2f496f6c76b2587e5aa39558c433fdb2a5354c`（`feat(M2): add project-isolated world bootstrap`，已推送至 `origin/master`）。
 > 计划入口：[dev_plan_MVP.md](dev_plan_MVP.md#m2-project-世界创建与加载)
 
 ## 1. 交付结论
