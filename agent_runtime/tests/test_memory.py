@@ -299,7 +299,12 @@ def test_retrieval_matches_full_record_and_touch_owner(
 
 
 def test_memory_identity_round_trip_and_rebuilding_preserve_owner() -> None:
-    record = _record("memory-1", minute=1, tags=("coffee",))
+    record = _record(
+        "memory-1",
+        minute=1,
+        tags=("coffee",),
+        source_entry_id="entry-1",
+    )
     stream = _stream(record)
     restored = MemoryStream.model_validate_json(stream.model_dump_json(), strict=True)
     assert restored == stream
@@ -327,6 +332,7 @@ def test_memory_identity_round_trip_and_rebuilding_preserve_owner() -> None:
     assert related.touches[0].agent_id == AGENT_ID
     assert related.touches[0].scope == MEMORY_SCOPE
     assert touched.records[0].last_accessed_at > record.last_accessed_at
+    assert touched.records[0].source_entry_id == "entry-1"
     assert restored.records[0].last_accessed_at == record.last_accessed_at
     with pytest.raises(ValidationError, match="frozen"):
         restored.world_ref = WorldRef(project_id="coffee-golden", world_id="world-2")
@@ -417,6 +423,7 @@ def _record(
     tags: tuple[str, ...] = (),
     embedding: tuple[float, ...] = (1.0, 0.0),
     novelty_key: str | None = None,
+    source_entry_id: str | None = None,
 ) -> MemoryRecord:
     created_at = BASE_TIME + timedelta(minutes=minute)
     return MemoryRecord(
@@ -434,6 +441,7 @@ def _record(
         poignancy=poignancy,
         tags=tags,
         source=f"world-event:{memory_id}",
+        source_entry_id=source_entry_id,
         evidence_ids=(f"evidence:{memory_id}",),
         embedding=embedding,
         novelty_key=novelty_key or f"novelty:{memory_id}",

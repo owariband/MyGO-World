@@ -18,13 +18,19 @@ from agent_runtime.agent.personact.loop import (
     Observation,
     PersonActLoop,
     PersonActLoopInput,
+    PersonActLoopResult,
     PlanDraft,
     PlanningInput,
     RetrievedContext,
 )
-from agent_runtime.agent.personact.state import PersonaState
+from agent_runtime.agent.personact.state import (
+    DecisionOutcome,
+    PersonActStateUpdate,
+    PersonaState,
+    PlanDisposition,
+)
 from agent_runtime.trace import LocalTrace, record_trace, trace_debug_enabled, trace_scope
-from agent_runtime.world.contracts import ActionProposal, WorldRef
+from agent_runtime.world.contracts import ActionProposal, CommitPosition, WorldRef, WorldVersion
 
 __all__ = [
     "ActionPlanningInput",
@@ -45,6 +51,7 @@ class _ReplayRecord:
     request_fingerprint: str
     proposal: ActionProposal
     trace: DecisionTrace
+    observed_through: CommitPosition | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +60,7 @@ class _PrivateSnapshot:
     memory: MemoryStream
     trace: DecisionTrace | None
     replay: _ReplayRecord | None
+    work: PersonActLoopResult | None
     used_proposal_ids: frozenset[str]
 
 
@@ -87,6 +95,7 @@ class PersonActAgent:
             memory=validated_memory,
             trace=None,
             replay=None,
+            work=None,
             used_proposal_ids=frozenset(),
         )
         self._validate_ownership()
@@ -168,6 +177,7 @@ class PersonActAgent:
                     memory=self._snapshot.memory,
                     trace=replay.trace,
                     replay=replay,
+                    work=self._snapshot.work,
                     used_proposal_ids=self._snapshot.used_proposal_ids,
                 )
                 record_trace("decision.replay", {"proposalId": replay.proposal_id})
@@ -207,7 +217,9 @@ class PersonActAgent:
                     request_fingerprint=request_fingerprint,
                     proposal=result.proposal,
                     trace=result.trace,
+                    observed_through=validated_request.view.observed_through,
                 ),
+                work=result,
                 used_proposal_ids=(
                     self._snapshot.used_proposal_ids | {validated_request.proposal_id}
                 ),
@@ -223,6 +235,45 @@ class PersonActAgent:
                 else None,
             )
             return result.proposal
+
+    def observe_outcome(
+        self,
+        *,
+        decision_id: str,
+        outcome: DecisionOutcome,
+        committed_world_version: WorldVersion,
+    ) -> PersonActStateUpdate:
+        """Prepare the private values that commit with one World outcome."""
+
+        with self._lock:
+            replay = self._snapshot.replay
+            work = self._snapshot.work
+            if replay is None or work is None or replay.proposal_id != decision_id:
+                raise DecisionInputError("outcome does not match the latest decision")
+            validated_outcome = DecisionOutcome(outcome)
+            expected_world_version = replay.proposal.based_on_world_version + (
+                1 if validated_outcome is DecisionOutcome.APPLIED else 0
+            )
+            if committed_world_version != expected_world_version:
+                raise DecisionInputError("committed world version does not match the outcome")
+
+            state = _state_after_outcome(
+                work.state,
+                outcome=validated_outcome,
+                disposition=work.plan_disposition,
+                committed_world_version=committed_world_version,
+            )
+            return PersonActStateUpdate(
+                world_ref=self._world_ref,
+                agent_id=self._spec.agent_id,
+                decision_id=decision_id,
+                outcome=validated_outcome,
+                state=state,
+                memory_writes=work.memory_writes,
+                memory_touches=work.memory_touches,
+                observation_cursor=replay.observed_through,
+                plan_disposition=work.plan_disposition,
+            )
 
     def _validate_ownership(self) -> None:
         if self._world_ref.project_id != self._spec.project_id:
@@ -256,3 +307,33 @@ def _scope_belongs_to(scope: str, base_scope: str) -> bool:
 def _fingerprint(request: DecisionRequest) -> str:
     canonical = request.model_dump_json(by_alias=True, exclude_none=False)
     return sha256(canonical.encode()).hexdigest()
+
+
+def _state_after_outcome(
+    state: PersonaState,
+    *,
+    outcome: DecisionOutcome,
+    disposition: PlanDisposition,
+    committed_world_version: WorldVersion,
+) -> PersonaState:
+    should_remove_active = disposition is PlanDisposition.CANCEL or (
+        disposition is PlanDisposition.COMPLETE_ON_APPLIED and outcome is DecisionOutcome.APPLIED
+    )
+    queue = state.plan_queue
+    if should_remove_active and state.active_plan_id is not None:
+        queue = tuple(item for item in queue if item.plan_id != state.active_plan_id)
+    active_plan_id = state.active_plan_id
+    if should_remove_active:
+        active_plan_id = queue[0].plan_id if queue else None
+    return PersonaState(
+        world_ref=state.world_ref,
+        agent_id=state.agent_id,
+        cognitive_config=state.cognitive_config,
+        reflection_remaining=state.reflection_remaining,
+        last_world_time=state.last_world_time,
+        last_world_version=committed_world_version,
+        plan_queue=queue,
+        active_plan_id=active_plan_id,
+        reflection_new_memory_count=state.reflection_new_memory_count,
+        known_place_ids=state.known_place_ids,
+    )

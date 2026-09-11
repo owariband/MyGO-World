@@ -17,8 +17,8 @@ generative_go_world/
 │   │   ├── director/       # Director 边界；实现待补
 │   │   └── broadcast/      # Broadcast 边界；实现待补
 │   ├── model_gateway.py     # typed LangChain ChatModel/Fixture seam
-│   ├── event/              # 外部 Scheduler/Event 生命周期（边界已建，实现待补）
-│   ├── world/              # 客观事实与 Commit 权威
+│   ├── event/              # 已实现 CharacterStep；持续 Scheduler 留给 M4
+│   ├── world/              # 客观事实、AgentView、Entry 与原子更新权威
 │   └── rendergateway/      # RenderJob 出站边界
 ├── extensions/
 │   └── dynamic-render/     # RenderJob 到 WebGAL 的外置 Adapter
@@ -58,7 +58,7 @@ npm test
 npm run dynamic -- --project rain-after
 ```
 
-Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice。`agent_runtime/agent/personact/loop.py` 是显式认知循环，`agent.py` 是串行化、replay 与 private snapshot 原子替换的门面；LangChain Core 是内部编排依赖，不是 ADK 本身。外部 Scheduler 与 World 提交链仍待实现。Python 环境、依赖和工具统一使用 uv：
+Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice，以及 Project 隔离的 SQLite World、硬可见 `AgentView` 和一次角色决定的原子 `CharacterStep`。`agent_runtime/agent/personact/loop.py` 是显式认知循环，`event/character_step.py` 是读取、决策、校验和提交的唯一单步入口；LangChain Core 是内部编排依赖，不是 ADK 本身。持续 Scheduler、EventSession 重组、Director 与 Broadcast 仍待实现。Python 环境、依赖和工具统一使用 uv：
 
 ```bash
 uv sync --frozen
@@ -68,7 +68,7 @@ uv run pyright
 uv run pytest
 ```
 
-当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State 与检索基础，以及 `PersonActAgent.decide` 的 prepare/perceive/retrieve/plan/propose Slice。Character Skill 由版本和整文件 SHA-256 固定，模型型 `CognitionStrategy` 通过 typed LangChain ChatModel Gateway 产出 strict Pydantic 草稿，并把 schema/Proposal 语义 repair 限制为最多一次。外部 Event Scheduler 拥有循环；`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`，需要 wire JSON 时再调用 `model_dump_json(by_alias=True)`。Proposal 使用固定 envelope + discriminated action union，不包含 `move` variant、`locationId` 或多目标 `targetIds`。Reflection/commit feedback、Director、World Commit、Event Scheduler、持久化 Generation Trace 与 Render ingress 仍待实现；当前只有离线 Fixture/Fake ChatModel 验证，不代表真实 Provider 已验收。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
+当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State、PersonAct 认知 Slice，以及 `ActionProposal → WorldUpdatePlan → EventEntry/Object/Persona/Memory` 的单事务发布。Character Skill 由版本和整文件 SHA-256 固定；模型型 `CognitionStrategy` 通过 typed LangChain ChatModel Gateway 产出 strict Pydantic 草稿，并把 schema/Proposal 语义 repair 限制为最多一次。`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`；只有 `WorldUpdater` 可以把受信 Object operation 或 Dialogue 变成公共事实。M3 已用离线 Fixture 证明 utter→respond、定向 whisper 可见性、对象操作、幂等重试、事务回滚和重启恢复；它仍不是持续多 Agent Runtime，Event Scheduler、Session merge/split、Director、Broadcast、完整 Reflection 与 Render ingress 留在后续阶段。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
 
 默认项目是 `rain-after`。开发服务器优先提供本仓库的自研 Overlay，并在文件不存在时从 `WEBGAL_ROOT` 提供 WebGAL 页面、Bundle、素材和媒体文件。
 

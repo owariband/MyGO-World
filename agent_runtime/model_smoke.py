@@ -39,6 +39,7 @@ from agent_runtime.world.contracts import (
     AgentView,
     AttentionTier,
     CharacterTarget,
+    DeliveryChannel,
     PerceptCandidate,
     PerceptionChannel,
     ProposalKind,
@@ -119,13 +120,14 @@ def run_smoke(
         agent_id=spec.agent_id,
         event_session_id="smoke-cafe",
         based_on_world_version=1,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=datetime(2026, 9, 1, 9, tzinfo=UTC),
         candidates=(
             PerceptCandidate(
                 candidate_id="soyo-greeting-for-anon",
-                source_event_id="soyo-greeting",
-                event_revision=1,
+                source_entry_id="soyo-greeting",
                 channel=PerceptionChannel.DIRECT_INTERACTION,
                 attention_tier=AttentionTier.MANDATORY,
                 subject="soyo",
@@ -137,8 +139,17 @@ def run_smoke(
         ),
         visible_evidence_ids=("soyo-greeting",),
         affordances=(
-            Affordance(kind=ProposalKind.UTTER, target=CharacterTarget(id="soyo")),
-            Affordance(kind=ProposalKind.INTERACT, target=CharacterTarget(id="soyo")),
+            Affordance(
+                affordance_id="smoke-utter-soyo-direct",
+                kind=ProposalKind.UTTER,
+                target=CharacterTarget(id="soyo"),
+                delivery_channel=DeliveryChannel.DIRECT,
+            ),
+            Affordance(
+                affordance_id="smoke-interact-soyo",
+                kind=ProposalKind.INTERACT,
+                target=CharacterTarget(id="soyo"),
+            ),
         ),
     )
     proposal = agent.decide(DecisionRequest(proposal_id="smoke-proposal-1", view=view))

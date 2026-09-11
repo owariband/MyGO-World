@@ -1,12 +1,465 @@
 # M3 开发记录：单步世界与认知提交
 
-> 状态：**DESIGN REVIEW**；M3.1–M3.4 代码尚未开始。
-> 日期：2026-09-09
+> 状态：**REVIEW**；M3.1–M3.4 实现与自动验收已完成，当前为未提交 worktree，等待用户 Review。
+> 日期：2026-09-11
 > 开发基线：`master@5d2f496`（M2 已提交并推送）。
 > 总计划：[dev_plan_MVP.md](dev_plan_MVP.md#m3-单步世界与认知提交)
 > 领域设计：[MVP_dev.md](MVP_dev.md)
 
-本文从 M3 的设计 Review 阶段开始维护。当前记录的是预计 contract、文件范围、开发量和验收门禁，不表示代码已经实现；Review 通过并开始开发后，仍在本文件原位补充实际实现、真实 diff、测试结果、Review 修复和遗留边界，不另建同义的 `M3_dev_plan.md`。
+本文从 M3 的设计 Review 阶段开始维护。下方“开工批准方案（原文）”保留当时的计划原貌；实际实现、真实 diff、测试结果、Review 修复和遗留边界统一记录在第 12 节，不另建同义的 `M3_dev_plan.md`。
+
+## 2026-09-11 开工批准方案（原文）
+
+可以继续开发 M3，但我建议严格拆成 M3.1～M3.4 四个可独立测试、提交和 Review 的单元，不做一次性大提交。
+
+M3 完成后的准确能力是：
+
+> 一个角色的一次决定，可以从数据库中的已提交世界状态出发，经过 Agent 决策，原子地变成 EventEntry、世界状态和角色私有认知，并在重启后准确恢复。
+
+它还不是“多个 Agent 自动连续自由互动”；持续调度、50 轮规则、EventSession 合并拆分属于 M4。
+
+当前 M3 源码尚未开始。仓库里只有已经 staged 的设计文档变更，我这一轮没有修改任何文件。现有详细设计在 [M3_dev_log.md](M3_dev_log.md)，总路线在 [dev_plan_MVP.md](dev_plan_MVP.md#m3-单步世界与认知提交)。
+
+### 一、M3 总体执行链
+
+```text
+Committed SQLite snapshot
+        │
+        ▼
+AgentViewBuilder
+构造该角色真正可见的世界
+        │
+        ▼
+Disposable PersonActAgent.decide()
+生成一次 ActionProposal
+        │
+        ▼
+WorldChangeValidator
+校验 Proposal，生成纯 WorldUpdatePlan
+        │
+        ▼
+PersonActAgent.observe_outcome()
+准备 PersonaState / Memory 私有变化
+        │
+        ▼
+一个 SQLite transaction
+├── World CAS
+├── Object 状态变化
+├── EventEntry / recipients / request
+├── PersonaState / cursor / decision
+└── Memory append / touch
+        │
+        ▼
+提交成功后关闭连接、重新加载，结果完全一致
+```
+
+核心所有权：
+
+```text
+scenario.py
+    └── affordances.py
+          ├── view_builder.py       负责“允许做什么、能看到什么”
+          └── updater.py            负责“这个 Proposal 能否真正生效”
+
+entries.py
+    └── entry_storage.py
+          └── updater.py            负责 Entry 的公共提交
+
+view_builder.py + updater.py + PersonAct stores
+                    │
+                    ▼
+             character_step.py      唯一跨域单步协调入口
+```
+
+这五个 World 新模块有明确边界，不建议合并：
+
+- `entries.py`：纯领域模型。
+- `entry_storage.py`：ORM 和窄 SQL 操作。
+- `affordances.py`：无副作用的操作解析。
+- `updater.py`：Validator、Plan、Result、公共世界写入。
+- `view_builder.py`：只读可见性投影。
+
+但不会继续拆 `service.py`、`repository.py`、`validation.py`、`errors.py` 等抽象层。
+
+### 二、M3.1～M3.4 开发计划
+
+| 阶段 | 开发目标 | 完成后可证明 |
+|---|---|---|
+| M3.1 | EventEntry、回应请求、稳定 Object operation、SQLite schema | 已发生的对话和动作可以按 World 隔离、确定排序、不可篡改地落库 |
+| M3.2 | WorldChangeValidator、WorldUpdater、World/Agent 原子事务 | 一次决定要么公共状态和私有状态全部成功，要么全部回滚 |
+| M3.3 | AgentViewBuilder 可见性 | Agent 只能看到 recipient 允许的 Entry、对象和待回应请求 |
+| M3.4 | CharacterStep 单步闭环 | Anon 发言 → Soyo 回应、对象操作、重试、失败、重启恢复全部跑通 |
+
+依赖顺序固定为：
+
+```text
+M3.1 Entry/Schema
+    ↓
+M3.2 Atomic Update
+    ↓
+M3.3 Agent View
+    ↓
+M3.4 Character Step
+```
+
+#### M3.1：Entry、回应和稳定 World operation
+
+实现内容：
+
+- `DialogueEntry`：已发生的 utter/respond。
+- `ActionEntry`：已生效的 Object operation。
+- `EventEntryLink`：previous/reply/cause。
+- `EventEntryRecipient`：提交时的可见成员快照。
+- `InteractionRequest`：明确等待某个 Agent 回应的请求。
+- `ObjectOperationSeed`：Scenario 声明的可信对象状态转换。
+- 稳定 `affordance_id`：角色只能选择 World 提供的操作，不能自行编造状态变化。
+- `commit_position=(world_version, entry_index)`：保证同一 World 内的 Entry 顺序。
+- append-only trigger：已提交 Entry、link、recipient 不允许更新或删除。
+
+M3 每个成功 Proposal 最多产生一个 Entry，所以首版：
+
+```text
+source_index = 0
+entry_index  = 0
+```
+
+成功事件按 `world_version` 排序；不同 World 即使复用相同 `entry_id` 也无法互相引用。
+
+#### M3.2：World 和 Agent 原子提交
+
+明确四种结果：
+
+| 结果 | 写 Entry | World version | 私有状态 |
+|---|---:|---:|---|
+| `applied` | 是 | `+1` | 保存 |
+| `not_applied` | 否 | 不变 | 保存失败反馈，不能完成依赖成功的计划 |
+| `wait` | 否 | 不变 | 保存计划、认知和决策进度 |
+| `no_op` | 否 | 不变 | 保存认知和决策进度 |
+
+一次提交顺序：
+
+```text
+1. CAS 更新 World decision_seq/version
+2. 修改可信 Object 当前状态
+3. 插入 Entry/link/recipient/request
+4. CAS 更新 PersonaState/cursor/last decision
+5. append/touch Memory
+6. commit
+```
+
+任一步失败，全部回滚。
+
+模型调用、Attention、Memory 检索、Embedding 都必须发生在写事务外，禁止在 SQLite transaction 里面等模型。
+
+#### M3.3：AgentViewBuilder 可见性
+
+首版规则：
+
+- direct 对话：commit 时同一个 `root_session_id` 的成员可见。
+- whisper：只有 actor 和 target 可见。
+- `expects_response=true`：target 得到 `mandatory` Candidate。
+- request 未解决前，即使 observation cursor 已经越过原 Entry，仍需继续召回。
+- 同地点、不同 EventSession root：可以看见允许公开的环境/在场信息，但不能看到对方组内对话，也不能获得跨组 utter/respond affordance。
+- 后续加入某个 Session 的角色，不能倒看加入前的私语或对话。
+- link 指向隐藏 Entry 时，不能借 link 泄漏正文。
+- Builder 不读取任何 Agent 的私有 Memory 或 Plan。
+
+#### M3.4：CharacterStep 单步闭环
+
+新增唯一入口：
+
+```python
+CharacterStep.run(agent_id, decision_id)
+```
+
+内部流程：
+
+```text
+短读事务：加载同一个 snapshot + Agent state revision + cursor
+→ 构建 AgentView
+→ 事务外执行 disposable PersonActAgent.decide()
+→ Validator 生成 WorldUpdatePlan
+→ 计算 PersonActStateUpdate
+→ 单一写事务提交 World + PersonaState + Memory
+→ 返回 CharacterStepResult
+```
+
+Fixture 至少完成：
+
+1. Anon 对 Soyo `utter(expects_response=true)`。
+2. 产生 DialogueEntry E1 和 pending response request。
+3. Soyo 的 View 中出现来源为 E1 的 mandatory Candidate。
+4. Soyo `respond(in_reply_to_entry_id=E1)`。
+5. 产生 E2，建立 reply link，并原子解决 request。
+6. Anon 对 metronome 执行注册 operation。
+7. Object state 与 ActionEntry 同事务生效。
+8. 关闭 Engine 后重新加载，所有状态一致。
+
+`CharacterStep` 不负责循环、不选择下一角色、不推进时间，也不修改 UnionPart；这些交给 M4 Runner。
+
+### 三、预计修改文件树
+
+`NEW` 是新增文件，`UPDATE` 是完善现有文件。行数表示预计新增或实质改写规模，不包括机械格式化。
+
+```text
+generative_go_world/
+├── agent_runtime/
+│   ├── migrations/
+│   │   ├── env.py
+│   │   │   [UPDATE · M3.1 · +5～10]
+│   │   │   └── 注册新增 ORM，保证 metadata drift 可检测
+│   │   └── versions/
+│   │       └── 0002_m3_event_entries.py
+│   │           [NEW · M3.1 · +430～600]
+│   │           └── 四张 Entry/Request 表、World/Agent/Memory 新列、
+│   │               复合外键、唯一约束、append-only/request trigger、downgrade
+│   │
+│   ├── scenario.py
+│   │   [UPDATE · M3.1 · +55～90]
+│   │   └── ObjectOperationSeed、引用/唯一性/hash 校验
+│   ├── bootstrap.py
+│   │   [UPDATE · M3.1/M3.2 · +20～45]
+│   │   └── Genesis control/cursor 默认值和 Scenario operation 装配
+│   │
+│   ├── world/
+│   │   ├── contracts.py
+│   │   │   [UPDATE · M3.1/M3.3 · +90～150 / -15～35]
+│   │   │   └── CommitPosition、稳定 Affordance、reply/request 字段；
+│   │   │       source_event_id/event_revision → source_entry_id
+│   │   ├── state.py
+│   │   │   [UPDATE · M3.1 · +15～30]
+│   │   │   └── control_epoch、decision_seq
+│   │   ├── entries.py
+│   │   │   [NEW · M3.1 · +180～280]
+│   │   │   └── DialogueEntry、ActionEntry、Link、Recipient、Request
+│   │   ├── entry_storage.py
+│   │   │   [NEW · M3.1 · +320～480]
+│   │   │   └── ORM、Entry append、recipient/request 窄查询
+│   │   ├── affordances.py
+│   │   │   [NEW · M3.1 · +120～200]
+│   │   │   └── 无副作用的 operation 解析和确定性 ID
+│   │   ├── storage.py
+│   │   │   [UPDATE · M3.1/M3.2 · +80～140]
+│   │   │   └── World CAS、Object 精确写入；继续复用现有 load()
+│   │   ├── updater.py
+│   │   │   [NEW · M3.2 · +300～450]
+│   │   │   └── WorldChangeValidator、WorldUpdatePlan/Result、WorldUpdater
+│   │   ├── view_builder.py
+│   │   │   [NEW · M3.3 · +220～350]
+│   │   │   └── committed public rows → strict AgentView
+│   │   └── __init__.py
+│   │       [UPDATE · M3.1/M3.3 · +10～25]
+│   │       └── 导出稳定公共 contract
+│   │
+│   ├── agent/
+│   │   ├── memory/
+│   │   │   ├── contracts.py
+│   │   │   │   [UPDATE · M3.2 · +5～15]
+│   │   │   │   └── MemoryRecord.source_entry_id
+│   │   │   ├── stream.py
+│   │   │   │   [UPDATE · M3.2 · +1～5]
+│   │   │   │   └── touch 重建 Memory 时保留 source_entry_id
+│   │   │   └── storage.py
+│   │   │       [UPDATE · M3.1/M3.2 · +80～140]
+│   │   │       └── ORM 新列、单 Agent load、append、touch
+│   │   │
+│   │   └── personact/
+│   │       ├── state.py
+│   │       │   [UPDATE · M3.2 · +20～45]
+│   │       │   └── PersonActStateUpdate、PlanDisposition
+│   │       ├── storage.py
+│   │       │   [UPDATE · M3.1/M3.2 · +90～150]
+│   │       │   └── cursor/last decision 持久化和 revision CAS
+│   │       ├── proposal.py
+│   │       │   [UPDATE · M3.1 · +35～65 / -10～20]
+│   │       │   └── affordance、reply、channel 完整匹配
+│   │       ├── loop.py
+│   │       │   [UPDATE · M3.2/M3.3 · +30～60 / -5～15]
+│   │       │   └── plan disposition、MemoryTouch、source_entry_id
+│   │       └── agent.py
+│   │           [UPDATE · M3.2/M3.4 · +40～80 / -5～20]
+│   │           └── disposable work-unit 和 observe_outcome
+│   │
+│   ├── event/
+│   │   ├── character_step.py
+│   │   │   [NEW · M3.4 · +180～300]
+│   │   │   └── 唯一单步协调入口
+│   │   └── __init__.py
+│   │       [UPDATE · M3.4 · +5～15]
+│   │
+│   └── model_smoke.py
+│       [UPDATE · M3.1 · +5～15]
+│       └── 适配新的 Proposal/Affordance contract
+│
+├── projects/
+│   └── for-the-band/
+│       └── scenario.yaml
+│           [UPDATE · M3.1 · +6～20]
+│           └── seed version 与 metronome stopped→running operation
+│
+├── agent_runtime/tests/
+│   ├── m3_support.py
+│   │   [NEW · M3.1–M3.4 · +180～280]
+│   │   └── 共用临时 DB、seed、Fake strategy、fault checkpoint
+│   ├── test_event_entries.py
+│   │   [NEW · M3.1 · +350～550]
+│   ├── test_world_updater.py
+│   │   [NEW · M3.2 · +450～700]
+│   ├── test_agent_view_builder.py
+│   │   [NEW · M3.3 · +350～550]
+│   ├── test_character_step.py
+│   │   [NEW · M3.4 · +400～650]
+│   ├── test_project_database.py
+│   │   [UPDATE · M3.1 · +100～170]
+│   ├── test_agent_storage.py
+│   │   [UPDATE · M3.1/M3.2 · +80～140]
+│   ├── test_scenario.py
+│   │   [UPDATE · M3.1 · +60～100]
+│   ├── test_bootstrap.py
+│   │   [UPDATE · M3.1/M3.2 · +35～70]
+│   ├── test_memory.py
+│   │   [UPDATE · M3.2 · +10～25]
+│   ├── test_personact.py
+│   │   [UPDATE · M3.1/M3.2 · +40～80]
+│   ├── test_personact_agent.py
+│   │   [UPDATE · M3.2/M3.3 · +30～60]
+│   ├── test_model_strategy.py
+│   │   [UPDATE · M3.1/M3.2 · +15～30]
+│   ├── test_model_provider.py
+│   │   [UPDATE · M3.1 · +5～15]
+│   ├── test_trace_model.py
+│   │   [UPDATE · M3.1 · +5～15]
+│   ├── test_trace_personact.py
+│   │   [UPDATE · M3.1/M3.2 · +10～25]
+│   ├── test_persona_state.py
+│   │   [UPDATE · M3.2/M3.3 · +5～15]
+│   └── test_model_smoke.py
+│       [UPDATE · M3.1 · +5～15]
+│
+├── README.md
+│   [UPDATE · M3.4 · +8～20]
+│   └── 删除“World Commit 尚未实现”的过期描述
+│
+└── wiki/
+    ├── design/dev_plan_MVP.md
+    │   [UPDATE · 每阶段仅维护状态和证据]
+    ├── design/M3_dev_log.md
+    │   [UPDATE · 实际文件、LOC、测试、Review 记录]
+    ├── index.md
+    │   [UPDATE · 状态索引]
+    └── log.md
+        [UPDATE · 简短开发记录]
+```
+
+预计修改量：
+
+| 范围 | 预计规模 |
+|---|---:|
+| 生产 Python，不含 migration | `+1,800～3,100` 行 |
+| Alembic 0002 | `+430～600` 行 |
+| Python 测试 | `+2,100～3,550` 行 |
+| Scenario Fixture | `+6～20` 行 |
+| README/Wiki | 控制在约 `100` 行以内 |
+| 总代码与测试 | 约 `+4,330～7,250` 行 |
+
+现有 M3 文档原先的生产代码汇总数字算错了，也漏了 `memory/stream.py`、`test_memory.py`、`test_model_provider.py`、`test_trace_model.py`。正式开工时会先把这些漏项和 LOC 口径纠正到 `M3_dev_log.md`。
+
+本阶段预计不增加依赖，不修改：
+
+```text
+pyproject.toml
+uv.lock
+agent_runtime/model_gateway.py
+agent_runtime/sqlite.py
+agent_runtime/world/initializer.py
+```
+
+`model_strategy.py` 的 Pydantic Schema 会自动传播，默认不修改；只有测试证明提示词需要补充语义时，允许最多约 8 行的小改动，并在日志说明原因。
+
+### 四、测试目标
+
+| 阶段 | 核心测试目标 |
+|---|---|
+| M3.1 | strict/frozen Entry union；未知字段拒绝；commit position/source 唯一；复合 World FK；append-only；reply/cause 不能向未来或成环；request 只能 pending→resolved；stable affordance；非法 operation 和自由文本状态修改失败；Project/World 隔离 |
+| M3.2 | Validator 无写入；四种结果语义；World/Persona 双 CAS；事务内没有模型/Embedding；在 World/Object/Entry/Request/Persona/Memory 每个 checkpoint 注错都全部回滚；重复提交不重复 Entry |
+| M3.3 | actor/target/同 root 旁听者/其他 root/whisper 的表驱动矩阵；pending request 不因 cursor 丢失；隐藏 link 不泄漏；未提交内容不可见；旧 version 拒绝；Builder 不读取私有 Memory |
+| M3.4 | Anon utter→Soyo mandatory respond；request 解决；metronome operation；关闭 Engine 重载；立即重试幂等；错误 Project/World、paused、stale proposal 无半写入 |
+
+每个子阶段先跑对应专项：
+
+```bash
+uv run pytest agent_runtime/tests/test_event_entries.py
+uv run pytest agent_runtime/tests/test_world_updater.py
+uv run pytest agent_runtime/tests/test_agent_view_builder.py
+uv run pytest agent_runtime/tests/test_character_step.py
+```
+
+M3 阶段末统一门禁：
+
+```bash
+uv run ruff format --check agent_runtime
+uv run ruff check agent_runtime
+uv run pyright
+uv run pytest
+npm test
+git diff --check
+```
+
+此外必须在临时数据库测试：
+
+- Alembic `0001 → 0002 → 0001 → 0002`。
+- ORM metadata 与 migration schema 一致。
+- migration 中途失败可以回滚。
+- 构建 wheel 后，`0002` migration 确实包含在包内。
+- 关闭 Engine 后重新连接，公共状态、Entry、request、PersonaState、Memory、cursor 全部相同。
+
+M2 文档里的 `367 passed / Node 14 passed` 只能作为历史基线，不能算 M3 的测试结果。
+
+### 五、开工前需要冻结的设计点
+
+我建议按以下默认值开发：
+
+1. 一个 Proposal 最多提交一个 EventEntry。
+2. Object 状态只能通过 Scenario 注册 operation 修改；模型文本不能直接修改状态。
+3. direct 对 commit 时同 root 成员可见；whisper 仅 actor+target。
+4. 只有 `expects_response=true` 创建 request；任何有效 Respond 都将它解决。角色台词上的“拒绝”仍然只是回应，不增加 `declined` Runtime 状态。
+5. 每步使用从 committed DB 构造的 disposable PersonActAgent；DB 是唯一权威。
+6. M3 不推进故事时间；多个对话可以共享同一个 `world_time`。跳时留给 M4/M5。
+7. `decision_id == proposal_id == EventEntry.source_id`，三者使用同一个稳定 ID，避免多套身份映射。
+8. observation cursor 使用可空的 `CommitPosition`；Genesis 为 `None`，不用伪造 `(0, -1)`。未解决 request 独立召回，不受 cursor 影响。
+9. 我建议把文档中的 `scheduler_seq` 改名为 `decision_seq`。它在 M3 统计的是所有成功接受的决策，包括 wait/no-op；此时根本还没有 Scheduler，`decision_seq` 更准确。
+10. 不新增完整 decision 历史表：已落 Entry 的历史重试由 source 唯一键保证；最新 wait/no-op 可以返回已保存结果；更早的无 Entry 决策重放按 stale 拒绝。这样不为一个边缘恢复场景再造第二份日志。
+
+### 六、提交与 Review 节奏
+
+Review 通过后，我会按以下顺序开发：
+
+```text
+1. design baseline
+   修正当前 M3_dev_log 的漏项、LOC 和 decision_seq 命名
+
+2. feat(M3.1)
+   Entry contracts + SQLite schema + operation + 专项测试
+
+3. feat(M3.2)
+   Validator/Updater + private CAS + failure injection 测试
+
+4. feat(M3.3)
+   AgentViewBuilder + 可见性矩阵测试
+
+5. feat(M3.4)
+   CharacterStep + 端到端/reload/replay 测试
+
+6. stage gate
+   全量 Python/Node/lint/type/migration/wheel 检查
+   回填实际 LOC、测试数量、提交 SHA 和遗留项
+```
+
+每个 M3.x 都会保持“实现、测试、对应 dev log 证据”在同一个 Review 单元里。不会顺手实现 M4 Scheduler、UnionPart 更新、Director、Broadcast、StoryLine 或 WebGAL 导出。
+
+你重点 Review 上面的 10 个冻结点即可；如果这些默认值没有异议，我就按这份文件树和 M3.1 → M3.4 的顺序开工。
+
+---
 
 ## 1. M3 的完成边界
 
@@ -211,8 +664,8 @@ Plan disposition 不进入 `ActionProposal`，也不交给 World 解释。只有
 ```text
 1. UPDATE worlds ... WHERE
      world_id/project_id/status=running/control_epoch/
-     current_version/scheduler_seq 全部等于读取值
-   -> scheduler_seq +1；仅 applied 时 current_version +1
+     current_version/decision_seq 全部等于读取值
+   -> decision_seq +1；仅 applied 时 current_version +1
 2. 应用受限的 Object 当前状态变化（无任意 JSON patch）
 3. 插入 EventEntry / link / recipient；创建或解决 request
 4. UPDATE agent_runtime_states ... WHERE state_revision=R
@@ -223,7 +676,7 @@ Plan disposition 不进入 `ActionProposal`，也不交给 World 解释。只有
 
 任一步失败，1–5 全部回滚。`WorldUpdater` 不自行开启或提交 transaction，也不导入 PersonaState/Memory；它是唯一公共 World writer。`CharacterStep` 是唯一同时持有 World Store 与 Agent private Store 的跨域协调点。
 
-`worlds` 在 M3 增加 `control_epoch` 与 `scheduler_seq`；`AgentView/ActionProposal` 携带读取时的 epoch，写入计划同时携带 scheduler sequence。M3 Fixture 通过受信测试准备把 World 置为 running；正式的 `resume_world/pause_and_save`、运行锁和额度属于 M4，不能为了单步测试开放 paused World 写入。
+`worlds` 在 M3 增加 `control_epoch` 与 `decision_seq`；`AgentView/ActionProposal` 携带读取时的 epoch，写入计划同时携带 decision sequence。M3 Fixture 通过受信测试准备把 World 置为 running；正式的 `resume_world/pause_and_save`、运行锁和额度属于 M4，不能为了单步测试开放 paused World 写入。
 
 <a id="m3-3"></a>
 
@@ -321,7 +774,7 @@ generative_go_world/
 │   │   │     source_event_id/event_revision -> source_entry_id
 │   │   ├── state.py
 │   │   │   [UPDATE · M3.2 · +20～40]
-│   │   │   — WorldState 增加 control_epoch/scheduler_seq，不增加 Snapshot 历史
+│   │   │   — WorldState 增加 control_epoch/decision_seq，不增加 Snapshot 历史
 │   │   ├── entries.py
 │   │   │   [NEW · M3.1 · +230～340]
 │   │   │   — DialogueEntry/ActionEntry 判别联合、Link、Recipient、Request contract
@@ -444,9 +897,9 @@ generative_go_world/
 
 旧分支和当前分支没有共同 Git 祖先，因此复用表示按当前 contract 重写机制并保留测试意图，不表示复制 package、schema 或整体 merge。
 
-## 9. 开工前 Review 的六个冻结点
+## 9. 已批准的六个领域冻结点
 
-以下是当前推荐默认值。在用户 Review 通过前，它们仍是 M3 设计草案：
+以下默认值已于 2026-09-11 随开工方案获准，并作为本轮实现边界：
 
 1. **一次一个 Entry。**M3 一个 Proposal 最多产生一条 committed Entry，因此 `source_index=0 / entry_index=0`；多 Entry 原子步骤等真实场景证明需要后再开放。
 2. **Scenario operation。**Object operation 使用 Scenario 的 `operation_id/from_state/to_state/result_text`；不建 Affordance 表，不允许自由文本修改对象状态。
@@ -459,14 +912,14 @@ generative_go_world/
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M3.1 | strict EventEntry/link/recipient/request；稳定 operation/affordance；Alembic 0002 与 Store | 两层 World 隔离；source/position 唯一；复合 FK；append-only；reply DAG；Scenario operation 不接受任意 patch | TODO · DESIGN REVIEW |
-| M3.2 | WorldChangeValidator/WorldUpdater；Agent private update；World/Agent/decision 同事务 | SQL CAS；applied/not_applied/wait/no_op；state revision；事务内不调用模型；逐 checkpoint 全回滚 | TODO · DESIGN REVIEW |
-| M3.3 | AgentViewBuilder 与历史 recipient/request 可见性 | actor/target/旁听/另一 root/whisper 参数化矩阵；隐藏 link 不泄漏；pending request 不因 cursor 丢失；调用顺序无关 | TODO · DESIGN REVIEW |
-| M3.4 | CharacterStep 与 utter→respond、Object operation 可重载 Fixture | 关闭连接重载一致；相同 decision/source 不重复；错 World、paused、stale 全丢弃；M4 可直接复用单步路径 | TODO · DESIGN REVIEW |
+| M3.1 | strict EventEntry/link/recipient/request；稳定 operation/affordance；Alembic 0002 与 Store | 两层 World 隔离；source/position 唯一；复合 FK；append-only；reply DAG；Scenario operation 不接受任意 patch | REVIEW · [实现与验收](#12-实现与验收记录) |
+| M3.2 | WorldChangeValidator/WorldUpdater；Agent private update；World/Agent/decision 同事务 | SQL CAS；applied/not_applied/wait/no_op；state revision；事务内不调用模型；逐 checkpoint 全回滚 | REVIEW · [实现与验收](#12-实现与验收记录) |
+| M3.3 | AgentViewBuilder 与历史 recipient/request 可见性 | actor/target/旁听/另一 root/whisper 参数化矩阵；隐藏 link 不泄漏；pending request 不因 cursor 丢失；调用顺序无关 | REVIEW · [实现与验收](#12-实现与验收记录) |
+| M3.4 | CharacterStep 与 utter→respond、Object operation 可重载 Fixture | 关闭连接重载一致；相同 decision/source 不重复；错 World、paused、stale 全丢弃；M4 可直接复用单步路径 | REVIEW · [实现与验收](#12-实现与验收记录) |
 
 ## 11. 阶段门禁
 
-M3 只有在以下证据全部取得后才能由 DESIGN REVIEW/TODO 改为 DONE：
+M3 只有在以下证据全部取得后才能进入实现 Review；用户确认并完成约定的提交交接后才改为 DONE：
 
 - M3 专项测试覆盖 Entry、Updater、AgentViewBuilder 和 CharacterStep；
 - 完整 Python suite 通过；
@@ -483,13 +936,123 @@ M3 只有在以下证据全部取得后才能由 DESIGN REVIEW/TODO 改为 DONE�
 
 ## 12. 实现与验收记录
 
-**尚未开始。**
+### 12.1 交付结论
 
-Review 通过并进入实现后，本节原位记录：
+M3.1–M3.4 已全部实现并通过自动门禁，当前状态为 `REVIEW · uncommitted worktree`。现在可以从 Project SQLite 的 committed snapshot 为一个角色构造 `AgentView`，在写事务外执行一次 disposable `PersonActAgent` 决策，再把公共 World、`EventEntry`、request、PersonaState 与 Memory 原子提交；进程关闭后可从数据库恢复一致结果。
 
-- M3.1–M3.4 的实际完成状态与 commit/PR；
-- 实际文件树、真实新增/删除行数及与预计范围的差异；
-- 专项与全量测试命令、通过数量和耗时；
-- Alembic、wheel、Node 与 `git diff --check` 结果；
-- 独立 Review 发现、修复和仍未解决的问题；
-- M4 接手 CharacterStep、调度字段与 EventSession 运行闭环时必须遵守的边界。
+四个工作单元的实际结果：
+
+- **M3.1：**新增 strict/frozen `DialogueEntry`、`ActionEntry`、link、recipient 与 response request；Scenario Object operation、稳定 affordance、Alembic `0002`、append-only trigger 和 World-scoped Store 已落地。
+- **M3.2：**`WorldChangeValidator` 生成纯 `WorldUpdatePlan`，`WorldUpdater` 只在调用方事务内写公共状态；`applied / not_applied / wait / no_op` 分权、World/Object/Persona CAS、Memory provenance 与六个 checkpoint 全回滚已落地。
+- **M3.3：**`AgentViewBuilder` 按提交时 recipient snapshot、当前 root、地点与 pending request 构造视图；direct、whisper、其他 root、隐藏 link、cursor 越过未回应请求等边界已覆盖。
+- **M3.4：**`CharacterStep` 成为唯一单步入口；utter→mandatory respond→request resolved、Object operation、幂等 replay、paused/stale/错身份、失败重试与关闭 Engine 后重载均已跑通。
+
+M3 仍然不是持续多 Agent Runtime：Scheduler、公平轮转、故事时间推进、50 轮约束、EventSession merge/split、Director、Broadcast、StoryLine 与 WebGAL 导出均未提前实现。
+
+### 12.2 实际修改文件树
+
+`NEW` 为新增，`UPDATE` 为完善现有文件。以下列出 M3 实际代码范围；本节不重复上方实现前预计树。
+
+```text
+generative_go_world/
+├── agent_runtime/
+│   ├── migrations/
+│   │   ├── env.py                                      [UPDATE · M3 ORM 注册]
+│   │   └── versions/0002_m3_event_entries.py           [NEW · M3 schema/trigger/downgrade]
+│   ├── scenario.py                                     [UPDATE · ObjectOperationSeed]
+│   ├── bootstrap.py                                    [UPDATE · object_seeds 装配]
+│   ├── world/
+│   │   ├── contracts.py                                [UPDATE · fence/affordance/view/proposal contract]
+│   │   ├── state.py                                    [UPDATE · control_epoch/decision_seq]
+│   │   ├── storage.py                                  [UPDATE · World/Object CAS 与可达性重查]
+│   │   ├── entries.py                                  [NEW · EventEntry 领域模型]
+│   │   ├── entry_storage.py                            [NEW · Entry/recipient/request Store]
+│   │   ├── affordances.py                              [NEW · 稳定操作解析]
+│   │   ├── updater.py                                  [NEW · Validator/Plan/Updater]
+│   │   └── view_builder.py                             [NEW · AgentViewBuilder]
+│   ├── agent/
+│   │   ├── memory/
+│   │   │   ├── contracts.py                            [UPDATE · source_entry_id]
+│   │   │   ├── stream.py                               [UPDATE · immutable replay support]
+│   │   │   └── storage.py                              [UPDATE · append/touch/provenance]
+│   │   └── personact/
+│   │       ├── __init__.py                             [UPDATE · outcome contract export]
+│   │       ├── agent.py                                [UPDATE · observe_outcome]
+│   │       ├── loop.py                                 [UPDATE · private update/provenance]
+│   │       ├── proposal.py                             [UPDATE · M3 ActionProposal]
+│   │       ├── state.py                                [UPDATE · DecisionOutcome/StateUpdate]
+│   │       └── storage.py                              [UPDATE · Persona CAS/cursor/receipt]
+│   ├── event/
+│   │   ├── __init__.py                                 [UPDATE · CharacterStep export]
+│   │   └── character_step.py                           [NEW · 单步协调入口]
+│   ├── model_smoke.py                                  [UPDATE · 新 contract Fixture]
+│   └── tests/
+│       ├── test_event_entries.py                       [NEW · M3.1]
+│       ├── test_world_updater.py                       [NEW · M3.2]
+│       ├── test_agent_view_builder.py                  [NEW · M3.3]
+│       ├── test_character_step.py                      [NEW · M3.4]
+│       ├── test_project_database.py                    [UPDATE · 0002/metadata/rollback]
+│       ├── test_agent_storage.py                       [UPDATE · Persona/Memory Store]
+│       ├── test_personact.py                           [UPDATE · outcome/private update]
+│       ├── test_personact_agent.py                     [UPDATE · disposable Agent]
+│       ├── test_scenario.py                            [UPDATE · operation/hash]
+│       └── test_{bootstrap,memory,model_provider,
+│                   model_smoke,model_strategy,persona_state,
+│                   trace_model,trace_personact}.py     [UPDATE · contract migration]
+├── projects/for-the-band/scenario.yaml                 [UPDATE · metronome operation Fixture]
+└── README.md                                           [UPDATE · 当前能力边界]
+```
+
+预计但未创建 `tests/m3_support.py`：Fixture 保留在各专项测试内，避免为四个测试文件提前建立共享抽象。`world/__init__.py` 未增加 eager import，以免 `scenario` 与 `world` 形成循环；`model_strategy.py` 无需修改，Pydantic Schema 已自动传播。
+
+实际 diff（不含 Wiki）：
+
+| 分类 | 新增 | 删除 |
+| --- | ---: | ---: |
+| Runtime Python，不含 migration revision | 3,463 | 48 |
+| Migration（`env.py` + `0002`） | 463 | 0 |
+| Python tests | 3,471 | 86 |
+| Scenario Fixture | 6 | 1 |
+| 合计 | 7,403 | 135 |
+
+Runtime 比预计上限多 163 行，主要来自独立 Review 后增加的 recipient/topology 写边界、Scenario operation 二次校验、Object 同地点重查、fence-bound decision ID 和历史 replay 位置语义；没有增加新的通用 Service/Repository 层。
+
+### 12.3 独立 Review 修复
+
+实现后进行了两轮独立只读 Review，并修复以下问题：
+
+1. `EventEntryStore.append` 在落行前验证精确 recipient snapshot：direct/action 必须等于当前 root 全体，whisper 必须恰好为 actor+target；参与者、root 与 topology version 必须一致。
+2. `WorldUpdater` 不只相信 Plan 内的 Object patch：再次核对 operation/from/to/result text 属于经 seed hash 钉住的 Scenario catalog，并在 World CAS 前重查 actor 与 Object 仍在同一地点，随后再做 Object state CAS。
+3. 任意字符串 decision ID 无法在“不建完整 decision history”的前提下识别较早的无 Entry 重放，因此新增 `CharacterStep.next_decision_id()`：ID 确定性绑定 `project/world/agent/world_version/control_epoch/decision_seq`。读取顺序为历史 applied Entry replay → 最新无 Entry receipt replay → 当前 fence 校验；旧 wait/no-op、跨 Agent 复用在 Memory/View/模型前拒绝，事务回滚后同 ID 仍可重试。
+4. `WorldUpdateResult.current_world_version/current_decision_seq` 明确表示查询时当前 World；`entry_position` 单独保留历史 applied Entry 的原提交位置，后续提交不会改写该语义。
+5. Replay 查询提前到 Memory/View 构建前；输入 ID 统一 trim，非字符串与空字符串映射为明确 `CharacterStepError`。
+6. 增加真正从 `0001` 升级 `0002` 途中注错的迁移测试，证明已创建的 M3 表和新增 World 列会整体回滚，不只验证空数据库首次迁移失败。
+
+可信边界保持为：`WorldUpdatePlan` 是 Runtime 内部 typed capability，不是外部 API 输入；`object_seeds` 必须来自 seed hash 校验后的 `LoadedWorld`，不能由模型或请求方替换。产品写路径必须通过 `CharacterStep` 的事务作用域，不能捕获 `WorldUpdater` 异常后继续提交同一事务。
+
+### 12.4 自动验收证据
+
+2026-09-11 最终工作区验证：
+
+| 门禁 | 结果 |
+| --- | --- |
+| M3 专项 | `test_event_entries.py` 7、`test_world_updater.py` 15、`test_agent_view_builder.py` 20、`test_character_step.py` 21；合计 63 tests 通过 |
+| M3 + Project DB/migration 专项 | 88 tests 通过 |
+| 完整 Python | `442 passed in 11.51s` |
+| Ruff format/check | 70 files 已格式化；lint 通过 |
+| Pyright strict | `0 errors, 0 warnings` |
+| Alembic | `0001 → 0002 → 0001 → 0002`、ORM metadata、`0002` 中途故障回滚均通过 |
+| Wheel | 最终 wheel 构建成功；包含 `character_step.py`、五个 World 新模块与 `0002_m3_event_entries.py` |
+| Node | `14 passed, 0 failed` |
+| Diff | `git diff --check` 通过；无冲突文件 |
+
+关键行为测试还包括六个 transaction checkpoint 全回滚、Object 移位与伪造 transition 拒绝、历史 applied replay、四种 outcome、旧无 Entry ID、跨 Agent ID、rollback 后同 ID 重试、Project/World 隔离以及关闭 Engine 后 paused reload。
+
+未执行真实 Provider 的自然对话品质测试；它不属于 M3 自动门禁。当前改动尚未 commit/push，待用户 Review 后再决定提交。
+
+### 12.5 M4 交接约束
+
+- M4 Runner 必须先取 `CharacterStep.next_decision_id(agent_id)`，再调用 `run(agent_id, decision_id)`；同一 fence 的并发计算允许重复模型开销，但 World CAS 保证只提交一次，失败方随后可 replay。
+- M4 不能在 `CharacterStep.run()` 已提交后另开事务保存 Scheduler 状态。`last_scheduled`、调度 cursor、wait/no-op wakeup、额度、公平轮转和必要的 Session 调度状态必须扩展进同一个写事务，否则崩溃恢复会产生歧义。
+- M4 引入 split/transfer 时必须定义 pending response 的去向，不能让角色离开原 root 后保留一个永远没有合法 respond affordance 的 mandatory request。
+- `WaitAction.next_wakeup` 在 M3 尚未持久化是有意边界；故事时间推进、Session topology 更新和连续运行由 M4 统一接手。

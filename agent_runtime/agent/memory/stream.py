@@ -175,6 +175,7 @@ def _touch_record(record: MemoryRecord, touch: MemoryTouch) -> MemoryRecord:
         poignancy=record.poignancy,
         tags=record.tags,
         source=record.source,
+        source_entry_id=record.source_entry_id,
         evidence_ids=record.evidence_ids,
         embedding=record.embedding,
         novelty_key=record.novelty_key,

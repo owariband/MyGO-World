@@ -14,7 +14,9 @@ from agent_runtime.model import StrictModel
 
 Identifier = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 WorldVersion = Annotated[int, Field(ge=1)]
-EventRevision = Annotated[int, Field(ge=1)]
+ControlEpoch = Annotated[int, Field(ge=1)]
+DecisionSequence = Annotated[int, Field(ge=0)]
+EntryIndex = Annotated[int, Field(ge=0)]
 Salience = Annotated[float, Field(ge=0.0, le=1.0)]
 
 
@@ -23,6 +25,13 @@ class WorldRef(StrictModel):
 
     project_id: Identifier
     world_id: Identifier
+
+
+class CommitPosition(StrictModel):
+    """Stable ordering of one committed Entry inside a World."""
+
+    world_version: WorldVersion
+    entry_index: EntryIndex = 0
 
 
 class ProposalKind(StrEnum):
@@ -52,6 +61,14 @@ class AttentionTier(StrEnum):
     AMBIENT = "ambient"
 
 
+class DeliveryChannel(StrEnum):
+    """How one Entry is delivered to its materialized recipients."""
+
+    DIRECT = "direct"
+    WHISPER = "whisper"
+    PUBLIC = "public"
+
+
 class CharacterTarget(StrictModel):
     """A character that the deciding Persona may address or interact with."""
 
@@ -75,8 +92,12 @@ InteractionTarget = Annotated[
 class Affordance(StrictModel):
     """One semantic action currently allowed by the committed world view."""
 
+    affordance_id: Identifier
     kind: ProposalKind
     target: InteractionTarget | None = None
+    operation_id: Identifier | None = None
+    delivery_channel: DeliveryChannel | None = None
+    request_entry_id: Identifier | None = None
 
     @model_validator(mode="after")
     def _validate_target(self) -> Self:
@@ -93,6 +114,37 @@ class Affordance(StrictModel):
             raise ValueError(f"{self.kind.value} affordance requires a character target")
         if self.kind not in targeted and self.target is not None:
             raise ValueError(f"{self.kind.value} affordance cannot carry a target")
+
+        if self.kind is ProposalKind.INTERACT:
+            if isinstance(self.target, ObjectTarget) and self.operation_id is None:
+                raise ValueError("object interact affordance requires an operationId")
+            if isinstance(self.target, CharacterTarget) and self.operation_id is not None:
+                raise ValueError("character interact affordance cannot carry an operationId")
+            if self.delivery_channel is not None or self.request_entry_id is not None:
+                raise ValueError("interact affordance cannot carry dialogue routing")
+        elif self.kind is ProposalKind.UTTER:
+            if self.delivery_channel not in {
+                DeliveryChannel.DIRECT,
+                DeliveryChannel.WHISPER,
+            }:
+                raise ValueError("utter affordance requires a direct or whisper channel")
+            if self.operation_id is not None or self.request_entry_id is not None:
+                raise ValueError("utter affordance cannot carry an operation or request source")
+        elif self.kind is ProposalKind.RESPOND:
+            if self.delivery_channel not in {
+                DeliveryChannel.DIRECT,
+                DeliveryChannel.WHISPER,
+            }:
+                raise ValueError("respond affordance requires a direct or whisper channel")
+            if self.request_entry_id is None:
+                raise ValueError("respond affordance requires a requestEntryId")
+            if self.operation_id is not None:
+                raise ValueError("respond affordance cannot carry an operation")
+        elif any(
+            value is not None
+            for value in (self.operation_id, self.delivery_channel, self.request_entry_id)
+        ):
+            raise ValueError(f"{self.kind.value} affordance cannot carry routing details")
         return self
 
 
@@ -107,18 +159,11 @@ class PerceptCandidate(StrictModel):
     object: Identifier | None = None
     content: Identifier
     salience: Salience
-    source_event_id: Identifier | None = None
-    event_revision: EventRevision | None = None
+    source_entry_id: Identifier | None = None
     visible_fields: tuple[Identifier, ...] = ()
     tags: tuple[Identifier, ...] = ()
     source_fact_refs: tuple[Identifier, ...] = ()
     source_info_refs: tuple[Identifier, ...] = ()
-
-    @model_validator(mode="after")
-    def _validate_event_identity(self) -> Self:
-        if (self.source_event_id is None) != (self.event_revision is None):
-            raise ValueError("sourceEventId and eventRevision must be provided together")
-        return self
 
 
 class AgentView(StrictModel):
@@ -128,11 +173,26 @@ class AgentView(StrictModel):
     agent_id: Identifier
     event_session_id: Identifier
     based_on_world_version: WorldVersion
+    based_on_control_epoch: ControlEpoch
+    based_on_decision_seq: DecisionSequence
     current_location_id: Identifier
     world_time: AwareDatetime | None = None
+    observed_through: CommitPosition | None = None
     candidates: tuple[PerceptCandidate, ...] = ()
     visible_evidence_ids: tuple[Identifier, ...] = ()
     affordances: tuple[Affordance, ...]
+
+    @model_validator(mode="after")
+    def _validate_snapshot(self) -> Self:
+        if (
+            self.observed_through is not None
+            and self.observed_through.world_version > self.based_on_world_version
+        ):
+            raise ValueError("observedThrough cannot be newer than the Agent view")
+        affordance_ids = tuple(item.affordance_id for item in self.affordances)
+        if len(affordance_ids) != len(set(affordance_ids)):
+            raise ValueError("Agent view affordance ids must be unique")
+        return self
 
 
 ActionText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
@@ -145,20 +205,25 @@ class ActAction(StrictModel):
 
 class InteractAction(StrictModel):
     kind: Literal["interact"] = "interact"
+    affordance_id: Identifier
     target: InteractionTarget
     description: ActionText
 
 
 class UtterAction(StrictModel):
     kind: Literal["utter"] = "utter"
+    affordance_id: Identifier
     target: CharacterTarget
     content: ActionText
+    expects_response: bool
 
 
 class RespondAction(StrictModel):
     kind: Literal["respond"] = "respond"
+    affordance_id: Identifier
     target: CharacterTarget
     content: ActionText
+    in_reply_to_entry_id: Identifier
 
 
 class WaitAction(StrictModel):
@@ -186,5 +251,7 @@ class ActionProposal(StrictModel):
     agent_id: Identifier
     event_session_id: Identifier
     based_on_world_version: WorldVersion
+    based_on_control_epoch: ControlEpoch
+    based_on_decision_seq: DecisionSequence
     action: AgentAction
     evidence_ids: tuple[Identifier, ...] = ()

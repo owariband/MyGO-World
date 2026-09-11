@@ -1,11 +1,13 @@
 """Private, immutable cognitive state for one PersonAct agent."""
 
+from enum import StrEnum
 from typing import Annotated, Self
 
 from pydantic import AwareDatetime, Field, StringConstraints, model_validator
 
+from agent_runtime.agent.memory import MemoryRecord, MemoryTouch
 from agent_runtime.model import StrictModel
-from agent_runtime.world.contracts import Identifier, WorldRef, WorldVersion
+from agent_runtime.world.contracts import CommitPosition, Identifier, WorldRef, WorldVersion
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 PositiveCount = Annotated[int, Field(ge=1)]
@@ -32,6 +34,23 @@ class PlanItem(StrictModel):
 
     plan_id: Identifier
     description: NonEmptyText
+
+
+class PlanDisposition(StrEnum):
+    """How one private plan changes after the World reports an outcome."""
+
+    KEEP = "keep"
+    COMPLETE_ON_APPLIED = "complete_on_applied"
+    CANCEL = "cancel"
+
+
+class DecisionOutcome(StrEnum):
+    """World outcome retained with the latest durable Persona decision."""
+
+    APPLIED = "applied"
+    NOT_APPLIED = "not_applied"
+    WAIT = "wait"
+    NO_OP = "no_op"
 
 
 class PersonaState(StrictModel):
@@ -63,3 +82,29 @@ class PersonaState(StrictModel):
             (item for item in self.plan_queue if item.plan_id == self.active_plan_id),
             None,
         )
+
+
+class PersonActStateUpdate(StrictModel):
+    """Private values staged with one accepted World decision."""
+
+    world_ref: WorldRef
+    agent_id: Identifier
+    decision_id: Identifier
+    outcome: DecisionOutcome
+    state: PersonaState
+    memory_writes: tuple[MemoryRecord, ...] = ()
+    memory_touches: tuple[MemoryTouch, ...] = ()
+    observation_cursor: CommitPosition | None = None
+    plan_disposition: PlanDisposition = PlanDisposition.KEEP
+
+    @model_validator(mode="after")
+    def _validate_owners(self) -> Self:
+        if self.state.world_ref != self.world_ref or self.state.agent_id != self.agent_id:
+            raise ValueError("PersonaState update ownership does not match its envelope")
+        for record in self.memory_writes:
+            if record.world_ref != self.world_ref or record.agent_id != self.agent_id:
+                raise ValueError("Memory write ownership does not match its Persona update")
+        for touch in self.memory_touches:
+            if touch.world_ref != self.world_ref or touch.agent_id != self.agent_id:
+                raise ValueError("Memory touch ownership does not match its Persona update")
+        return self

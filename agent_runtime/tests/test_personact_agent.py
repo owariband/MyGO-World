@@ -54,9 +54,18 @@ from agent_runtime.world.contracts import (
 )
 
 WORLD_REF = WorldRef(project_id="coffee-golden", world_id="save-001")
+AFFORDANCE_ID = "interact-soyo"
 NOW = datetime(2026, 8, 31, 9, 5, tzinfo=UTC)
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
 SKILLS_PATH = Path(__file__).parents[2] / "content" / "skills"
+
+
+def _talk_action() -> InteractAction:
+    return InteractAction(
+        affordance_id=AFFORDANCE_ID,
+        target=CharacterTarget(id="soyo"),
+        description="talk",
+    )
 
 
 @dataclass(slots=True)
@@ -124,13 +133,14 @@ def test_decide_runs_real_cognition_and_returns_direct_action_proposal() -> None
             object_="ready",
             tags=("coffee",),
             content="Coffee is ready.",
-            novelty_key='["ready-event",1,["owner","status"]]',
+            novelty_key='["ready-event",["owner","status"]]',
         ),
     )
     stage_log: list[str] = []
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="ask Soyo about the coffee",
             ),
@@ -148,6 +158,7 @@ def test_decide_runs_real_cognition_and_returns_direct_action_proposal() -> None
     assert proposal.action.target == CharacterTarget(id="soyo")
     assert proposal.model_dump(by_alias=True)["action"] == {
         "kind": "interact",
+        "affordanceId": AFFORDANCE_ID,
         "target": {"kind": "character", "id": "soyo"},
         "description": "ask Soyo about the coffee",
     }
@@ -213,10 +224,11 @@ def test_decide_runs_real_cognition_and_returns_direct_action_proposal() -> None
     )
 
 
-def test_novelty_uses_event_revision_and_sorted_visible_fields() -> None:
+def test_novelty_uses_immutable_entry_id_and_sorted_visible_fields() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="check the changed order",
             ),
@@ -268,6 +280,7 @@ def test_novelty_replay_is_idempotent_after_retention_window() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="check the order",
             ),
@@ -299,7 +312,7 @@ def test_novelty_replay_is_idempotent_after_retention_window() -> None:
             object_="ready",
             tags=("coffee",),
             content="Coffee is ready.",
-            novelty_key='["ready-event",1,["owner","status"]]',
+            novelty_key='["ready-event-1",["owner","status"]]',
         ),
         _record(
             "newer-unrelated",
@@ -339,6 +352,7 @@ def test_write_policy_off_keeps_novel_observation_without_writing_memory() -> No
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="notice without remembering",
             ),
@@ -403,6 +417,7 @@ def test_proposal_id_replay_is_cached_and_conflicting_view_is_rejected() -> None
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="talk once",
             )
@@ -454,6 +469,7 @@ def test_decide_rejects_world_version_regression_without_state_change() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="talk",
             )
@@ -498,6 +514,7 @@ def test_failed_proposal_does_not_advance_private_state_or_memory() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="unknown"),
                 description="reach outside the affordance",
             )
@@ -521,6 +538,7 @@ def test_agent_rejects_foreign_state_memory_and_view() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="talk",
             )
@@ -560,6 +578,7 @@ def test_decide_serializes_calls_for_one_agent() -> None:
     strategy = FixedStrategy(
         ProposalDraft(
             action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
                 target=CharacterTarget(id="soyo"),
                 description="talk",
             )
@@ -607,17 +626,23 @@ def test_decide_serializes_calls_for_one_agent() -> None:
     assert agent.state.reflection_new_memory_count == 1
 
 
-def test_percept_event_identity_requires_id_and_revision_together() -> None:
-    with pytest.raises(ValidationError, match="provided together"):
-        PerceptCandidate(
-            candidate_id="broken-event",
-            channel=PerceptionChannel.SAME_SCENE,
-            attention_tier=AttentionTier.AMBIENT,
-            subject="bell",
-            predicate="rings",
-            content="A bell rings.",
-            salience=0.5,
-            source_event_id="bell-event",
+def test_percept_entry_identity_is_one_immutable_reference() -> None:
+    candidate = PerceptCandidate(
+        candidate_id="bell-for-anon",
+        channel=PerceptionChannel.SAME_SCENE,
+        attention_tier=AttentionTier.AMBIENT,
+        subject="bell",
+        predicate="rings",
+        content="A bell rings.",
+        salience=0.5,
+        source_entry_id="bell-entry",
+    )
+
+    assert candidate.source_entry_id == "bell-entry"
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        PerceptCandidate.model_validate(
+            {**candidate.model_dump(by_alias=False), "event_revision": 2},
+            strict=True,
         )
 
 
@@ -632,9 +657,7 @@ def test_percept_event_identity_requires_id_and_revision_together() -> None:
 def test_world_mismatch_is_rejected_before_replay_and_cognition(
     foreign_ref: WorldRef, cached: bool
 ) -> None:
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     embeddings = FixedEmbeddingProvider()
     agent = PersonActAgent(_spec(), _state(), _memory(), strategy, embeddings, world_ref=WORLD_REF)
     request = DecisionRequest(proposal_id="same-id", view=_view())
@@ -662,9 +685,7 @@ def test_agent_constructor_rejects_mismatched_binding_without_side_effects(compo
     memory = _memory(world_ref=foreign) if component == "memory" else _memory()
     if component == "scope":
         memory = MemoryStream(world_ref=WORLD_REF, agent_id="anon", scope="another-scope")
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     embeddings = FixedEmbeddingProvider()
     with pytest.raises(DecisionInputError):
         PersonActAgent(spec, state, memory, strategy, embeddings, world_ref=WORLD_REF)
@@ -683,9 +704,7 @@ def test_agent_constructor_rejects_mismatched_binding_without_side_effects(compo
 def test_direct_loop_rejects_foreign_world_before_cognitive_nodes(
     component: str, foreign_ref: WorldRef
 ) -> None:
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     embeddings = FixedEmbeddingProvider()
     loop = PersonActLoop(
         spec=_spec(), strategy=strategy, embedding_provider=embeddings, world_ref=WORLD_REF
@@ -716,9 +735,7 @@ def test_direct_loop_rejects_foreign_world_before_cognitive_nodes(
 )
 def test_independent_worlds_can_reuse_all_internal_ids(second_ref: WorldRef) -> None:
     # Deliberately share a stateless strategy: provenance must not rely on current-world globals.
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     first = PersonActAgent(
         _spec(), _state(), _memory(), strategy, FixedEmbeddingProvider(), world_ref=WORLD_REF
     )
@@ -750,9 +767,7 @@ def test_independent_worlds_can_reuse_all_internal_ids(second_ref: WorldRef) -> 
 
 
 def test_private_json_reload_continues_queue_across_dates_without_replanning() -> None:
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     agent = PersonActAgent(
         _spec(), _state(), _memory(), strategy, FixedEmbeddingProvider(), world_ref=WORLD_REF
     )
@@ -783,9 +798,7 @@ def test_existing_plan_queue_selects_head_without_copying_or_dequeuing() -> None
         PlanItem(plan_id="coffee", description="get coffee"),
         PlanItem(plan_id="talk", description="talk to Soyo"),
     )
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     agent = PersonActAgent(
         _spec(),
         _state(plan_queue=plans),
@@ -813,9 +826,7 @@ def test_invalid_plan_cannot_publish_perception_writes_or_consume_proposal_id() 
             item = PlanItem(plan_id="duplicate", description="talk")
             return PlanDraft.model_construct(items=(item, item))
 
-    draft = ProposalDraft(
-        action=InteractAction(target=CharacterTarget(id="soyo"), description="talk")
-    )
+    draft = ProposalDraft(action=_talk_action())
     strategy = DuplicatePlanStrategy(draft)
     agent = PersonActAgent(
         _spec(), _state(), _memory(), strategy, FixedEmbeddingProvider(), world_ref=WORLD_REF
@@ -836,9 +847,7 @@ def test_invalid_plan_cannot_publish_perception_writes_or_consume_proposal_id() 
 
 @pytest.mark.parametrize("invalid_time", [None, NOW - timedelta(seconds=1)])
 def test_missing_or_regressing_world_time_has_no_effect(invalid_time: datetime | None) -> None:
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     embeddings = FixedEmbeddingProvider()
     agent = PersonActAgent(_spec(), _state(), _memory(), strategy, embeddings, world_ref=WORLD_REF)
     agent.decide(DecisionRequest(proposal_id="valid", view=_view()))
@@ -857,9 +866,7 @@ def test_missing_or_regressing_world_time_has_no_effect(invalid_time: datetime |
 
 @pytest.mark.parametrize("component", ["view_agent", "state_agent", "memory_agent", "memory_scope"])
 def test_direct_loop_rejects_foreign_agent_or_scope_before_cognition(component: str) -> None:
-    strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
-    )
+    strategy = FixedStrategy(ProposalDraft(action=_talk_action()))
     embeddings = FixedEmbeddingProvider()
     loop = PersonActLoop(
         spec=_spec(), strategy=strategy, embedding_provider=embeddings, world_ref=WORLD_REF
@@ -1004,6 +1011,8 @@ def _view(
         agent_id=agent_id,
         event_session_id="cafe",
         based_on_world_version=world_version,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=world_time,
         candidates=(
@@ -1012,14 +1021,14 @@ def _view(
                 AttentionTier.MANDATORY,
                 PerceptionChannel.SELF,
                 0.9,
-                source_event_id="self-event",
+                source_entry_id="self-event",
             ),
             _candidate(
                 "direct-soyo",
                 AttentionTier.MANDATORY,
                 PerceptionChannel.DIRECT_INTERACTION,
                 0.8,
-                source_event_id="direct-event",
+                source_entry_id="direct-event",
                 subject="soyo",
             ),
             _candidate(
@@ -1027,7 +1036,7 @@ def _view(
                 AttentionTier.MANDATORY,
                 PerceptionChannel.COMMITMENT_UPDATE,
                 0.7,
-                source_event_id="ready-event",
+                source_entry_id="ready-event",
                 visible_fields=("status", "owner"),
             ),
             _candidate("relevant-a", AttentionTier.RELEVANT, PerceptionChannel.SAME_SCENE, 0.9),
@@ -1035,7 +1044,13 @@ def _view(
             _candidate("ambient", AttentionTier.AMBIENT, PerceptionChannel.SAME_SCENE, 1.0),
         ),
         visible_evidence_ids=("direct-event", "ready-event"),
-        affordances=(Affordance(kind=ProposalKind.INTERACT, target=CharacterTarget(id="soyo")),),
+        affordances=(
+            Affordance(
+                affordance_id=AFFORDANCE_ID,
+                kind=ProposalKind.INTERACT,
+                target=CharacterTarget(id="soyo"),
+            ),
+        ),
     )
 
 
@@ -1052,6 +1067,8 @@ def _single_candidate_view(
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=world_version,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=world_time,
         candidates=(
@@ -1060,13 +1077,18 @@ def _single_candidate_view(
                 AttentionTier.MANDATORY,
                 PerceptionChannel.COMMITMENT_UPDATE,
                 1.0,
-                source_event_id="ready-event",
-                revision=revision,
+                source_entry_id=f"ready-event-{revision}",
                 visible_fields=visible_fields,
             ),
         ),
         visible_evidence_ids=("ready-event",),
-        affordances=(Affordance(kind=ProposalKind.INTERACT, target=CharacterTarget(id="soyo")),),
+        affordances=(
+            Affordance(
+                affordance_id=AFFORDANCE_ID,
+                kind=ProposalKind.INTERACT,
+                target=CharacterTarget(id="soyo"),
+            ),
+        ),
     )
 
 
@@ -1076,9 +1098,8 @@ def _candidate(
     channel: PerceptionChannel,
     salience: float,
     *,
-    source_event_id: str | None = None,
+    source_entry_id: str | None = None,
     subject: str = "coffee-42",
-    revision: int = 1,
     visible_fields: tuple[str, ...] = ("status",),
 ) -> PerceptCandidate:
     return PerceptCandidate(
@@ -1090,8 +1111,7 @@ def _candidate(
         object="ready",
         content=f"{candidate_id} happened",
         salience=salience,
-        source_event_id=source_event_id,
-        event_revision=revision if source_event_id is not None else None,
+        source_entry_id=source_entry_id,
         visible_fields=visible_fields,
         tags=("coffee", subject),
     )

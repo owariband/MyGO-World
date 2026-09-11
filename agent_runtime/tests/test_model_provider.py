@@ -128,8 +128,9 @@ def test_openai_wire_configuration_and_strict_tuple_parsing() -> None:
 def test_real_sdk_accepts_proposal_union_and_evidence_array() -> None:
     api = MockAPI(
         [
-            '{"action":{"kind":"utter","target":{"kind":"character","id":"soyo"},'
-            '"content":"Hi!"},"evidenceIds":["soyo-visible"]}'
+            '{"action":{"kind":"utter","affordanceId":"utter-soyo-direct",'
+            '"target":{"kind":"character","id":"soyo"},'
+            '"content":"Hi!","expectsResponse":false},"evidenceIds":["soyo-visible"]}'
         ]
     )
     with httpx.Client(transport=httpx.MockTransport(api.handle)) as client:
@@ -249,8 +250,9 @@ def test_model_override_is_rejected_before_http() -> None:
     [
         None,
         '{"action":{"kind":"utter"},"evidenceIds":[]}',
-        '{"action":{"kind":"utter","target":{"kind":"character","id":"tomori"},'
-        '"content":"Hi!"},"evidenceIds":["invisible-evidence"]}',
+        '{"action":{"kind":"utter","affordanceId":"smoke-utter-soyo-direct",'
+        '"target":{"kind":"character","id":"tomori"},'
+        '"content":"Hi!","expectsResponse":false},"evidenceIds":["invisible-evidence"]}',
     ],
 )
 def test_whole_agent_through_sdk_with_at_most_one_schema_or_semantic_repair(
@@ -260,8 +262,9 @@ def test_whole_agent_through_sdk_with_at_most_one_schema_or_semantic_repair(
     if bad_action is not None:
         responses.append(bad_action)
     responses.append(
-        '{"action":{"kind":"utter","target":{"kind":"character","id":"soyo"},'
-        '"content":"Hi!"},"evidenceIds":["soyo-greeting"]}'
+        '{"action":{"kind":"utter","affordanceId":"smoke-utter-soyo-direct",'
+        '"target":{"kind":"character","id":"soyo"},'
+        '"content":"Hi!","expectsResponse":false},"evidenceIds":["soyo-greeting"]}'
     )
     api = MockAPI(responses)
     with httpx.Client(transport=httpx.MockTransport(api.handle)) as client:

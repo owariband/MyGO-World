@@ -1,7 +1,7 @@
 # MVP 分阶段执行计划
 
-> 状态：M1、M2 已完成并推送；M3 详细设计草案已形成、尚未实现，等待用户 Review；M4–M7 尚未执行。
-> 更新日期：2026-09-09
+> 状态：M1、M2 已完成并推送；M3.1–M3.4 已实现并通过自动门禁，处于未提交 Review；M4–M7 尚未执行。
+> 更新日期：2026-09-11
 > 开发基线：`master@5d2f496`（M2，已推送）。
 > 设计依据：[MVP_dev.md](MVP_dev.md)。该文档解释模型与规则，本文负责执行顺序、review 单元、验收与进度追踪。
 
@@ -122,7 +122,7 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 ## M3. 单步世界与认知提交
 
-> 当前状态：**DESIGN REVIEW**。详细设计与 Review 入口统一维护在 [M3_dev_log.md](M3_dev_log.md)；本文不重复字段级 Schema、可见性矩阵、预计文件树和行数。
+> 当前状态：**REVIEW · uncommitted worktree**。实际实现、文件树、行数、独立 Review 与自动门禁统一维护在 [M3_dev_log.md](M3_dev_log.md#12-实现与验收记录)。
 
 **开发目标：** 证明“一次角色决策”能够基于同一 committed World 构造受限 AgentView，经校验后把公共结果、角色私有认知和决策完成位置原子落库，并可从数据库重建一致结果。M4 的持续 Runner 只复用这条单步路径，不再实现第二套提交逻辑。
 
@@ -132,10 +132,10 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M3.1 | EventEntry/link/recipient/request、稳定 operation/affordance、Alembic 0002 与 Store | commit position/source 幂等、复合外键、append-only、reply/cause 无环；自然语言 description 不能直接修改 Object | DESIGN REVIEW · [详细设计](M3_dev_log.md#m3-1) |
-| M3.2 | WorldChangeValidator/WorldUpdater、单 Agent State/Memory 增量与同事务提交 | status/epoch/version/state revision CAS；applied/not_applied/wait/no_op 分权；事务内不调用模型；任一点失败全回滚 | DESIGN REVIEW · [详细设计](M3_dev_log.md#m3-2) |
-| M3.3 | AgentViewBuilder 与 committed recipient/request 可见性 | actor/target/旁听/隔离 root/whisper 权限矩阵；隐藏 link 不泄漏；pending request 不因 observation cursor 前移而消失 | DESIGN REVIEW · [详细设计](M3_dev_log.md#m3-3) |
-| M3.4 | 唯一 CharacterStep：view → decide → validate/outcome → transaction → reload | utter→respond 与 Object operation Fixture；重复 decision/source 不重复；paused、stale、错 World 的工作副本不发布 | DESIGN REVIEW · [详细设计](M3_dev_log.md#m3-4) |
+| M3.1 | EventEntry/link/recipient/request、稳定 operation/affordance、Alembic 0002 与 Store | commit position/source 幂等、复合外键、append-only、reply/cause 无环；自然语言 description 不能直接修改 Object | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.2 | WorldChangeValidator/WorldUpdater、单 Agent State/Memory 增量与同事务提交 | status/epoch/version/state revision CAS；applied/not_applied/wait/no_op 分权；事务内不调用模型；任一点失败全回滚 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.3 | AgentViewBuilder 与 committed recipient/request 可见性 | actor/target/旁听/隔离 root/whisper 权限矩阵；隐藏 link 不泄漏；pending request 不因 observation cursor 前移而消失 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.4 | 唯一 CharacterStep：view → decide → validate/outcome → transaction → reload | utter→respond 与 Object operation Fixture；重复 decision/source 不重复；paused、stale、错 World 的工作副本不发布 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
 
 ### 必须保持的不变量
 
@@ -153,7 +153,7 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 严格按 **M3.1 → M3.2 → M3.3 → M3.4** 推进：先冻结可持久化事实与操作身份，再实现原子更新，然后补角色视图，最后串成唯一单步入口。详细 Schema、字段约束、可见性矩阵、带 `[NEW/UPDATE · M3.x]` 的文件树、预计代码量、`origin/mvp` 复用边界和六个开工冻结点均以 [M3_dev_log.md](M3_dev_log.md) 为唯一维护位置。
 
-**阶段门禁：** 单步 Fixture 能关闭连接后重建相同公共/私有结果；source 重试不重复 Entry；私语与隔离 root 不泄漏；stale/paused/错 epoch/错 World/错误 state revision 均无半提交；M3 专项测试、完整 Python 测试、Ruff、Pyright、Alembic upgrade/downgrade/metadata、wheel migration 资源和既有 Node 测试全部通过。实现后在同一份 `M3_dev_log.md` 原位补实际 diff、真实行数、测试与提交记录，全部门禁通过后才把本阶段改为 DONE。
+**阶段门禁：** 单步 Fixture 能关闭连接后重建相同公共/私有结果；source 重试不重复 Entry；私语与隔离 root 不泄漏；stale/paused/错 epoch/错 World/错误 state revision 均无半提交；M3 专项测试、完整 Python 测试、Ruff、Pyright、Alembic upgrade/downgrade/metadata、wheel migration 资源和既有 Node 测试全部通过。上述自动门禁已通过，证据见阶段日志；当前等待用户 Review，尚未 commit/push。
 
 ## M4. 自由互动与可恢复运行
 
@@ -258,4 +258,6 @@ git diff --check
 
 2026-09-09：完成 M3 代码现状、`origin/mvp@fe8fd22` 可复用机制与现行需求审计，形成本文 M3.1–M3.4 的详细设计、预计文件树和验收门禁；尚未实现 M3 代码。
 
-**下一工作单元：Review M3 的六个冻结点；通过后实现 M3.1。** 首个提交只处理 EventEntry、稳定 operation/affordance、Alembic 0002 与 Store，不提前混入持续 Runner、Director 或 Broadcast。
+2026-09-11：M3.1–M3.4 已实现并完成自动验收：M3 专项 63 项、完整 Python 442 项、Node 14 项通过，Ruff、Pyright、Alembic 往返/故障回滚、metadata、wheel 资源和 diff 检查均通过；独立 Review 修复记录与 M4 原子事务交接边界见 [M3 开发记录](M3_dev_log.md#12-实现与验收记录)。当前为未提交 worktree。
+
+**下一工作单元：用户 Review M3 实现。** Review 通过后再按用户指示 commit/push，并进入 M4 Runner、EventSession merge/split 与 StoryLine 的文件级设计；不在 M3 收尾中提前实现。

@@ -2,7 +2,7 @@
 
 这里维护「多事件 AI Native 世界剧场」的持续架构结论。Wiki 用于沉淀讨论、决策、机制和未决问题，不替代当前仓库源码；涉及现有行为时仍以代码为准。
 
-> 最后更新：2026-09-09。最新 MVP 边界以 [MVP_dev.md](design/MVP_dev.md) 为准；下文部分历史概述保留原术语。执行顺序和验收请看总计划 / 阶段记录，不据旧概述推断当前实现。
+> 最后更新：2026-09-11。最新 MVP 边界以 [MVP_dev.md](design/MVP_dev.md) 为准；下文部分历史概述保留原术语。执行顺序和验收请看总计划 / 阶段记录，不据旧概述推断当前实现。
 
 ## 核心模型：Agent 提案，World 提交
 
@@ -29,7 +29,7 @@ perceive -> retrieve -> plan -> ActionProposal
 
 ## 项目定位：自研领域型 NPC ADK
 
-当前建设的是 **Generative Go World 自己的 NPC ADK**，不是对 LangChain 的二次包装，也不是通用 Agent Builder。项目自研并拥有 Creator Manifest、受信 Compiler、Persona State/Memory、认知阶段、Action Schema、权限校验和 Trace；LangChain Core 只是内部 Runnable 与模型接入基础设施。当前已落地 PersonAct 单次认知 Slice、Runtime Skill 与模型 Strategy seam，外部 Scheduler、Director、World Commit、reflection feedback 和完整 Runtime 仍按下文边界继续实现。
+当前建设的是 **Generative Go World 自己的 NPC ADK**，不是对 LangChain 的二次包装，也不是通用 Agent Builder。项目自研并拥有 Creator Manifest、受信 Compiler、Persona State/Memory、认知阶段、Action Schema、权限校验和 Trace；LangChain Core 只是内部 Runnable 与模型接入基础设施。当前已落地 PersonAct 单次认知 Slice、Project World 和 M3 单步原子提交；持续 Scheduler、Session 重组、长期 Reflection、Director/Broadcast 和完整 Runtime 仍按下文边界继续实现。
 
 ## 当前结论
 
@@ -56,10 +56,10 @@ perceive -> retrieve -> plan -> ActionProposal
 - **明确没有迁入：**MVP 的 same-snapshot lockstep、同 Event 多角色并发、`move`、Proposal 内 `memory_changes`、Wave/World DB Runtime 和一次整轮提交；本项目继续坚持同 Event 内“一个角色 Proposal -> commit -> 下一角色读取新版本”。
 - **自由互动 MVP 的持久化已收敛：**SQLite 只保存明确的关系型当前状态、稳定 EventSession root binding、轻量 InteractionRequest、append-only `event_entries` 与隔离 Agent Memory；不建立重复的 `world_events / world_changes / world_versions / entity_revisions / world_snapshots`。作品 `scenario.yaml` 初始化公共世界与初始分区，全员/指定角色知识由 bootstrap 按接收者展开到各自 Agent Memory。
 - **M2 Project World 已实现、验收并推送：**`5d2f496` 为每个 Project 提供独立 `.runtime/<project-id>/world.sqlite`，同库可容纳多个 `world_id`；严格 Scenario、九表首版 schema、公共/私有状态原子初始化、五稳定 EventSession 节点、跨进程 paused load 和配置钉住均已落地。M2 尚无 EventEntry、WorldUpdater、Runner、Director 或 Broadcast，不能表述为 Agent 已可自由互动；证据见 [M2 开发记录](design/M2_dev_log.md)。
-- **M3 已进入设计 Review、尚未实现：**详细设计收口为唯一 `EventEntry` 历史、稳定 World operation/affordance、World/Agent 原子单步提交、`AgentViewBuilder` 和可重载 `CharacterStep`；文件树、预计行数、六个冻结点与验收门禁见 [M3 开发记录](design/M3_dev_log.md)。
+- **M3 单步链已实现并通过自动门禁：**唯一 `EventEntry` 历史、稳定 World operation/affordance、World/Agent 原子提交、`AgentViewBuilder` 与可重载 `CharacterStep` 已落地；完整 Python 442 项和 Node 14 项通过，当前为未提交 Review，证据见 [M3 开发记录](design/M3_dev_log.md#12-实现与验收记录)。
 - **互动记录与演出投影已经分权：**所有已提交的 Character 互动、Session merge/split 和 Director environment release 共用 `event_entries`；`interaction_requests` 只保存仍待 Character 处理的当前状态，待完成的客观过程使用同一 EventEntry 的 pending 状态，Agent Memory 通过 `source_entry_id` 保存主观认知。Broadcast 据此生成带来源的 Render Artifact，不能把 WebGAL 脚本回写为世界事实。
 - **Director 权限已经收紧：**Director 不做 Segment Completion、Narrative Thread 或剧情刺激。它只能读取一个 committed source Entry/待检查 pending Entry 的受限 DirectorView，并从 World 提供的 affordance 中选择 `emit / schedule / keep / release / cancel / no_op`。一句“我要煮咖啡”不足以 schedule，必须先有角色自己提交的 `coffee_brewing_started`。
-- **基础代码不等于完整 Runtime：**Project World、PersonaState/Memory 初始持久化已经完成；reflection/commit feedback、pending EnvironmentEntry Director、Validator/WorldUpdater、EventSessionRunner/EventEntry history、Broadcast、真实 Provider 验收、Generation Trace 持久化与完整咖啡 Golden Trace 仍未实现。
+- **基础代码不等于完整 Runtime：**Project World、PersonaState/Memory 持久化、最小 commit feedback、EventEntry history、Validator/WorldUpdater 与 CharacterStep 已完成；持续 EventSessionRunner、merge/split、长期 Reflection、pending EnvironmentEntry Director、Broadcast、真实 Provider 剧情验收、Generation Trace 持久化与完整咖啡 Golden Trace 仍未实现。
 - **必须准确理解强类型：**`Runnable.with_types()` 只提供类型/Schema 元数据，不做 runtime validation。真正的运行时结构校验由 Pydantic 完成，领域合法性由 Compiler、AgentViewBuilder、Validator 与 WorldUpdater 保证。
 - **必须在实现中验证：**World time/pending Entry 唤醒时钟、EnvironmentEntry affordance/取消规则、跨 StoryLine 共享实体如何归约、Prompt Contract、真实模型质量和约 30 分钟领先库存。它们不阻塞 Fixture 骨架开工，但不能被表述成已经解决。
 
@@ -73,7 +73,7 @@ perceive -> retrieve -> plan -> ActionProposal
 - [MVP 分阶段执行计划](design/dev_plan_MVP.md)：固定 dev_plan，维护 M1–M7 的范围、实现前文件级设计、验收和 Review 状态；当前重点是 M3 单步世界与认知提交。
 - [M1 开发记录](design/M1_dev_log.md)：固定阶段 dev_log，记录 Gateway、WorldRef / Plan queue、UnionPart 的实际文件与测试证据。
 - [M2 开发记录](design/M2_dev_log.md)：记录 Project SQLite、Scenario、初始 World/Agent 状态、跨进程加载的实际 schema、文件与测试证据。
-- [M3 开发记录](design/M3_dev_log.md)：从设计阶段开始维护 M3.1–M3.4 的详细 schema、文件树、Review 冻结点；开工后继续在同一文件补实际 diff、测试与提交证据。
+- [M3 开发记录](design/M3_dev_log.md)：维护 M3.1–M3.4 的设计基线、实际文件树、独立 Review 修复、自动门禁与 M4 交接边界；当前为未提交 Review。
 - [NPC DIY](npc-diy.md)：创作者配置、Pydantic 受信编译、`PersonActAgent.decide`、Proposal contract、当前实现证据与下一步。
 - [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 查询、确定性可见性与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。
@@ -105,5 +105,6 @@ perceive -> retrieve -> plan -> ActionProposal
 - [Project SQLite Boundary](../agent_runtime/sqlite.py)：每 Project 独立数据库、身份、迁移、连接约束与首次创建原子发布。
 - [Scenario Loader](../agent_runtime/scenario.py)：开场公共状态、初始分组、知识接收者与 canonical hash 的严格加载。
 - [World Bootstrap](../agent_runtime/bootstrap.py)：公共 World、PersonaState、Memory 的原子创建与 paused load。
+- M3 单步链：[EventEntry](../agent_runtime/world/entries.py)、[WorldUpdater](../agent_runtime/world/updater.py)、[AgentViewBuilder](../agent_runtime/world/view_builder.py)、[CharacterStep](../agent_runtime/event/character_step.py)。
 - [NPC DIY 契约测试](../agent_runtime/tests/test_personact.py)：类型、权限、namespace、affordance 和 evidence 拒绝路径。
 - [PersonAct 认知测试](../agent_runtime/tests/test_personact_agent.py)：attention、novelty、Memory retrieval、state 原子更新和单 Proposal 边界。

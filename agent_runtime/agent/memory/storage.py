@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Sequence
+from datetime import datetime
 
 from pydantic import TypeAdapter
 from sqlalchemy import (
@@ -16,11 +18,16 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     select,
+    update,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from agent_runtime.agent.memory.contracts import MemoryRecord
-from agent_runtime.agent.memory.errors import MemoryScopeError
+from agent_runtime.agent.memory.contracts import MemoryRecord, MemoryTouch
+from agent_runtime.agent.memory.errors import (
+    DuplicateMemoryError,
+    MemoryScopeError,
+    MemoryTouchError,
+)
 from agent_runtime.agent.memory.stream import MemoryStream
 from agent_runtime.sqlite import Base, require_session_project
 from agent_runtime.world.contracts import WorldRef
@@ -38,6 +45,15 @@ class MemoryRow(Base):
             ["world_id", "agent_id"],
             ["agent_world_states.world_id", "agent_world_states.agent_id"],
             name="fk_agent_memory_records_agent",
+        ),
+        ForeignKeyConstraint(
+            ["world_id", "source_entry_id", "agent_id"],
+            [
+                "event_entry_recipients.world_id",
+                "event_entry_recipients.entry_id",
+                "event_entry_recipients.agent_id",
+            ],
+            name="fk_agent_memory_records_source_recipient",
         ),
         UniqueConstraint(
             "world_id",
@@ -100,6 +116,7 @@ class MemoryRow(Base):
     poignancy: Mapped[float] = mapped_column(Float, nullable=False)
     tags_json: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entry_id: Mapped[str | None] = mapped_column(Text)
     evidence_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
     embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
     novelty_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -162,6 +179,116 @@ class MemoryStore:
             streams.append(stream)
         return tuple(streams)
 
+    def load(self, session: Session, agent_id: str, scope: str) -> MemoryStream:
+        """Load one Agent stream without exposing any other role's private memory."""
+
+        self._require_stream_identity(session, agent_id, scope)
+        rows = session.scalars(
+            select(MemoryRow)
+            .where(
+                MemoryRow.world_id == self._world_ref.world_id,
+                MemoryRow.agent_id == agent_id,
+            )
+            .order_by(MemoryRow.memory_seq)
+        ).all()
+        self._require_contiguous_sequence(agent_id, rows)
+        records = tuple(self._record(row) for row in rows)
+        if any(record.scope != scope for record in records):
+            raise MemoryScopeError("persisted MemoryRecord scope does not match requested scope")
+        return MemoryStream(
+            world_ref=self._world_ref,
+            agent_id=agent_id,
+            scope=scope,
+            records=records,
+        )
+
+    def append(
+        self,
+        session: Session,
+        *,
+        agent_id: str,
+        scope: str,
+        records: tuple[MemoryRecord, ...],
+    ) -> None:
+        """Stage new records at the current stream tail in the caller's transaction."""
+
+        self._require_stream_identity(session, agent_id, scope)
+        validated = tuple(MemoryRecord.model_validate(record, strict=True) for record in records)
+        record_ids = tuple(record.id for record in validated)
+        if len(record_ids) != len(set(record_ids)):
+            raise DuplicateMemoryError("memory record ids must be unique")
+        persisted_scopes = set(
+            session.scalars(
+                select(MemoryRow.scope)
+                .where(
+                    MemoryRow.world_id == self._world_ref.world_id,
+                    MemoryRow.agent_id == agent_id,
+                )
+                .distinct()
+            )
+        )
+        if persisted_scopes and persisted_scopes != {scope}:
+            raise MemoryScopeError("persisted MemoryRecord scope does not match requested scope")
+        stream = MemoryStream(
+            world_ref=self._world_ref,
+            agent_id=agent_id,
+            scope=scope,
+            records=validated,
+        )
+        tail = session.scalar(
+            select(func.max(MemoryRow.memory_seq)).where(
+                MemoryRow.world_id == self._world_ref.world_id,
+                MemoryRow.agent_id == agent_id,
+            )
+        )
+        next_sequence = 1 if tail is None else tail + 1
+        session.add_all(
+            self._row(record, memory_seq=next_sequence + offset)
+            for offset, record in enumerate(stream.records)
+        )
+
+    def touch(self, session: Session, touches: tuple[MemoryTouch, ...]) -> None:
+        """Stage explicit access-time advances without rewriting immutable memory content."""
+
+        require_session_project(session, self._world_ref.project_id)
+        validated = tuple(MemoryTouch.model_validate(touch, strict=True) for touch in touches)
+        touch_ids = tuple(touch.memory_id for touch in validated)
+        if len(touch_ids) != len(set(touch_ids)):
+            raise DuplicateMemoryError("memory touch ids must be unique")
+
+        for touch in validated:
+            if touch.world_ref != self._world_ref:
+                raise MemoryScopeError("MemoryTouch belongs to a different WorldRef")
+            row = session.get(
+                MemoryRow,
+                {
+                    "world_id": self._world_ref.world_id,
+                    "agent_id": touch.agent_id,
+                    "memory_id": touch.memory_id,
+                },
+            )
+            if row is None or row.scope != touch.scope:
+                raise MemoryTouchError(f'unknown memory id "{touch.memory_id}"')
+            previous = _load_datetime(row.last_accessed_at)
+            if touch.accessed_at < previous:
+                raise MemoryTouchError(
+                    f'touch for memory "{touch.memory_id}" cannot move lastAccessedAt backwards'
+                )
+            updated_memory_id = session.scalar(
+                update(MemoryRow)
+                .where(
+                    MemoryRow.world_id == self._world_ref.world_id,
+                    MemoryRow.agent_id == touch.agent_id,
+                    MemoryRow.memory_id == touch.memory_id,
+                    MemoryRow.scope == touch.scope,
+                    MemoryRow.last_accessed_at == row.last_accessed_at,
+                )
+                .values(last_accessed_at=touch.accessed_at.isoformat())
+                .returning(MemoryRow.memory_id)
+            )
+            if updated_memory_id is None:
+                raise MemoryTouchError(f'memory "{touch.memory_id}" changed concurrently')
+
     def _row(self, record: MemoryRecord, *, memory_seq: int) -> MemoryRow:
         return MemoryRow(
             world_id=self._world_ref.world_id,
@@ -180,6 +307,7 @@ class MemoryStore:
             poignancy=record.poignancy,
             tags_json=_dump_json(record.tags),
             source=record.source,
+            source_entry_id=record.source_entry_id,
             evidence_ids_json=_dump_json(record.evidence_ids),
             embedding_json=_dump_json(record.embedding),
             novelty_key=record.novelty_key,
@@ -202,6 +330,7 @@ class MemoryStore:
             "poignancy": row.poignancy,
             "tags": _TEXT_TUPLE.validate_json(row.tags_json, strict=True),
             "source": row.source,
+            "sourceEntryId": row.source_entry_id,
             "evidenceIds": _TEXT_TUPLE.validate_json(row.evidence_ids_json, strict=True),
             "embedding": _FLOAT_TUPLE.validate_json(row.embedding_json, strict=True),
             "noveltyKey": row.novelty_key,
@@ -227,6 +356,20 @@ class MemoryStore:
         ):
             raise MemoryScopeError("MemoryRecord ownership does not match its stream")
 
+    def _require_stream_identity(self, session: Session, agent_id: str, scope: str) -> None:
+        require_session_project(session, self._world_ref.project_id)
+        if not agent_id.strip():
+            raise ValueError("agent_id cannot be empty")
+        if not scope.strip():
+            raise ValueError("scope cannot be empty")
+
+    @staticmethod
+    def _require_contiguous_sequence(agent_id: str, rows: Sequence[MemoryRow]) -> None:
+        expected = tuple(range(1, len(rows) + 1))
+        actual = tuple(row.memory_seq for row in rows)
+        if actual != expected:
+            raise ValueError(f'Memory sequence for agent "{agent_id}" is not contiguous')
+
 
 def _dump_json(values: tuple[str, ...] | tuple[float, ...]) -> str:
     return json.dumps(
@@ -235,3 +378,7 @@ def _dump_json(values: tuple[str, ...] | tuple[float, ...]) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _load_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value)

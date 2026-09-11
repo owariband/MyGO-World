@@ -39,6 +39,8 @@ def test_agent_view_requires_world_and_has_no_legacy_frame_alias() -> None:
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         affordances=(),
     )
@@ -57,8 +59,7 @@ def test_agent_view_requires_world_and_has_no_legacy_frame_alias() -> None:
 def test_perception_candidate_is_strict_and_owned_by_its_view() -> None:
     candidate = PerceptCandidate(
         candidate_id="coffee-ready-for-anon",
-        source_event_id="coffee-ready",
-        event_revision=2,
+        source_entry_id="coffee-ready",
         channel=PerceptionChannel.COMMITMENT_UPDATE,
         attention_tier=AttentionTier.MANDATORY,
         subject="coffee-42",
@@ -75,6 +76,8 @@ def test_perception_candidate_is_strict_and_owned_by_its_view() -> None:
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=datetime(2026, 8, 31, 9, 0, tzinfo=UTC),
         candidates=(candidate,),

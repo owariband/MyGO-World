@@ -13,8 +13,10 @@ from agent_runtime.world.contracts import UtterAction
 RESPONSES = (
     '{"score":3.0}',
     '{"items":[{"planId":"coffee","description":"先问问爽世喜欢喝什么"}]}',
-    '{"action":{"kind":"utter","target":{"kind":"character","id":"soyo"},'
-    '"content":"爽世想喝什么？我还在考虑呢。"},"evidenceIds":["soyo-greeting"]}',
+    '{"action":{"kind":"utter","affordanceId":"smoke-utter-soyo-direct",'
+    '"target":{"kind":"character","id":"soyo"},'
+    '"content":"爽世想喝什么？我还在考虑呢。","expectsResponse":true},'
+    '"evidenceIds":["soyo-greeting"]}',
 )
 
 

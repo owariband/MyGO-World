@@ -58,6 +58,19 @@ class LocationSeed(StrictModel):
     description: NonEmptyText
 
 
+class ObjectOperationSeed(StrictModel):
+    """One Scenario-owned state transition that an Agent may select."""
+
+    operation_id: ScenarioIdentifier
+    from_state: NonEmptyText
+    to_state: NonEmptyText
+    result_text: NonEmptyText
+
+
+def _exclude_empty_operations(value: tuple[ObjectOperationSeed, ...]) -> bool:
+    return not value
+
+
 class ObjectSeed(StrictModel):
     id: ScenarioIdentifier
     name: NonEmptyText
@@ -66,6 +79,19 @@ class ObjectSeed(StrictModel):
     location_id: ScenarioIdentifier
     owner_agent_id: ScenarioIdentifier | None = None
     state: NonEmptyText
+    # Omitting an empty catalog preserves pre-M3 Scenario hashes and wire content.
+    operations: tuple[ObjectOperationSeed, ...] = Field(
+        default=(),
+        exclude_if=_exclude_empty_operations,
+    )
+
+    @model_validator(mode="after")
+    def _validate_operations(self) -> Self:
+        _require_unique(
+            tuple(operation.operation_id for operation in self.operations),
+            f'operation ids for object "{self.id}"',
+        )
+        return self
 
 
 class FactSubject(StrictModel):
@@ -373,6 +399,19 @@ def _canonical_seed(seed: ScenarioSeed) -> ScenarioSeed:
         )
         for item in sorted(seed.initial_partitions, key=lambda value: value.root_session_id)
     )
+    objects = tuple(
+        ObjectSeed(
+            id=item.id,
+            name=item.name,
+            kind=item.kind,
+            description=item.description,
+            location_id=item.location_id,
+            owner_agent_id=item.owner_agent_id,
+            state=item.state,
+            operations=tuple(sorted(item.operations, key=lambda value: value.operation_id)),
+        )
+        for item in sorted(seed.objects, key=lambda value: value.id)
+    )
     return ScenarioSeed(
         format_version=seed.format_version,
         project_id=seed.project_id,
@@ -380,7 +419,7 @@ def _canonical_seed(seed: ScenarioSeed) -> ScenarioSeed:
         version=seed.version,
         world_time=seed.world_time,
         locations=tuple(sorted(seed.locations, key=lambda value: value.id)),
-        objects=tuple(sorted(seed.objects, key=lambda value: value.id)),
+        objects=objects,
         public_facts=tuple(sorted(seed.public_facts, key=lambda value: value.id)),
         agents=tuple(sorted(seed.agents, key=lambda value: value.agent_id)),
         initial_partitions=partitions,

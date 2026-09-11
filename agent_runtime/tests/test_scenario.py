@@ -32,7 +32,7 @@ def test_formal_projects_load_as_isolated_strict_scenarios() -> None:
 
     assert band.manifest.project_id == band.seed.project_id == "for-the-band"
     assert rain.manifest.project_id == rain.seed.project_id == "rain-after"
-    assert band.seed_hash == "046fd7016734dcbe0e35ac7dae0a1d263f4237d89ac141a7fc04436275e06d59"
+    assert band.seed_hash == "9eada0aaf0960634de42cfda915151dc07dc23eff43b369085e2312bffa9efb6"
     assert rain.seed_hash == "c4e3f46b9f9ce70b5e8ba14875bf1ab064208ad7ce1a53191df9673fc562d33c"
     assert band.seed_hash != rain.seed_hash
     assert {agent.agent_id for agent in band.seed.agents} == {
@@ -64,6 +64,46 @@ def test_scenario_uses_camel_case_on_its_external_surface(tmp_path: Path) -> Non
     assert external["agents"][0]["publicStatus"] is None
     assert external["publicFacts"][0]["object"] == "ready"
     assert external["publicFacts"][0]["content"] == "The machine can be used."
+    assert "operations" not in external["objects"][0]
+
+
+def test_object_operations_are_strict_unique_and_canonical(tmp_path: Path) -> None:
+    first = _scenario_data("test-project")
+    second = deepcopy(first)
+    operations = [
+        {
+            "operationId": "stop",
+            "fromState": "running",
+            "toState": "stopped",
+            "resultText": "The machine stops.",
+        },
+        {
+            "operationId": "start",
+            "fromState": "idle",
+            "toState": "running",
+            "resultText": "The machine starts.",
+        },
+    ]
+    _object_list(first, "objects")[0]["operations"] = operations
+    _object_list(second, "objects")[0]["operations"] = list(reversed(operations))
+
+    first_seed = load_scenario_seed(_write_seed(tmp_path / "first.yaml", first))
+    second_seed = load_scenario_seed(_write_seed(tmp_path / "second.yaml", second))
+
+    assert tuple(item.operation_id for item in first_seed.objects[0].operations) == (
+        "start",
+        "stop",
+    )
+    assert scenario_seed_hash(first_seed) == scenario_seed_hash(second_seed)
+
+    duplicate = deepcopy(first)
+    duplicate_operations = cast(
+        list[dict[str, object]], _object_list(duplicate, "objects")[0]["operations"]
+    )
+    duplicate_operations[1]["operationId"] = duplicate_operations[0]["operationId"]
+    with pytest.raises(ScenarioDecodeError) as raised:
+        load_scenario_seed(_write_seed(tmp_path / "duplicate.yaml", duplicate))
+    assert "operation ids" in _cause_text(raised.value)
 
 
 def test_semantic_hash_ignores_comments_field_order_and_set_like_order(

@@ -9,9 +9,11 @@ from pydantic import ValidationError
 
 from agent_runtime.agent.personact.compiler import CompiledPersonActSpec
 from agent_runtime.agent.personact.errors import ProposalValidationError
+from agent_runtime.agent.personact.state import PlanDisposition
 from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import (
     ActionProposal,
+    Affordance,
     AgentAction,
     AgentView,
     Identifier,
@@ -30,6 +32,7 @@ class ProposalDraft(StrictModel):
 
     action: AgentAction
     evidence_ids: tuple[Identifier, ...] = ()
+    plan_disposition: PlanDisposition = PlanDisposition.KEEP
 
 
 def build_action_proposal(
@@ -68,7 +71,7 @@ def build_action_proposal(
         if validated_draft.evidence_ids:
             raise ProposalValidationError("no_op proposal cannot carry evidence")
     elif not any(
-        affordance.kind is action_kind and affordance.target == _target(validated_draft.action)
+        _matches_affordance(validated_draft.action, affordance)
         for affordance in validated_view.affordances
     ):
         raise ProposalValidationError(
@@ -84,6 +87,8 @@ def build_action_proposal(
         agent_id=validated_spec.agent_id,
         event_session_id=validated_view.event_session_id,
         based_on_world_version=validated_view.based_on_world_version,
+        based_on_control_epoch=validated_view.based_on_control_epoch,
+        based_on_decision_seq=validated_view.based_on_decision_seq,
         action=validated_draft.action,
         evidence_ids=validated_draft.evidence_ids,
     )
@@ -93,3 +98,16 @@ def _target(action: AgentAction) -> InteractionTarget | None:
     if isinstance(action, (InteractAction, UtterAction, RespondAction)):
         return action.target
     return None
+
+
+def _matches_affordance(action: AgentAction, affordance: Affordance) -> bool:
+    if affordance.kind is not ProposalKind(action.kind) or affordance.target != _target(action):
+        return False
+    if (
+        isinstance(action, (InteractAction, UtterAction, RespondAction))
+        and action.affordance_id != affordance.affordance_id
+    ):
+        return False
+    if isinstance(action, RespondAction):
+        return action.in_reply_to_entry_id == affordance.request_entry_id
+    return True

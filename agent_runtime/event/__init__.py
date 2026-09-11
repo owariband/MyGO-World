@@ -1,6 +1,9 @@
-"""EventSession, scheduling, recognition, and lifecycle ownership.
+"""Single Event steps and the future EventSession scheduling boundary."""
 
-The external Event scheduler chooses which Agent instance receives a decision
-opportunity.  This package owns the world-level loop; no Agent owns it.
-Concrete scheduling code is not implemented yet.
-"""
+from agent_runtime.event.character_step import (
+    CharacterStep,
+    CharacterStepError,
+    CharacterStepResult,
+)
+
+__all__ = ["CharacterStep", "CharacterStepError", "CharacterStepResult"]

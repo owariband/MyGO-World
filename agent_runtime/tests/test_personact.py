@@ -31,13 +31,18 @@ from agent_runtime.agent.personact.manifest import (
     load_manifest,
 )
 from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_proposal
+from agent_runtime.agent.personact.state import PlanDisposition
 from agent_runtime.agent.skill import RuntimeSkill, RuntimeSkillCatalog, load_runtime_skill
+from agent_runtime.scenario import ObjectOperationSeed, ObjectSeed
+from agent_runtime.world.affordances import WorldAffordanceResolver
 from agent_runtime.world.contracts import (
     ActAction,
     ActionProposal,
     Affordance,
     AgentView,
     CharacterTarget,
+    CommitPosition,
+    DeliveryChannel,
     InteractAction,
     NoOpAction,
     ObjectTarget,
@@ -46,6 +51,7 @@ from agent_runtime.world.contracts import (
     UtterAction,
     WorldRef,
 )
+from agent_runtime.world.state import ObjectState
 
 WORLD_REF = WorldRef(project_id="coffee-golden", world_id="save-001")
 FIXTURE_PATH = Path(__file__).parents[1] / "testdata" / "npc_diy" / "agents.json"
@@ -239,13 +245,24 @@ def test_compile_rejects_unknown_or_wrong_kind_character_skill() -> None:
 
 def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
     target = CharacterTarget(id="soyo")
+    affordance = Affordance(
+        affordance_id="utter-soyo-direct",
+        kind=ProposalKind.UTTER,
+        target=target,
+        delivery_channel=DeliveryChannel.DIRECT,
+    )
     proposal = build_action_proposal(
         world_ref=WORLD_REF,
         spec=_anon_spec(),
-        view=_view(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+        view=_view(affordances=(affordance,)),
         proposal_id="proposal-1",
         draft=ProposalDraft(
-            action=UtterAction(target=target, content="轮到我们了，要这个吗？"),
+            action=UtterAction(
+                affordance_id=affordance.affordance_id,
+                target=target,
+                content="轮到我们了，要这个吗？",
+                expects_response=True,
+            ),
             evidence_ids=("queue-ready",),
         ),
     )
@@ -257,10 +274,14 @@ def test_build_action_proposal_has_fixed_envelope_and_spec_actor() -> None:
         "agentId": "anon",
         "eventSessionId": "cafe",
         "basedOnWorldVersion": 7,
+        "basedOnControlEpoch": 1,
+        "basedOnDecisionSeq": 0,
         "action": {
             "kind": "utter",
+            "affordanceId": "utter-soyo-direct",
             "target": {"kind": "character", "id": "soyo"},
             "content": "轮到我们了，要这个吗？",
+            "expectsResponse": True,
         },
         "evidenceIds": ["queue-ready"],
     }
@@ -280,6 +301,118 @@ def test_proposal_draft_rejects_actor_override() -> None:
         )
 
 
+def test_proposal_draft_keeps_private_plan_disposition_out_of_world_proposal() -> None:
+    draft = ProposalDraft(
+        action=NoOpAction(next_wakeup="event_change"),
+        plan_disposition=PlanDisposition.CANCEL,
+    )
+    proposal = build_action_proposal(
+        world_ref=WORLD_REF,
+        spec=_anon_spec(),
+        view=_view(affordances=()),
+        proposal_id="proposal-1",
+        draft=draft,
+    )
+
+    assert draft.plan_disposition is PlanDisposition.CANCEL
+    assert "planDisposition" not in proposal.model_dump_json(by_alias=True)
+
+
+def test_world_affordances_are_stable_and_bound_to_snapshot_state() -> None:
+    seed = ObjectSeed(
+        id="metronome",
+        name="Metronome",
+        kind="instrument",
+        description="A rehearsal metronome.",
+        location_id="cafe",
+        state="stopped",
+        operations=(
+            ObjectOperationSeed(
+                operation_id="start",
+                from_state="stopped",
+                to_state="running",
+                result_text="The metronome starts.",
+            ),
+            ObjectOperationSeed(
+                operation_id="stop",
+                from_state="running",
+                to_state="stopped",
+                result_text="The metronome stops.",
+            ),
+        ),
+    )
+    state = ObjectState(
+        world_ref=WORLD_REF,
+        object_id="metronome",
+        name="Metronome",
+        kind="instrument",
+        description="A rehearsal metronome.",
+        location_id="cafe",
+        state="stopped",
+    )
+    resolver = WorldAffordanceResolver(
+        world_ref=WORLD_REF,
+        world_version=7,
+        agent_id="anon",
+    )
+
+    first = resolver.object_affordances(object_state=state, object_seed=seed)
+    second = resolver.object_affordances(object_state=state, object_seed=seed)
+
+    assert first == second
+    assert tuple(item.operation_id for item in first) == ("start",)
+    assert first[0].affordance_id.startswith("affordance-")
+    next_version = WorldAffordanceResolver(
+        world_ref=WORLD_REF,
+        world_version=8,
+        agent_id="anon",
+    ).object_affordances(object_state=state, object_seed=seed)
+    assert next_version[0].affordance_id != first[0].affordance_id
+
+
+def test_speech_affordances_bind_channel_and_response_source() -> None:
+    resolver = WorldAffordanceResolver(
+        world_ref=WORLD_REF,
+        world_version=7,
+        agent_id="anon",
+    )
+    target = CharacterTarget(id="soyo")
+
+    direct = resolver.utter_affordance(
+        target=target,
+        delivery_channel=DeliveryChannel.DIRECT,
+    )
+    whisper = resolver.utter_affordance(
+        target=target,
+        delivery_channel=DeliveryChannel.WHISPER,
+    )
+    response = resolver.response_affordance(
+        target=target,
+        delivery_channel=DeliveryChannel.WHISPER,
+        request_entry_id="entry-1",
+    )
+
+    assert direct.affordance_id != whisper.affordance_id
+    assert response.request_entry_id == "entry-1"
+    assert response.affordance_id not in {direct.affordance_id, whisper.affordance_id}
+    assert resolver.simple_affordance(ProposalKind.WAIT).kind is ProposalKind.WAIT
+
+
+def test_agent_view_rejects_future_cursor_and_duplicate_affordance_ids() -> None:
+    with pytest.raises(ValidationError, match="newer"):
+        AgentView.model_validate(
+            {
+                **_view(affordances=()).model_dump(by_alias=False),
+                "observed_through": CommitPosition(world_version=8),
+            },
+            strict=True,
+        )
+
+    afforded = Affordance(affordance_id="same", kind=ProposalKind.ACT)
+    with pytest.raises(ValidationError, match="unique"):
+        _view(affordances=(afforded, afforded))
+
+
 @pytest.mark.parametrize(
     "target",
     [
@@ -290,13 +423,23 @@ def test_proposal_draft_rejects_actor_override() -> None:
 def test_build_action_proposal_accepts_character_and_object_interact(
     target: CharacterTarget | ObjectTarget,
 ) -> None:
+    affordance = Affordance(
+        affordance_id="interact-shared-id",
+        kind=ProposalKind.INTERACT,
+        target=target,
+        operation_id="use" if isinstance(target, ObjectTarget) else None,
+    )
     proposal = build_action_proposal(
         world_ref=WORLD_REF,
         spec=_anon_spec(),
-        view=_view(affordances=(Affordance(kind=ProposalKind.INTERACT, target=target),)),
+        view=_view(affordances=(affordance,)),
         proposal_id="proposal-1",
         draft=ProposalDraft(
-            action=InteractAction(target=target, description="interact with target")
+            action=InteractAction(
+                affordance_id=affordance.affordance_id,
+                target=target,
+                description="interact with target",
+            )
         ),
     )
 
@@ -323,9 +466,19 @@ def test_build_action_proposal_does_not_confuse_target_kind_with_same_id(
     afforded_target: CharacterTarget | ObjectTarget,
     draft_target: CharacterTarget | ObjectTarget,
 ) -> None:
-    view = _view(affordances=(Affordance(kind=ProposalKind.INTERACT, target=afforded_target),))
+    affordance = Affordance(
+        affordance_id="interact-shared-id",
+        kind=ProposalKind.INTERACT,
+        target=afforded_target,
+        operation_id="use" if isinstance(afforded_target, ObjectTarget) else None,
+    )
+    view = _view(affordances=(affordance,))
     draft = ProposalDraft(
-        action=InteractAction(target=draft_target, description="interact with target")
+        action=InteractAction(
+            affordance_id=affordance.affordance_id,
+            target=draft_target,
+            description="interact with target",
+        )
     )
 
     with pytest.raises(ProposalValidationError, match="not afforded"):
@@ -342,11 +495,21 @@ def test_build_action_proposal_does_not_confuse_target_kind_with_same_id(
     "action",
     [
         pytest.param(
-            UtterAction(target=CharacterTarget(id="soyo"), content="hi"),
+            UtterAction(
+                affordance_id="utter-soyo-direct",
+                target=CharacterTarget(id="soyo"),
+                content="hi",
+                expects_response=True,
+            ),
             id="utter",
         ),
         pytest.param(
-            RespondAction(target=CharacterTarget(id="soyo"), content="hi"),
+            RespondAction(
+                affordance_id="respond-soyo-entry-1",
+                target=CharacterTarget(id="soyo"),
+                content="hi",
+                in_reply_to_entry_id="entry-1",
+            ),
             id="respond",
         ),
     ],
@@ -362,13 +525,20 @@ def test_world_contract_accepts_character_target_for_speech(
 
 @pytest.mark.parametrize("kind", [ProposalKind.UTTER, ProposalKind.RESPOND])
 def test_world_contract_rejects_object_target_for_speech(kind: ProposalKind) -> None:
+    action_details = (
+        {"expectsResponse": False}
+        if kind is ProposalKind.UTTER
+        else {"inReplyToEntryId": "entry-1"}
+    )
     with pytest.raises(ValidationError, match="character"):
         ProposalDraft.model_validate(
             {
                 "action": {
                     "kind": kind.value,
+                    "affordanceId": "speech-affordance",
                     "target": {"kind": "object", "id": "coffee-42"},
                     "content": "hi",
+                    **action_details,
                 }
             },
             strict=True,
@@ -380,6 +550,7 @@ def test_world_contract_rejects_object_target_for_speech(kind: ProposalKind) -> 
     [
         pytest.param(
             Affordance(
+                affordance_id="wrong-target",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="tomori"),
             ),
@@ -387,8 +558,10 @@ def test_world_contract_rejects_object_target_for_speech(kind: ProposalKind) -> 
         ),
         pytest.param(
             Affordance(
+                affordance_id="wrong-kind",
                 kind=ProposalKind.UTTER,
                 target=CharacterTarget(id="soyo"),
+                delivery_channel=DeliveryChannel.DIRECT,
             ),
             id="wrong-kind",
         ),
@@ -399,6 +572,7 @@ def test_build_action_proposal_rejects_wrong_target_or_affordance(
 ) -> None:
     draft = ProposalDraft(
         action=InteractAction(
+            affordance_id="wrong-target",
             target=CharacterTarget(id="soyo"),
             description="talk to Soyo",
         )
@@ -414,12 +588,60 @@ def test_build_action_proposal_rejects_wrong_target_or_affordance(
         )
 
 
+def test_build_action_proposal_rejects_forged_affordance_or_response_source() -> None:
+    target = CharacterTarget(id="soyo")
+    utter_affordance = Affordance(
+        affordance_id="utter-soyo-direct",
+        kind=ProposalKind.UTTER,
+        target=target,
+        delivery_channel=DeliveryChannel.DIRECT,
+    )
+    with pytest.raises(ProposalValidationError, match="not afforded"):
+        build_action_proposal(
+            world_ref=WORLD_REF,
+            spec=_anon_spec(),
+            view=_view(affordances=(utter_affordance,)),
+            proposal_id="proposal-1",
+            draft=ProposalDraft(
+                action=UtterAction(
+                    affordance_id="forged",
+                    target=target,
+                    content="hi",
+                    expects_response=False,
+                )
+            ),
+        )
+
+    response_affordance = Affordance(
+        affordance_id="respond-soyo-entry-1",
+        kind=ProposalKind.RESPOND,
+        target=target,
+        delivery_channel=DeliveryChannel.DIRECT,
+        request_entry_id="entry-1",
+    )
+    with pytest.raises(ProposalValidationError, match="not afforded"):
+        build_action_proposal(
+            world_ref=WORLD_REF,
+            spec=_anon_spec(),
+            view=_view(affordances=(response_affordance,)),
+            proposal_id="proposal-2",
+            draft=ProposalDraft(
+                action=RespondAction(
+                    affordance_id=response_affordance.affordance_id,
+                    target=target,
+                    content="hi",
+                    in_reply_to_entry_id="entry-2",
+                )
+            ),
+        )
+
+
 def test_build_action_proposal_rejects_kind_not_granted_by_spec() -> None:
     with pytest.raises(ProposalValidationError, match="not granted"):
         build_action_proposal(
             world_ref=WORLD_REF,
             spec=_anon_spec(),
-            view=_view(affordances=(Affordance(kind=ProposalKind.ACT),)),
+            view=_view(affordances=(Affordance(affordance_id="act", kind=ProposalKind.ACT),)),
             proposal_id="proposal-1",
             draft=ProposalDraft(action=ActAction(description="look around")),
         )
@@ -427,8 +649,19 @@ def test_build_action_proposal_rejects_kind_not_granted_by_spec() -> None:
 
 def test_build_action_proposal_rejects_hidden_evidence() -> None:
     target = CharacterTarget(id="soyo")
+    affordance = Affordance(
+        affordance_id="utter-soyo-direct",
+        kind=ProposalKind.UTTER,
+        target=target,
+        delivery_channel=DeliveryChannel.DIRECT,
+    )
     draft = ProposalDraft(
-        action=UtterAction(target=target, content="hi"),
+        action=UtterAction(
+            affordance_id=affordance.affordance_id,
+            target=target,
+            content="hi",
+            expects_response=False,
+        ),
         evidence_ids=("tomori-private-event",),
     )
 
@@ -436,7 +669,7 @@ def test_build_action_proposal_rejects_hidden_evidence() -> None:
         build_action_proposal(
             world_ref=WORLD_REF,
             spec=_anon_spec(),
-            view=_view(affordances=(Affordance(kind=ProposalKind.UTTER, target=target),)),
+            view=_view(affordances=(affordance,)),
             proposal_id="proposal-1",
             draft=draft,
         )
@@ -603,6 +836,8 @@ def _view(
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         visible_evidence_ids=visible_evidence_ids,
         affordances=affordances,

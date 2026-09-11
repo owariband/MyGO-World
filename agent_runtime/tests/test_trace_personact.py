@@ -29,6 +29,7 @@ from agent_runtime.agent.personact.proposal import ProposalDraft
 from agent_runtime.agent.personact.state import CognitiveConfig, PersonaState, PlanItem
 from agent_runtime.agent.skill import RuntimeSkillCatalog
 from agent_runtime.tests.test_personact_agent import (
+    AFFORDANCE_ID,
     FIXTURE_PATH,
     NOW,
     SKILLS_PATH,
@@ -57,7 +58,13 @@ def test_success_and_replay_have_distinct_traces_without_repeating_cognition(
     tmp_path: Path, debug: bool
 ) -> None:
     strategy = FixedStrategy(
-        ProposalDraft(action=InteractAction(target=CharacterTarget(id="soyo"), description="talk"))
+        ProposalDraft(
+            action=InteractAction(
+                affordance_id=AFFORDANCE_ID,
+                target=CharacterTarget(id="soyo"),
+                description="talk",
+            )
+        )
     )
     with LocalTrace(tmp_path, WORLD_REF, debug=debug) as log:
         agent = PersonActAgent(
@@ -312,9 +319,17 @@ def _view(*, agent_id: str = "anon", world_ref: WorldRef = WORLD_REF) -> AgentVi
         agent_id=agent_id,
         event_session_id="cafe",
         based_on_world_version=1,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=NOW,
-        affordances=(Affordance(kind=ProposalKind.INTERACT, target=CharacterTarget(id="soyo")),),
+        affordances=(
+            Affordance(
+                affordance_id=AFFORDANCE_ID,
+                kind=ProposalKind.INTERACT,
+                target=CharacterTarget(id="soyo"),
+            ),
+        ),
         candidates=(
             PerceptCandidate(
                 candidate_id="soyo-visible",

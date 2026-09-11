@@ -82,6 +82,8 @@ def test_create_and_restart_load_complete_paused_world(
     assert created.world_ref.world_id == "save-001"
     assert created.public_state.world.status is WorldStatus.PAUSED
     assert created.public_state.world.current_version == 1
+    assert created.public_state.world.control_epoch == 1
+    assert created.public_state.world.decision_seq == 0
     assert tuple(item.agent_id for item in created.public_state.agents) == (
         "anon",
         "rana",
@@ -111,6 +113,10 @@ def test_create_and_restart_load_complete_paused_world(
     assert restarted.specs == created.specs
     assert restarted.persona_states == created.persona_states
     assert restarted.memory_streams == created.memory_streams
+    assert restarted.object_seeds == created.object_seeds
+    assert tuple(
+        operation.operation_id for item in restarted.object_seeds for operation in item.operations
+    ) == ("start",)
     assert restarted.session_partition.root_of("session-anon") == "session-anon"
     assert restarted.session_partition.members_of("session-anon") == {
         "session-anon",

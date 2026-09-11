@@ -28,7 +28,7 @@ from agent_runtime.agent.personact.errors import (
 )
 from agent_runtime.agent.personact.manifest import MemoryWritePolicy
 from agent_runtime.agent.personact.proposal import ProposalDraft, build_action_proposal
-from agent_runtime.agent.personact.state import PersonaState, PlanItem
+from agent_runtime.agent.personact.state import PersonaState, PlanDisposition, PlanItem
 from agent_runtime.model import StrictModel
 from agent_runtime.trace import record_trace, trace_debug_enabled
 from agent_runtime.world.contracts import (
@@ -166,6 +166,7 @@ class _RetrievedDecision(StrictModel):
     memory_writes: tuple[MemoryRecord, ...]
     observations: tuple[Observation, ...]
     retrieved: tuple[RetrievedContext, ...]
+    memory_touches: tuple[MemoryTouch, ...]
     touched_memory_ids: tuple[str, ...]
 
 
@@ -176,6 +177,7 @@ class _PlannedDecision(StrictModel):
     memory_writes: tuple[MemoryRecord, ...]
     observations: tuple[Observation, ...]
     retrieved: tuple[RetrievedContext, ...]
+    memory_touches: tuple[MemoryTouch, ...]
     touched_memory_ids: tuple[str, ...]
     draft: ProposalDraft
     active_plan: PlanItem | None = None
@@ -189,6 +191,9 @@ class PersonActLoopResult(StrictModel):
     state: PersonaState
     memory: MemoryStream
     trace: DecisionTrace
+    memory_writes: tuple[MemoryRecord, ...]
+    memory_touches: tuple[MemoryTouch, ...]
+    plan_disposition: PlanDisposition
 
 
 class PersonActLoop:
@@ -391,9 +396,10 @@ class PersonActLoop:
                 content=candidate.content,
                 poignancy=poignancy,
                 tags=candidate.tags,
+                source_entry_id=candidate.source_entry_id,
                 source=(
-                    f"world-event:{candidate.source_event_id}"
-                    if candidate.source_event_id is not None
+                    f"event-entry:{candidate.source_entry_id}"
+                    if candidate.source_entry_id is not None
                     else f"percept-candidate:{candidate.candidate_id}"
                 ),
                 evidence_ids=_candidate_evidence(candidate),
@@ -512,6 +518,7 @@ class PersonActLoop:
             memory_writes=decision.memory_writes,
             observations=decision.observations,
             retrieved=tuple(contexts),
+            memory_touches=deduplicated_touches,
             touched_memory_ids=tuple(touch.memory_id for touch in deduplicated_touches),
         )
 
@@ -599,6 +606,7 @@ class PersonActLoop:
             memory_writes=decision.memory_writes,
             observations=decision.observations,
             retrieved=decision.retrieved,
+            memory_touches=decision.memory_touches,
             touched_memory_ids=decision.touched_memory_ids,
             draft=draft,
             active_plan=state.active_plan,
@@ -624,6 +632,9 @@ class PersonActLoop:
             proposal=proposal,
             state=decision.state,
             memory=decision.memory,
+            memory_writes=decision.memory_writes,
+            memory_touches=decision.memory_touches,
+            plan_disposition=decision.draft.plan_disposition,
             trace=DecisionTrace(
                 world_ref=self._world_ref,
                 stages=("prepare", "perceive", "retrieve", "plan", "propose"),
@@ -673,8 +684,7 @@ def _replace_state(
 
 def _novelty_key(candidate: PerceptCandidate) -> str:
     identity = (
-        candidate.source_event_id or candidate.candidate_id,
-        candidate.event_revision,
+        candidate.source_entry_id or candidate.candidate_id,
         tuple(sorted(set(candidate.visible_fields))),
     )
     return dumps(identity, ensure_ascii=False, separators=(",", ":"))
@@ -682,7 +692,7 @@ def _novelty_key(candidate: PerceptCandidate) -> str:
 
 def _candidate_evidence(candidate: PerceptCandidate) -> tuple[str, ...]:
     values = (
-        *((candidate.source_event_id,) if candidate.source_event_id is not None else ()),
+        *((candidate.source_entry_id,) if candidate.source_entry_id is not None else ()),
         *candidate.source_fact_refs,
         *candidate.source_info_refs,
     )

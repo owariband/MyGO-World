@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Never
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from pydantic import ValidationError
@@ -36,6 +38,12 @@ from agent_runtime.sqlite import (
     upgrade_to_head,
 )
 from agent_runtime.world.contracts import WorldRef
+from agent_runtime.world.entry_storage import (
+    EventEntryLinkRow,
+    EventEntryRecipientRow,
+    EventEntryRow,
+    InteractionRequestRow,
+)
 from agent_runtime.world.initializer import initialize_public_world
 from agent_runtime.world.state import (
     AgentWorldState,
@@ -49,6 +57,7 @@ from agent_runtime.world.state import (
 )
 from agent_runtime.world.storage import (
     WorldAlreadyExistsError,
+    WorldCommitConflictError,
     WorldNotFoundError,
     WorldOwnershipError,
     WorldStore,
@@ -60,7 +69,11 @@ EXPECTED_TABLES = {
     "agent_runtime_states",
     "agent_world_states",
     "alembic_version",
+    "event_entries",
+    "event_entry_links",
+    "event_entry_recipients",
     "event_sessions",
+    "interaction_requests",
     "locations",
     "objects",
     "project_database",
@@ -102,12 +115,54 @@ def test_initial_migration_matches_all_mapped_storage_rows(tmp_path: Path) -> No
     try:
         assert MemoryRow.metadata is Base.metadata
         assert AgentRuntimeStateRow.metadata is Base.metadata
+        assert EventEntryRow.metadata is Base.metadata
+        assert EventEntryLinkRow.metadata is Base.metadata
+        assert EventEntryRecipientRow.metadata is Base.metadata
+        assert InteractionRequestRow.metadata is Base.metadata
         with database.engine.connect() as connection:
             differences = compare_metadata(
                 MigrationContext.configure(connection, opts={"compare_type": True}),
                 Base.metadata,
             )
         assert differences == []
+    finally:
+        database.dispose()
+
+
+def test_m3_migration_downgrades_and_reupgrades_without_losing_m2_world(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / ".runtime"
+    world_ref = WorldRef(project_id="coffee-golden", world_id="save-001")
+    database = open_project_database(runtime_root, world_ref.project_id, create=True)
+    with database.session_factory.begin() as session:
+        WorldStore(world_ref).insert_initial(session, _initial_world(world_ref))
+
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(Path(sqlite_runtime.__file__).parent / "migrations"),
+    )
+    try:
+        with database.engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.downgrade(config, "0001_m2_world")
+        assert current_schema_revision(database.engine) == "0001_m2_world"
+        inspector = inspect(database.engine)
+        assert "event_entries" not in inspector.get_table_names()
+        assert "control_epoch" not in {column["name"] for column in inspector.get_columns("worlds")}
+        with database.engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM worlds")) == 1
+
+        with database.engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "head")
+        assert current_schema_revision(database.engine) == expected_schema_revision()
+        with database.session_factory() as session:
+            restored = WorldStore(world_ref).load(session)
+        assert restored.world.control_epoch == 1
+        assert restored.world.decision_seq == 0
+        assert restored.agents == _initial_world(world_ref).agents
     finally:
         database.dispose()
 
@@ -167,6 +222,60 @@ def test_migration_failure_rolls_back_ddl(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
     assert tables == []
+
+
+def test_m3_migration_failure_rolls_back_to_complete_m2_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = tmp_path / ".runtime"
+    database = open_project_database(runtime_root, "coffee-golden", create=True)
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(Path(sqlite_runtime.__file__).parent / "migrations"),
+    )
+    original_create_table = Operations.create_table
+    try:
+        with database.engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.downgrade(config, "0001_m2_world")
+
+        def create_m3_entry_table_then_fail(
+            operations: Operations,
+            table_name: str,
+            *columns: SchemaItem,
+            if_not_exists: bool | None = None,
+            **kwargs: object,
+        ) -> object:
+            created = original_create_table(
+                operations,
+                table_name,
+                *columns,
+                if_not_exists=if_not_exists,
+                **kwargs,
+            )
+            if table_name == "event_entries":
+                raise RuntimeError("injected M3 migration failure")
+            return created
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(Operations, "create_table", create_m3_entry_table_then_fail)
+            with (
+                pytest.raises(RuntimeError, match="injected M3 migration failure"),
+                database.engine.begin() as connection,
+            ):
+                config.attributes["connection"] = connection
+                command.upgrade(config, "head")
+
+        assert current_schema_revision(database.engine) == "0001_m2_world"
+        inspector = inspect(database.engine)
+        assert "event_entries" not in inspector.get_table_names()
+        world_columns = {column["name"] for column in inspector.get_columns("worlds")}
+        assert "control_epoch" not in world_columns
+        assert "decision_seq" not in world_columns
+    finally:
+        database.dispose()
 
 
 def test_concurrent_first_open_atomically_publishes_one_complete_database(
@@ -315,6 +424,87 @@ def test_store_does_not_commit_callers_transaction(tmp_path: Path) -> None:
 
         with database.session_factory() as session, pytest.raises(WorldNotFoundError):
             WorldStore(world_ref).load(session)
+    finally:
+        database.dispose()
+
+
+def test_world_compare_and_advance_fences_stale_work_and_object_state(
+    tmp_path: Path,
+) -> None:
+    world_ref = WorldRef(project_id="coffee-golden", world_id="save-001")
+    database = open_project_database(tmp_path / ".runtime", world_ref.project_id, create=True)
+    store = WorldStore(world_ref)
+    try:
+        with database.session_factory.begin() as session:
+            store.insert_initial(session, _initial_world(world_ref))
+
+        with (
+            pytest.raises(WorldCommitConflictError, match="not running"),
+            database.session_factory.begin() as session,
+        ):
+            store.compare_and_advance(
+                session,
+                expected_version=1,
+                expected_control_epoch=1,
+                expected_decision_seq=0,
+                advances_world=False,
+            )
+
+        with database.session_factory.begin() as session:
+            session.execute(
+                text("UPDATE worlds SET status = 'running' WHERE world_id = 'save-001'")
+            )
+            assert store.compare_and_advance(
+                session,
+                expected_version=1,
+                expected_control_epoch=1,
+                expected_decision_seq=0,
+                advances_world=False,
+            ) == (1, 1)
+
+        with (
+            pytest.raises(WorldCommitConflictError, match="decision sequence"),
+            database.session_factory.begin() as session,
+        ):
+            store.compare_and_advance(
+                session,
+                expected_version=1,
+                expected_control_epoch=1,
+                expected_decision_seq=0,
+                advances_world=True,
+            )
+
+        with database.session_factory.begin() as session:
+            assert store.compare_and_advance(
+                session,
+                expected_version=1,
+                expected_control_epoch=1,
+                expected_decision_seq=1,
+                advances_world=True,
+            ) == (2, 2)
+            store.compare_and_set_object_state(
+                session,
+                object_id="coffee-machine",
+                expected_state="idle",
+                new_state="brewing",
+            )
+
+        with (
+            pytest.raises(WorldCommitConflictError, match="no longer"),
+            database.session_factory.begin() as session,
+        ):
+            store.compare_and_set_object_state(
+                session,
+                object_id="coffee-machine",
+                expected_state="idle",
+                new_state="ready",
+            )
+
+        with database.session_factory() as session:
+            restored = store.load(session)
+        assert restored.world.current_version == 2
+        assert restored.world.decision_seq == 2
+        assert restored.objects[0].state == "brewing"
     finally:
         database.dispose()
 

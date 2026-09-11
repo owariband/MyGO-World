@@ -83,8 +83,9 @@ def test_full_decision_records_one_explicit_repair_without_private_bodies(
     bad = (
         '{"action":{"kind":"utter"},"evidenceIds":[]}'
         if reason == "schema"
-        else '{"action":{"kind":"utter","target":{"kind":"character","id":"tomori"},'
-        '"content":"private-rejected-output"},"evidenceIds":[]}'
+        else '{"action":{"kind":"utter","affordanceId":"smoke-utter-soyo-direct",'
+        '"target":{"kind":"character","id":"tomori"},'
+        '"content":"private-rejected-output","expectsResponse":false},"evidenceIds":[]}'
     )
     responses = (*RESPONSES[:2], bad, RESPONSES[2])
     api = MockAPI(list(responses))

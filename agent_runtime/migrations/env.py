@@ -8,6 +8,12 @@ from sqlalchemy import Connection, engine_from_config, event, pool
 from agent_runtime.agent.memory.storage import MemoryRow
 from agent_runtime.agent.personact.storage import AgentRuntimeStateRow
 from agent_runtime.sqlite import Base, configure_sqlite_connection
+from agent_runtime.world.entry_storage import (
+    EventEntryLinkRow,
+    EventEntryRecipientRow,
+    EventEntryRow,
+    InteractionRequestRow,
+)
 from agent_runtime.world.storage import (
     AgentWorldStateRow,
     EventSessionRow,
@@ -31,6 +37,10 @@ _MAPPED_ROWS = (
     ObjectRow,
     WorldFactRow,
     EventSessionRow,
+    EventEntryRow,
+    EventEntryLinkRow,
+    EventEntryRecipientRow,
+    InteractionRequestRow,
     AgentRuntimeStateRow,
     MemoryRow,
 )

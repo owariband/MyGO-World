@@ -8,15 +8,23 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from agent_runtime.agent.memory.contracts import MemoryKind, MemoryRecord
-from agent_runtime.agent.memory.errors import MemoryScopeError
+from agent_runtime.agent.memory.contracts import MemoryKind, MemoryRecord, MemoryTouch
+from agent_runtime.agent.memory.errors import MemoryScopeError, MemoryTouchError
 from agent_runtime.agent.memory.storage import MemoryRow, MemoryStore
 from agent_runtime.agent.memory.stream import MemoryStream
-from agent_runtime.agent.personact.state import CognitiveConfig, PersonaState, PlanItem
+from agent_runtime.agent.personact.state import (
+    CognitiveConfig,
+    DecisionOutcome,
+    PersonActStateUpdate,
+    PersonaState,
+    PlanItem,
+)
 from agent_runtime.agent.personact.storage import (
     AgentRuntimeStateRow,
+    PersonaStateConflictError,
     PersonaStateStore,
     StoredPersonaState,
 )
@@ -25,7 +33,7 @@ from agent_runtime.sqlite import (
     ProjectDatabaseIdentityError,
     open_project_database,
 )
-from agent_runtime.world.contracts import WorldRef
+from agent_runtime.world.contracts import CommitPosition, WorldRef
 
 PROJECT_ID = "coffee-golden"
 WORLD_REF = WorldRef(project_id=PROJECT_ID, world_id="save-001")
@@ -249,6 +257,182 @@ def test_memory_restore_requires_contiguous_sequence_and_strict_json_arrays(
         database.dispose()
 
 
+def test_persona_compare_and_set_persists_cursor_decision_and_rejects_stale_revision(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    state = _state(WORLD_REF, "anon")
+    update_state = PersonActStateUpdate(
+        world_ref=WORLD_REF,
+        agent_id="anon",
+        decision_id="decision-1",
+        outcome=DecisionOutcome.WAIT,
+        state=state,
+        observation_cursor=CommitPosition(world_version=1),
+    )
+    try:
+        with database.session_factory.begin() as session:
+            _seed_world(session, WORLD_REF, "anon", "soyo")
+            _seed_dialogue_entry(session, WORLD_REF)
+            PersonaStateStore(WORLD_REF).insert(session, state, "a" * 64)
+
+        with database.session_factory.begin() as session:
+            stored = PersonaStateStore(WORLD_REF).compare_and_set(
+                session,
+                update_state,
+                expected_revision=1,
+            )
+            assert stored == StoredPersonaState(
+                state_revision=2,
+                spec_digest="a" * 64,
+                state=state,
+                observation_cursor=CommitPosition(world_version=1),
+                last_decision_id="decision-1",
+                last_decision_outcome=DecisionOutcome.WAIT,
+            )
+
+        with (
+            pytest.raises(PersonaStateConflictError, match="stale"),
+            database.session_factory.begin() as session,
+        ):
+            PersonaStateStore(WORLD_REF).compare_and_set(
+                session,
+                update_state,
+                expected_revision=1,
+            )
+
+        without_cursor = PersonActStateUpdate(
+            world_ref=WORLD_REF,
+            agent_id="anon",
+            decision_id="decision-2",
+            outcome=DecisionOutcome.NO_OP,
+            state=state,
+        )
+        with (
+            pytest.raises(PersonaStateConflictError, match="stale"),
+            database.session_factory.begin() as session,
+        ):
+            PersonaStateStore(WORLD_REF).compare_and_set(
+                session,
+                without_cursor,
+                expected_revision=2,
+            )
+
+        with database.session_factory() as session:
+            assert PersonaStateStore(WORLD_REF).load(session, "anon") == stored
+    finally:
+        database.dispose()
+
+
+def test_memory_append_touch_and_source_entry_round_trip_atomically(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    first = _record(
+        WORLD_REF,
+        "anon",
+        "memory-1",
+        minute=1,
+        source_entry_id="entry-1",
+    )
+    second = _record(
+        WORLD_REF,
+        "anon",
+        "memory-2",
+        minute=2,
+        source_entry_id="entry-1",
+    )
+    scope = _scope(WORLD_REF, "anon")
+    accessed_at = BASE_TIME + timedelta(minutes=20)
+    try:
+        with database.session_factory.begin() as session:
+            _seed_world(session, WORLD_REF, "anon", "soyo")
+            _seed_dialogue_entry(session, WORLD_REF)
+            MemoryStore(WORLD_REF).insert_stream(
+                session,
+                _stream(WORLD_REF, "anon", first),
+            )
+
+        with database.session_factory.begin() as session:
+            store = MemoryStore(WORLD_REF)
+            store.append(
+                session,
+                agent_id="anon",
+                scope=scope,
+                records=(second,),
+            )
+            store.touch(
+                session,
+                (
+                    MemoryTouch(
+                        memory_id=first.id,
+                        world_ref=WORLD_REF,
+                        agent_id="anon",
+                        scope=scope,
+                        accessed_at=accessed_at,
+                    ),
+                ),
+            )
+
+        with database.session_factory() as session:
+            restored = MemoryStore(WORLD_REF).load(session, "anon", scope)
+            assert tuple(record.id for record in restored.records) == ("memory-1", "memory-2")
+            assert all(record.source_entry_id == "entry-1" for record in restored.records)
+            assert restored.records[0].last_accessed_at == accessed_at
+
+        with (
+            pytest.raises(MemoryTouchError, match="backwards"),
+            database.session_factory.begin() as session,
+        ):
+            MemoryStore(WORLD_REF).touch(
+                session,
+                (
+                    MemoryTouch(
+                        memory_id=first.id,
+                        world_ref=WORLD_REF,
+                        agent_id="anon",
+                        scope=scope,
+                        accessed_at=BASE_TIME,
+                    ),
+                ),
+            )
+
+        wrong_scope = "project/coffee-golden/world/save-001/persona/someone-else"
+        with (
+            pytest.raises(MemoryScopeError, match="persisted MemoryRecord scope"),
+            database.session_factory.begin() as session,
+        ):
+            MemoryStore(WORLD_REF).append(
+                session,
+                agent_id="anon",
+                scope=wrong_scope,
+                records=(second.model_copy(update={"id": "memory-3", "scope": wrong_scope}),),
+            )
+    finally:
+        database.dispose()
+
+
+def test_memory_source_entry_requires_historical_recipient_visibility(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    hidden = _record(
+        WORLD_REF,
+        "taki",
+        "hidden-memory",
+        minute=1,
+        source_entry_id="entry-1",
+    )
+    try:
+        with database.session_factory.begin() as session:
+            _seed_world(session, WORLD_REF, "anon", "soyo", "taki")
+            _seed_dialogue_entry(session, WORLD_REF)
+
+        with pytest.raises(IntegrityError), database.session_factory.begin() as session:
+            MemoryStore(WORLD_REF).insert_stream(
+                session,
+                _stream(WORLD_REF, "taki", hidden),
+            )
+    finally:
+        database.dispose()
+
+
 def _database(tmp_path: Path) -> ProjectDatabase:
     return open_project_database(tmp_path / "runtime", PROJECT_ID, create=True)
 
@@ -285,6 +469,49 @@ def _seed_world(session: Session, world_ref: WorldRef, *agent_ids: str) -> None:
                 "INSERT INTO agent_world_states("
                 "world_id, agent_id, location_id, public_status"
                 ") VALUES (:world_id, :agent_id, 'cafe', NULL)"
+            ),
+            {"world_id": world_ref.world_id, "agent_id": agent_id},
+        )
+        session.execute(
+            text(
+                "INSERT INTO event_sessions("
+                "world_id, session_id, agent_id, root_session_id, "
+                "topology_version, updated_world_version"
+                ") VALUES ("
+                ":world_id, :session_id, :agent_id, :session_id, 1, 1)"
+            ),
+            {
+                "world_id": world_ref.world_id,
+                "session_id": f"session-{agent_id}",
+                "agent_id": agent_id,
+            },
+        )
+
+
+def _seed_dialogue_entry(session: Session, world_ref: WorldRef) -> None:
+    session.execute(
+        text(
+            "INSERT INTO event_entries("
+            "world_id, entry_id, status, entry_kind, source_kind, source_id, source_index, "
+            "world_version, entry_index, root_session_id_at_commit, topology_version, "
+            "actor_agent_id, target_agent_id, target_object_id, operation_id, audience_mode, "
+            "delivery_channel, occurred_at, text, created_at"
+            ") VALUES ("
+            ":world_id, 'entry-1', 'committed', 'dialogue', 'character_proposal', "
+            "'decision-0', 0, 1, 0, 'session-anon', 1, 'anon', 'soyo', NULL, NULL, "
+            "'session', 'direct', :occurred_at, 'hello', :created_at)"
+        ),
+        {
+            "world_id": world_ref.world_id,
+            "occurred_at": BASE_TIME.isoformat(),
+            "created_at": BASE_TIME.isoformat(),
+        },
+    )
+    for agent_id in ("anon", "soyo"):
+        session.execute(
+            text(
+                "INSERT INTO event_entry_recipients(world_id, entry_id, agent_id) "
+                "VALUES (:world_id, 'entry-1', :agent_id)"
             ),
             {"world_id": world_ref.world_id, "agent_id": agent_id},
         )
@@ -335,6 +562,7 @@ def _record(
     *,
     minute: int,
     kind: MemoryKind = MemoryKind.CHAT,
+    source_entry_id: str | None = None,
 ) -> MemoryRecord:
     created_at = BASE_TIME + timedelta(minutes=minute)
     return MemoryRecord(
@@ -353,6 +581,7 @@ def _record(
         poignancy=3.5,
         tags=("coffee", "会話"),
         source="event-entry",
+        source_entry_id=source_entry_id,
         evidence_ids=("entry-1", "fact-1"),
         embedding=(0.1, -0.2, 0.3),
         novelty_key=f"{memory_id}/v1",

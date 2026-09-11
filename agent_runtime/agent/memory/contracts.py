@@ -10,7 +10,7 @@ from typing import Annotated, Protocol, Self
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from agent_runtime.model import StrictModel
-from agent_runtime.world.contracts import WorldRef
+from agent_runtime.world.contracts import Identifier, WorldRef
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 NonNegativeScore = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
@@ -41,6 +41,7 @@ class MemoryRecord(StrictModel):
     poignancy: NonNegativeScore
     tags: tuple[NonEmptyText, ...] = ()
     source: NonEmptyText
+    source_entry_id: Identifier | None = None
     evidence_ids: tuple[NonEmptyText, ...] = ()
     embedding: tuple[float, ...] = ()
     novelty_key: NonEmptyText

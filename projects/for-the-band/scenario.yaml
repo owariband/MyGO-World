@@ -1,7 +1,7 @@
 formatVersion: 1
 projectId: for-the-band
 seedId: rehearsal-opening
-version: 1
+version: 2
 worldTime: "2026-09-08T18:10:00+08:00"
 
 locations:
@@ -16,6 +16,11 @@ objects:
     description: 一台留在谱架旁、可供排练使用的电子节拍器。
     locationId: ring-rehearsal
     state: stopped
+    operations:
+      - operationId: start
+        fromState: stopped
+        toState: running
+        resultText: 节拍器被启动，稳定的节拍声在排练室里响起。
 
 publicFacts:
   - id: rehearsal-finished

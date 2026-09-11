@@ -262,6 +262,7 @@ def test_gateway_parses_real_proposal_union_and_evidence_array() -> None:
             {
                 "action": {
                     "kind": "interact",
+                    "affordanceId": "interact-soyo",
                     "target": {"kind": "character", "id": "soyo"},
                     "description": "offer the menu",
                 },
@@ -430,12 +431,12 @@ def test_model_strategy_repairs_semantically_invalid_action_once(tmp_path: Path)
     del tmp_path
     skill = _bound_skill()
     first = (
-        '{"action":{"kind":"interact","target":'
+        '{"action":{"kind":"interact","affordanceId":"interact-soyo","target":'
         '{"kind":"character","id":"unknown"},'
         '"description":"talk"},"evidenceIds":[]}'
     )
     second = (
-        '{"action":{"kind":"interact","target":'
+        '{"action":{"kind":"interact","affordanceId":"interact-soyo","target":'
         '{"kind":"character","id":"soyo"},'
         '"description":"talk"},"evidenceIds":["soyo-visible"]}'
     )
@@ -473,7 +474,7 @@ def test_personact_loop_uses_model_strategy_without_moving_world(use_langchain: 
         '{"score":3.0}',
         '{"items":[{"planId":"talk","description":"talk naturally"}]}',
         (
-            '{"action":{"kind":"interact","target":'
+            '{"action":{"kind":"interact","affordanceId":"interact-soyo","target":'
             '{"kind":"character","id":"soyo"},'
             '"description":"offer the menu"},'
             '"evidenceIds":["soyo-visible"]}'
@@ -506,12 +507,15 @@ def test_personact_loop_uses_model_strategy_without_moving_world(use_langchain: 
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         world_time=datetime(2026, 9, 1, 9, tzinfo=UTC),
         candidates=(_poignancy_candidate(),),
         visible_evidence_ids=("soyo-visible",),
         affordances=(
             Affordance(
+                affordance_id="interact-soyo",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
             ),
@@ -581,6 +585,7 @@ def test_model_strategy_shares_one_repair_budget_for_schema_and_semantics() -> N
             {
                 "action": {
                     "kind": "interact",
+                    "affordanceId": "interact-soyo",
                     "target": {"kind": "character", "id": "unknown"},
                     "description": "talk",
                 },
@@ -871,10 +876,13 @@ def _planning_input() -> ActionPlanningInput:
         agent_id="anon",
         event_session_id="cafe",
         based_on_world_version=7,
+        based_on_control_epoch=1,
+        based_on_decision_seq=0,
         current_location_id="cafe",
         visible_evidence_ids=("soyo-visible",),
         affordances=(
             Affordance(
+                affordance_id="interact-soyo",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
             ),

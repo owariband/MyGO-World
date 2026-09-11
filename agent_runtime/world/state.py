@@ -9,7 +9,13 @@ from typing import Annotated, Self
 from pydantic import AwareDatetime, Field, StringConstraints, model_validator
 
 from agent_runtime.model import StrictModel
-from agent_runtime.world.contracts import Identifier, WorldRef, WorldVersion
+from agent_runtime.world.contracts import (
+    ControlEpoch,
+    DecisionSequence,
+    Identifier,
+    WorldRef,
+    WorldVersion,
+)
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 ContentHash = Annotated[
@@ -36,6 +42,8 @@ class WorldState(StrictModel):
     world_time: AwareDatetime
     status: WorldStatus
     created_at: AwareDatetime
+    control_epoch: ControlEpoch = 1
+    decision_seq: DecisionSequence = 0
 
 
 class LocationState(StrictModel):

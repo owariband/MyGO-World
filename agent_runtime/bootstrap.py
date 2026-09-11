@@ -24,6 +24,7 @@ from agent_runtime.scenario import (
     FactSubject,
     KnowledgeSeed,
     LoadedScenario,
+    ObjectSeed,
     ScenarioSeed,
     WorldFactSeed,
     load_project_scenario,
@@ -92,6 +93,7 @@ class LoadedWorld:
     persona_states: tuple[StoredPersonaState, ...]
     memory_streams: tuple[MemoryStream, ...]
     session_partition: UnionPart[str]
+    object_seeds: tuple[ObjectSeed, ...]
 
     @property
     def world_ref(self) -> WorldRef:
@@ -104,6 +106,7 @@ class _PreparedWorld:
     specs: tuple[CompiledPersonActSpec, ...]
     persona_states: tuple[PersonaState, ...]
     memory_streams: tuple[MemoryStream, ...]
+    object_seeds: tuple[ObjectSeed, ...]
 
 
 def create_world(
@@ -201,6 +204,7 @@ def _prepare_world(
         specs=specs,
         persona_states=persona_states,
         memory_streams=memory_streams,
+        object_seeds=source.seed.objects,
     )
 
 
@@ -284,6 +288,8 @@ def _build_public_state(
             world_time=seed.world_time,
             status=WorldStatus.PAUSED,
             created_at=created_at,
+            control_epoch=1,
+            decision_seq=0,
         ),
         locations=locations,
         agents=agents,
@@ -449,6 +455,7 @@ def _load_prepared_world(
         persona_states=persona_states,
         memory_streams=streams,
         session_partition=_restore_partition(public_state),
+        object_seeds=source.seed.objects,
     )
 
 
@@ -467,6 +474,7 @@ def _loaded_from_prepared(prepared: _PreparedWorld) -> LoadedWorld:
         ),
         memory_streams=prepared.memory_streams,
         session_partition=_restore_partition(prepared.public_state),
+        object_seeds=prepared.object_seeds,
     )
 
 

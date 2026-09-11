@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     select,
+    update,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -51,6 +52,10 @@ class WorldOwnershipError(WorldStorageError):
     """Input state does not belong to the Store's bound WorldRef."""
 
 
+class WorldCommitConflictError(WorldStorageError):
+    """The World or Object no longer matches the state read for one decision."""
+
+
 class ProjectDatabaseRow(Base):
     __tablename__ = "project_database"
     __table_args__ = (
@@ -73,6 +78,8 @@ class WorldRow(Base):
         ),
         CheckConstraint("current_version >= 1", name="ck_worlds_current_version"),
         CheckConstraint("status IN ('paused', 'running', 'ended')", name="ck_worlds_status"),
+        CheckConstraint("control_epoch >= 1", name="ck_worlds_control_epoch"),
+        CheckConstraint("decision_seq >= 0", name="ck_worlds_decision_seq"),
     )
 
     world_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -87,6 +94,8 @@ class WorldRow(Base):
     world_time: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    control_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    decision_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class LocationRow(Base):
@@ -259,6 +268,8 @@ class WorldStore:
                 world_time=world.world_time.isoformat(),
                 status=world.status.value,
                 created_at=world.created_at.isoformat(),
+                control_epoch=world.control_epoch,
+                decision_seq=world.decision_seq,
             )
         )
         try:
@@ -350,6 +361,8 @@ class WorldStore:
             world_time=_load_datetime(world_row.world_time),
             status=WorldStatus(world_row.status),
             created_at=_load_datetime(world_row.created_at),
+            control_epoch=world_row.control_epoch,
+            decision_seq=world_row.decision_seq,
         )
         world_id = self._world_ref.world_id
         locations = tuple(
@@ -435,6 +448,106 @@ class WorldStore:
             facts=facts,
             sessions=sessions,
         )
+
+    def compare_and_advance(
+        self,
+        session: Session,
+        *,
+        expected_version: int,
+        expected_control_epoch: int,
+        expected_decision_seq: int,
+        advances_world: bool,
+    ) -> tuple[int, int]:
+        """Claim one accepted decision using all public stale-work fences."""
+
+        self._require_database_project(session)
+        if isinstance(expected_version, bool) or expected_version < 1:
+            raise ValueError("expected_version must be a positive integer")
+        if isinstance(expected_control_epoch, bool) or expected_control_epoch < 1:
+            raise ValueError("expected_control_epoch must be a positive integer")
+        if isinstance(expected_decision_seq, bool) or expected_decision_seq < 0:
+            raise ValueError("expected_decision_seq must be a non-negative integer")
+
+        next_version = expected_version + int(advances_world)
+        next_decision_seq = expected_decision_seq + 1
+        updated_world_id = session.scalar(
+            update(WorldRow)
+            .where(
+                WorldRow.world_id == self._world_ref.world_id,
+                WorldRow.project_id == self._world_ref.project_id,
+                WorldRow.status == WorldStatus.RUNNING.value,
+                WorldRow.control_epoch == expected_control_epoch,
+                WorldRow.current_version == expected_version,
+                WorldRow.decision_seq == expected_decision_seq,
+            )
+            .values(
+                current_version=next_version,
+                decision_seq=next_decision_seq,
+            )
+            .returning(WorldRow.world_id)
+        )
+        if updated_world_id is None:
+            raise WorldCommitConflictError(
+                "World is not running or the version, control epoch, or decision sequence is stale"
+            )
+        return next_version, next_decision_seq
+
+    def compare_and_set_object_state(
+        self,
+        session: Session,
+        *,
+        object_id: str,
+        expected_state: str,
+        new_state: str,
+    ) -> None:
+        """Apply one trusted Object operation against the exact state it resolved from."""
+
+        self._require_database_project(session)
+        if not object_id.strip():
+            raise ValueError("object_id cannot be empty")
+        if not expected_state.strip() or not new_state.strip():
+            raise ValueError("Object states cannot be empty")
+        updated_object_id = session.scalar(
+            update(ObjectRow)
+            .where(
+                ObjectRow.world_id == self._world_ref.world_id,
+                ObjectRow.object_id == object_id,
+                ObjectRow.state == expected_state,
+            )
+            .values(state=new_state)
+            .returning(ObjectRow.object_id)
+        )
+        if updated_object_id is None:
+            raise WorldCommitConflictError(
+                f'Object "{object_id}" does not exist or no longer has state "{expected_state}"'
+            )
+
+    def require_object_interaction_context(
+        self,
+        session: Session,
+        *,
+        agent_id: str,
+        object_id: str,
+    ) -> None:
+        """Reject an Object operation after its actor or target moved out of reach."""
+
+        self._require_database_project(session)
+        agent_location = session.scalar(
+            select(AgentWorldStateRow.location_id).where(
+                AgentWorldStateRow.world_id == self._world_ref.world_id,
+                AgentWorldStateRow.agent_id == agent_id,
+            )
+        )
+        object_location = session.scalar(
+            select(ObjectRow.location_id).where(
+                ObjectRow.world_id == self._world_ref.world_id,
+                ObjectRow.object_id == object_id,
+            )
+        )
+        if agent_location is None or object_location is None or agent_location != object_location:
+            raise WorldCommitConflictError(
+                f'Agent "{agent_id}" can no longer interact with Object "{object_id}"'
+            )
 
     def _require_owner(self, world_ref: WorldRef) -> None:
         if world_ref != self._world_ref:

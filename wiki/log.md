@@ -131,3 +131,9 @@
 - M3 设计草案采用唯一 `EventEntry` 客观历史、Scenario-owned Object operation、稳定 affordance、recipient snapshot、World/Agent CAS 事务及 disposable PersonAct work instance；M3 代码尚未开始，六个行为冻结点等待 Review。
 - 用户确认阶段日志必须从设计阶段建立：M3 新增独立 `M3_dev_log.md`；总计划只保留阶段摘要、状态、依赖与门禁，后续实现差异和测试继续原位追加到同一日志，不另建同义 `M3_dev_plan.md`。
 - 按用户要求重写 `master` 的两条旧提交元数据，删除不需要的 CLI co-author trailer；六个提交的文件树、作者、提交者、时间和标题均保持不变，新 tip 为 `5d2f496`。同步修正 Wiki 中失效的 M1/M2 commit 引用；MVP 与 feature 分支未改写。
+
+## 2026-09-11
+
+- 实现 M3.1–M3.4 单步世界与认知提交：Scenario operation、append-only EventEntry/request、精确 recipient snapshot、AgentViewBuilder、World/Persona/Memory 原子提交和可重载 CharacterStep 已落地；Scheduler、Session merge/split、Director 与 Broadcast 仍留在后续阶段。
+- 独立 Review 后补齐 Object/recipient 写边界、fence-bound decision ID、历史 replay 位置语义、六 checkpoint 回滚和 `0002` 中途故障回滚；M3 专项 63 项、完整 Python 442 项与 Node 14 项通过，Ruff、Pyright、Alembic、wheel 和 diff 门禁全绿。
+- M3 当前为 `REVIEW · uncommitted worktree`。M4 必须把调度 cursor、wakeup、额度和公平轮转进度接入 CharacterStep 的同一写事务，不能在角色决定提交后另开事务保存调度状态。
