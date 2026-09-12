@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "id": "mygo-hogwarts",
+  "name": "MyGO × Hogwarts：有求必应屋的共鸣课题",
+  "gameKey": "generative-mygo.mygo-hogwarts",
+  "titleImage": "角色生活地点/mygo/爱音家门口（白天有车）.jpg",
+  "titleBgm": "s_Title.mp3",
+  "gameLogo": "WebGAL_MyGO_Enter.webp",
+  "defaultLanguage": "zh_CN",
+  "textSpeed": 58,
+  "migrateTextSpeedAtOrBelow": 100,
+  "playerSettingsVersion": 1
+}

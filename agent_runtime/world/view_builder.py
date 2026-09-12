@@ -22,7 +22,13 @@ from agent_runtime.world.contracts import (
     ProposalKind,
     WorldRef,
 )
-from agent_runtime.world.entries import DialogueEntry, EventEntry, InteractionRequest
+from agent_runtime.world.entries import (
+    ActionEntry,
+    BehaviorEntry,
+    DialogueEntry,
+    EventEntry,
+    InteractionRequest,
+)
 from agent_runtime.world.entry_storage import EventEntryStore
 from agent_runtime.world.state import (
     AgentWorldState,
@@ -67,6 +73,8 @@ class AgentViewBuilder:
         *,
         agent_id: str,
         observed_through: CommitPosition | None = None,
+        priority_request_entry_id: str | None = None,
+        restrict_pending_priority: bool = False,
     ) -> AgentView:
         """Project current committed facts into one Character's hard-visible input."""
 
@@ -104,6 +112,16 @@ class AgentViewBuilder:
             visible_by_id=visible_by_id,
             current_version=current_version,
         )
+        if (
+            priority_request_entry_id is not None
+            and priority_request_entry_id not in pending_sources
+        ):
+            raise AgentViewBuildError("priority request is not pending for this Agent")
+        mandatory_entry_ids = (
+            frozenset((priority_request_entry_id,) if priority_request_entry_id is not None else ())
+            if restrict_pending_priority
+            else frozenset(pending_sources)
+        )
         new_entries = tuple(
             entry
             for entry in visible_entries
@@ -116,7 +134,7 @@ class AgentViewBuilder:
                 self._entry_candidate(
                     entry,
                     agent_id=agent_id,
-                    pending_entry_ids=frozenset(pending_sources),
+                    pending_entry_ids=mandatory_entry_ids,
                 )
                 for entry in candidate_entries
             ),
@@ -268,7 +286,7 @@ class AgentViewBuilder:
                 "text",
             )
             tags = ("dialogue", entry.delivery_channel.value)
-        else:
+        elif isinstance(entry, ActionEntry):
             object_id = entry.target_object_id
             predicate = entry.operation_id
             visible_fields = (
@@ -279,6 +297,27 @@ class AgentViewBuilder:
                 "text",
             )
             tags = ("action", entry.operation_id)
+        elif isinstance(entry, BehaviorEntry):
+            object_id = None
+            predicate = entry.operation_id
+            visible_fields = (
+                "actor_agent_id",
+                "operation_id",
+                "occurred_at",
+                "text",
+            )
+            tags = ("behavior", entry.operation_id)
+        else:
+            object_id = entry.target_agent_id
+            predicate = entry.transition_reason.value
+            visible_fields = (
+                "actor_agent_id",
+                "target_agent_id",
+                "transition_reason",
+                "occurred_at",
+                "text",
+            )
+            tags = ("session_transition", entry.transition_reason.value)
         return PerceptCandidate(
             candidate_id=f"entry-{entry.entry_id}",
             channel=channel,
@@ -389,7 +428,7 @@ class AgentViewBuilder:
         resolver: WorldAffordanceResolver,
     ) -> tuple[Affordance, ...]:
         affordances = [
-            resolver.simple_affordance(ProposalKind.ACT),
+            *resolver.behavior_affordances(),
             resolver.simple_affordance(ProposalKind.WAIT),
         ]
         same_root_agent_ids = sorted(
@@ -398,12 +437,28 @@ class AgentViewBuilder:
             if node.root_session_id == actor_session.root_session_id
             and node.agent_id != actor.agent_id
         )
-        for target_id in same_root_agent_ids:
-            target = CharacterTarget(id=target_id)
-            affordances.extend(
-                resolver.utter_affordance(target=target, delivery_channel=channel)
-                for channel in (DeliveryChannel.DIRECT, DeliveryChannel.WHISPER)
-            )
+        dialogue_allowed = actor_session.consecutive_dialogue_turns < 50
+        if dialogue_allowed:
+            for target_id in same_root_agent_ids:
+                target = CharacterTarget(id=target_id)
+                affordances.extend(
+                    resolver.utter_affordance(target=target, delivery_channel=channel)
+                    for channel in (DeliveryChannel.DIRECT, DeliveryChannel.WHISPER)
+                )
+
+        if same_root_agent_ids:
+            affordances.append(resolver.leave_session_affordance())
+
+        local_sessions = {
+            item.agent_id: next(node for node in public.sessions if node.agent_id == item.agent_id)
+            for item in public.agents
+            if item.location_id == actor.location_id and item.agent_id != actor.agent_id
+        }
+        for target_id, target_session in sorted(local_sessions.items()):
+            if target_session.root_session_id != actor_session.root_session_id:
+                affordances.append(
+                    resolver.join_session_affordance(target=CharacterTarget(id=target_id))
+                )
 
         for item in public.objects:
             if item.location_id == actor.location_id:
@@ -415,17 +470,18 @@ class AgentViewBuilder:
                 )
 
         same_root = frozenset(same_root_agent_ids)
-        for request in pending:
-            if request.requester_agent_id not in same_root:
-                continue
-            source = pending_sources[request.request_entry_id]
-            affordances.append(
-                resolver.response_affordance(
-                    target=CharacterTarget(id=request.requester_agent_id),
-                    delivery_channel=source.delivery_channel,
-                    request_entry_id=request.request_entry_id,
+        if dialogue_allowed:
+            for request in pending:
+                if request.requester_agent_id not in same_root:
+                    continue
+                source = pending_sources[request.request_entry_id]
+                affordances.append(
+                    resolver.response_affordance(
+                        target=CharacterTarget(id=request.requester_agent_id),
+                        delivery_channel=source.delivery_channel,
+                        request_entry_id=request.request_entry_id,
+                    )
                 )
-            )
         return tuple(sorted(affordances, key=_affordance_key))
 
 

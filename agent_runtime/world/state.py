@@ -12,6 +12,7 @@ from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import (
     ControlEpoch,
     DecisionSequence,
+    DispatchCount,
     Identifier,
     WorldRef,
     WorldVersion,
@@ -44,6 +45,33 @@ class WorldState(StrictModel):
     created_at: AwareDatetime
     control_epoch: ControlEpoch = 1
     decision_seq: DecisionSequence = 0
+    dispatch_count: DispatchCount = 0
+    dispatch_limit_at: DispatchCount = 0
+    active_dispatch_count: Annotated[int, Field(ge=1)] | None = None
+    active_dispatch_agent_id: Identifier | None = None
+    run_owner_id: Identifier | None = None
+    stop_reason: NonEmptyText | None = None
+    stopped_at_world_version: WorldVersion | None = None
+
+    @model_validator(mode="after")
+    def _validate_runtime_control(self) -> Self:
+        if self.dispatch_limit_at < self.dispatch_count:
+            raise ValueError("dispatchLimitAt cannot be behind dispatchCount")
+        if (self.active_dispatch_count is None) != (self.active_dispatch_agent_id is None):
+            raise ValueError("active dispatch count and Agent must be present together")
+        if (
+            self.active_dispatch_count is not None
+            and self.active_dispatch_count > self.dispatch_count
+        ):
+            raise ValueError("activeDispatchCount cannot be newer than dispatchCount")
+        if self.active_dispatch_count is not None and self.status is not WorldStatus.RUNNING:
+            raise ValueError("only a running World may have an active dispatch")
+        if (
+            self.stopped_at_world_version is not None
+            and self.stopped_at_world_version > self.current_version
+        ):
+            raise ValueError("stoppedAtWorldVersion cannot be newer than the World")
+        return self
 
 
 class LocationState(StrictModel):
@@ -102,6 +130,9 @@ class EventSessionNode(StrictModel):
     root_session_id: Identifier
     topology_version: WorldVersion
     updated_world_version: WorldVersion
+    last_dispatch_count: DispatchCount = 0
+    wait_for_visible_entry_after_version: WorldVersion | None = None
+    consecutive_dialogue_turns: DispatchCount = 0
 
 
 class PublicWorldState(StrictModel):
@@ -158,6 +189,13 @@ class PublicWorldState(StrictModel):
                 raise ValueError("a Session topology cannot be newer than the World")
             if node.updated_world_version > self.world.current_version:
                 raise ValueError("a Session binding cannot be newer than the World")
+            if node.last_dispatch_count > self.world.dispatch_count:
+                raise ValueError("a Session dispatch count cannot be newer than the World")
+            if (
+                node.wait_for_visible_entry_after_version is not None
+                and node.wait_for_visible_entry_after_version > self.world.current_version
+            ):
+                raise ValueError("a Session wait threshold cannot be newer than the World")
         roots = {node.root_session_id for node in self.sessions}
         for root in roots:
             root_node = nodes[root]

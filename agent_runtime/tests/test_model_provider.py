@@ -18,8 +18,10 @@ from agent_runtime.model_gateway import (
     ModelTransportError,
 )
 from agent_runtime.model_provider import (
+    ARK_BASE_URL,
     DEEPSEEK_BASE_URL,
     DEFAULT_DEEPSEEK_MODEL,
+    create_ark_gateway,
     create_deepseek_gateway,
 )
 from agent_runtime.model_smoke import run_smoke
@@ -27,6 +29,7 @@ from agent_runtime.world.contracts import WorldRef
 
 PLAN = '{"items":[{"planId":"talk","description":"talk to Soyo"}]}'
 SECRET = "private-provider-body-or-key"
+ARK_MODEL_ID = "ep-offline-test"
 
 
 @dataclass
@@ -86,6 +89,8 @@ def offline_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_ORG_ID", "unused-openai-organization")
     monkeypatch.setenv("OPENAI_ORGANIZATION", "unused-legacy-organization")
     monkeypatch.setenv("OPENAI_PROJECT_ID", "unused-openai-project")
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    monkeypatch.delenv("ARK_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
 
@@ -139,6 +144,62 @@ def test_real_sdk_accepts_proposal_union_and_evidence_array() -> None:
         )
     assert result.structured.evidence_ids == ("soyo-visible",)
     assert result.structured.action.kind == "utter"
+
+
+def test_ark_openai_wire_configuration_and_strict_tuple_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARK_ENDPOINT_ID", ARK_MODEL_ID)
+    api = MockAPI([PLAN])
+    with httpx.Client(transport=httpx.MockTransport(api.handle)) as client:
+        gateway = create_ark_gateway(api_key=SECRET, http_client=client)
+        result = gateway.generate(_request(model_id=ARK_MODEL_ID), PlanDraft)
+
+    assert result.structured.items[0].plan_id == "talk"
+    assert isinstance(result.structured.items, tuple)
+    request = api.requests[0]
+    assert request.method == "POST"
+    assert str(request.url) == f"{ARK_BASE_URL}/chat/completions"
+    assert request.headers["authorization"] == f"Bearer {SECRET}"
+    assert "openai-organization" not in request.headers
+    assert "openai-project" not in request.headers
+    payload = api.payloads[0]
+    assert payload["model"] == ARK_MODEL_ID
+    assert payload["stream"] is False
+    assert "thinking" not in payload
+    assert "parallel_tool_calls" not in payload
+    assert payload["tool_choice"]["type"] == "function"
+    assert SECRET not in result.trace.model_dump_json()
+
+
+def test_ark_missing_key_never_falls_back_to_other_provider_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARK_ENDPOINT_ID", ARK_MODEL_ID)
+    monkeypatch.setenv("OPENAI_API_KEY", SECRET)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", SECRET)
+    with pytest.raises(ModelRequestRejectedError, match="ARK_API_KEY is required"):
+        create_ark_gateway()
+
+
+def test_ark_missing_endpoint_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ARK_API_KEY", SECRET)
+    with pytest.raises(ModelRequestRejectedError, match="ARK_ENDPOINT_ID is required"):
+        create_ark_gateway()
+
+
+def test_ark_provider_rejection_is_sanitized_and_not_retried() -> None:
+    api = MockAPI([401])
+    with httpx.Client(transport=httpx.MockTransport(api.handle)) as client:
+        gateway = create_ark_gateway(
+            model_id=ARK_MODEL_ID,
+            api_key=SECRET,
+            http_client=client,
+        )
+        with pytest.raises(ModelRequestRejectedError) as caught:
+            gateway.generate(_request(model_id=ARK_MODEL_ID), PlanDraft)
+    assert len(api.requests) == 1
+    assert SECRET not in str(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -285,14 +346,14 @@ def test_whole_agent_through_sdk_with_at_most_one_schema_or_semantic_repair(
         assert api.payloads[-2]["messages"][1] == api.payloads[-1]["messages"][1]
 
 
-def _request() -> ModelRequest:
+def _request(*, model_id: str = DEFAULT_DEEPSEEK_MODEL) -> ModelRequest:
     return ModelRequest(
         world_ref=WorldRef(project_id="provider-smoke", world_id="offline"),
         call_id="offline-call-1",
         agent_kind="character",
         agent_id="anon",
         call_kind="plan",
-        model_id=DEFAULT_DEEPSEEK_MODEL,
+        model_id=model_id,
         prompt_id="personact.v1",
         prompt_version="1",
         prompt_digest="test-prompt",

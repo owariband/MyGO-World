@@ -22,8 +22,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.schema import SchemaItem
 
 import agent_runtime.sqlite as sqlite_runtime
-from agent_runtime.agent.memory.storage import MemoryRow
-from agent_runtime.agent.personact.storage import AgentRuntimeStateRow
+from agent_runtime.agent.memory.storage import MemoryRow, MemoryStore
+from agent_runtime.agent.personact.state import CognitiveConfig, PersonaState
+from agent_runtime.agent.personact.storage import AgentRuntimeStateRow, PersonaStateStore
 from agent_runtime.sqlite import (
     Base,
     InvalidProjectIdError,
@@ -42,6 +43,7 @@ from agent_runtime.world.entry_storage import (
     EventEntryLinkRow,
     EventEntryRecipientRow,
     EventEntryRow,
+    EventEntryStore,
     InteractionRequestRow,
 )
 from agent_runtime.world.initializer import initialize_public_world
@@ -72,6 +74,7 @@ EXPECTED_TABLES = {
     "event_entries",
     "event_entry_links",
     "event_entry_recipients",
+    "event_session_transition_parts",
     "event_sessions",
     "interaction_requests",
     "locations",
@@ -163,6 +166,262 @@ def test_m3_migration_downgrades_and_reupgrades_without_losing_m2_world(
         assert restored.world.control_epoch == 1
         assert restored.world.decision_seq == 0
         assert restored.agents == _initial_world(world_ref).agents
+    finally:
+        database.dispose()
+
+
+def test_m4_downgrade_refuses_runtime_state_without_data_loss(tmp_path: Path) -> None:
+    runtime_root = tmp_path / ".runtime"
+    world_ref = WorldRef(project_id="coffee-golden", world_id="m4-save")
+    database = open_project_database(runtime_root, world_ref.project_id, create=True)
+    with database.session_factory.begin() as session:
+        WorldStore(world_ref).insert_initial(session, _initial_world(world_ref))
+        session.execute(
+            text(
+                "UPDATE worlds SET dispatch_count = 1, dispatch_limit_at = 1 "
+                "WHERE world_id = :world_id"
+            ),
+            {"world_id": world_ref.world_id},
+        )
+
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(Path(sqlite_runtime.__file__).parent / "migrations"),
+    )
+    try:
+        with (
+            pytest.raises(RuntimeError, match="M4 runtime state"),
+            database.engine.begin() as connection,
+        ):
+            config.attributes["connection"] = connection
+            command.downgrade(config, "0002_m3_event_entries")
+
+        assert current_schema_revision(database.engine) == expected_schema_revision()
+        assert "dispatch_count" in {
+            column["name"] for column in inspect(database.engine).get_columns("worlds")
+        }
+        with database.engine.connect() as connection:
+            saved = connection.execute(
+                text(
+                    "SELECT dispatch_count, dispatch_limit_at FROM worlds "
+                    "WHERE world_id = :world_id"
+                ),
+                {"world_id": world_ref.world_id},
+            ).one()
+        assert saved == (1, 1)
+    finally:
+        database.dispose()
+
+
+def test_m4_migration_preserves_real_entry_request_persona_and_memory_rows(
+    tmp_path: Path,
+) -> None:
+    project_id = "migration-fixture"
+    world_ref = WorldRef(project_id=project_id, world_id="save-001")
+    runtime_root = tmp_path / ".runtime"
+    project_directory = runtime_root / project_id
+    project_directory.mkdir(parents=True)
+    path = project_directory / "world.sqlite"
+    engine = sqlite_runtime.create_project_engine(path)
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(Path(sqlite_runtime.__file__).parent / "migrations"),
+    )
+    persona = PersonaState(
+        world_ref=world_ref,
+        agent_id="soyo",
+        cognitive_config=CognitiveConfig(
+            attention_budget=1,
+            retention=20,
+            recency_weight=1.0,
+            relevance_weight=1.0,
+            importance_weight=1.0,
+            recency_decay=0.99,
+            reflection_threshold=10.0,
+            reflection_count=5,
+        ),
+        reflection_remaining=7.0,
+        last_world_time=NOW,
+        last_world_version=2,
+        known_place_ids=("cafe",),
+    )
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0002_m3_event_entries")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO project_database(singleton_id, project_id, created_at) "
+                    "VALUES (1, :project_id, :created_at)"
+                ),
+                {"project_id": project_id, "created_at": NOW.isoformat()},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO worlds("
+                    "world_id, project_id, seed_id, seed_version, seed_hash, current_version, "
+                    "world_time, status, created_at, control_epoch, decision_seq"
+                    ") VALUES ("
+                    ":world_id, :project_id, 'migration-seed', 1, :seed_hash, 2, "
+                    ":world_time, 'paused', :created_at, 4, 9)"
+                ),
+                {
+                    "world_id": world_ref.world_id,
+                    "project_id": project_id,
+                    "seed_hash": "d" * 64,
+                    "world_time": NOW.isoformat(),
+                    "created_at": NOW.isoformat(),
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO locations(world_id, location_id, name, description) "
+                    "VALUES (:world_id, 'cafe', 'Cafe', 'Migration fixture cafe')"
+                ),
+                {"world_id": world_ref.world_id},
+            )
+            for agent_id in ("anon", "soyo"):
+                connection.execute(
+                    text(
+                        "INSERT INTO agent_world_states("
+                        "world_id, agent_id, location_id, public_status"
+                        ") VALUES (:world_id, :agent_id, 'cafe', 'talking')"
+                    ),
+                    {"world_id": world_ref.world_id, "agent_id": agent_id},
+                )
+            for session_id, agent_id in (("session-anon", "anon"), ("session-soyo", "soyo")):
+                connection.execute(
+                    text(
+                        "INSERT INTO event_sessions("
+                        "world_id, session_id, agent_id, root_session_id, "
+                        "topology_version, updated_world_version"
+                        ") VALUES ("
+                        ":world_id, :session_id, :agent_id, 'session-anon', 1, 1)"
+                    ),
+                    {
+                        "world_id": world_ref.world_id,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                    },
+                )
+            connection.execute(
+                text(
+                    "INSERT INTO event_entries("
+                    "world_id, entry_id, status, entry_kind, source_kind, source_id, "
+                    "source_index, world_version, entry_index, root_session_id_at_commit, "
+                    "topology_version, actor_agent_id, target_agent_id, target_object_id, "
+                    "operation_id, audience_mode, delivery_channel, occurred_at, text, created_at"
+                    ") VALUES ("
+                    ":world_id, 'entry-1', 'committed', 'dialogue', 'character_proposal', "
+                    "'proposal-1', 0, 2, 0, 'session-anon', 1, 'anon', 'soyo', NULL, NULL, "
+                    "'session', 'direct', :occurred_at, 'Migration keeps this dialogue', "
+                    ":created_at)"
+                ),
+                {
+                    "world_id": world_ref.world_id,
+                    "occurred_at": NOW.isoformat(),
+                    "created_at": NOW.isoformat(),
+                },
+            )
+            for agent_id in ("anon", "soyo"):
+                connection.execute(
+                    text(
+                        "INSERT INTO event_entry_recipients(world_id, entry_id, agent_id) "
+                        "VALUES (:world_id, 'entry-1', :agent_id)"
+                    ),
+                    {"world_id": world_ref.world_id, "agent_id": agent_id},
+                )
+            connection.execute(
+                text(
+                    "INSERT INTO interaction_requests("
+                    "world_id, request_entry_id, request_kind, requester_agent_id, "
+                    "recipient_agent_id, status, resolution_entry_id, updated_world_version"
+                    ") VALUES ("
+                    ":world_id, 'entry-1', 'response', 'anon', 'soyo', "
+                    "'pending', NULL, 2)"
+                ),
+                {"world_id": world_ref.world_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_runtime_states("
+                    "world_id, agent_id, state_revision, spec_digest, persona_state_json, "
+                    "observation_world_version, observation_entry_index, "
+                    "last_decision_id, last_decision_outcome"
+                    ") VALUES ("
+                    ":world_id, 'soyo', 3, :spec_digest, :persona, 2, 0, "
+                    "'proposal-1', 'applied')"
+                ),
+                {
+                    "world_id": world_ref.world_id,
+                    "spec_digest": "e" * 64,
+                    "persona": persona.model_dump_json(by_alias=True, exclude_none=False),
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_memory_records("
+                    "world_id, agent_id, memory_id, memory_seq, scope, kind, created_at, "
+                    "last_accessed_at, expires_at, subject, predicate, object_value, content, "
+                    "poignancy, tags_json, source, evidence_ids_json, embedding_json, "
+                    "novelty_key, source_entry_id"
+                    ") VALUES ("
+                    ":world_id, 'soyo', 'memory-1', 1, :scope, 'chat', :created_at, "
+                    ":last_accessed_at, NULL, 'anon', 'said', NULL, "
+                    "'Migration keeps this memory', 2.5, '[\"migration\"]', "
+                    "'event-entry', '[\"entry-1\"]', '[0.25,0.75]', 'migration-memory', "
+                    "'entry-1')"
+                ),
+                {
+                    "world_id": world_ref.world_id,
+                    "scope": "project/migration/persona/soyo",
+                    "created_at": NOW.isoformat(),
+                    "last_accessed_at": NOW.isoformat(),
+                },
+            )
+
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+
+    database = open_project_database(runtime_root, project_id, create=False)
+    try:
+        assert current_schema_revision(database.engine) == expected_schema_revision()
+        with database.session_factory() as session:
+            world = WorldStore(world_ref).load(session)
+            entry = EventEntryStore(world_ref).get(session, "entry-1")
+            request = EventEntryStore(world_ref).get_request(session, "entry-1")
+            stored_persona = PersonaStateStore(world_ref).load(session, "soyo")
+            memory = MemoryStore(world_ref).load(
+                session,
+                "soyo",
+                "project/migration/persona/soyo",
+            )
+            foreign_key_violations = session.execute(text("PRAGMA foreign_key_check")).all()
+
+        assert world.world.control_epoch == 4
+        assert world.world.decision_seq == 9
+        assert world.world.dispatch_count == 0
+        assert world.world.dispatch_limit_at == 0
+        assert all(node.last_dispatch_count == 0 for node in world.sessions)
+        assert entry.text == "Migration keeps this dialogue"
+        assert request.status.value == "pending"
+        assert request.cancellation_entry_id is None
+        assert request.priority_consumed_dispatch_count is None
+        assert stored_persona.state_revision == 3
+        assert stored_persona.state == persona
+        assert stored_persona.observation_cursor is not None
+        assert stored_persona.observation_cursor.world_version == 2
+        assert stored_persona.last_decision_id == "proposal-1"
+        assert len(memory.records) == 1
+        assert memory.records[0].source_entry_id == "entry-1"
+        assert memory.records[0].content == "Migration keeps this memory"
+        assert foreign_key_violations == []
     finally:
         database.dispose()
 

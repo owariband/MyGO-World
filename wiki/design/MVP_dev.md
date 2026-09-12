@@ -358,8 +358,8 @@ MVP 最小表集：
 | `world_facts` | 作品内公开、客观的开场事实和当前事实 | 可选关联 Location/Agent/Object；只存 World 公共知识 |
 | `agent_world_states` | Agent 当前地点和最小公开状态 | `agent_id -> location_id`；不包含 Persona 私有 State/Memory |
 | `objects` | 物体身份、地点、所有者和当前状态 | 关联 Location/Agent；只为 Golden Trace 建必要字段 |
-| `event_sessions` | 稳定节点与 root/topology；保存 `last_scheduled_seq / next_wakeup_world_time / consecutive_no_op` | root 自外键；成员由 root 派生，调度进展绑定稳定节点以支持读档和重组 |
-| `event_entries` | Dialogue/Action/Environment/Join/Leave Entry 及其 `pending / committed / cancelled` 生命周期 | Character 结果直接 committed；未来客观结果可先 pending；只有 committed 对 Character/Broadcast 可见 |
+| `event_sessions` | 稳定节点与 root/topology；M4 保存 `last_dispatch_count / wait_for_visible_entry_after_version / consecutive_dialogue_turns` | root 自外键；成员由 root 派生，调度进展绑定稳定节点以支持读档和重组；Character 首版只由自己可见的新 Entry 唤醒 |
+| `event_entries` | Dialogue/Action/Behavior/SessionTransition/Environment Entry 及其 `pending / committed / cancelled` 生命周期 | Character 结果直接 committed；未来客观结果可先 pending；只有 committed 对 Character/Broadcast 可见 |
 | `event_entry_links` | Entry 间的 `previous / reply / cause` 有向边 | 用外键保存 StoryLine 顺序、对话回应、因果与 merge/split 交汇，不把多值关系塞进任意 JSON |
 | `event_entry_recipients` | committed Entry 在发生时实际告知到的 Agent ID 快照 | Character 可见性的最终依据；Session 后续 merge/split 不能扩大旧 Entry 的接收者 |
 | `interaction_requests` | 当前仍可由某个 Agent 处理的回应或邀请；不是入组审批 | 以发起 Entry 为来源，以解决 Entry 关闭；供 AgentView 与 Scheduler 重启恢复 |
@@ -393,7 +393,7 @@ MVP 最小表集：
 - `broadcast_runs / renders / broadcast_dispositions`：现有 Render 边界尚未需要这一整套数据库模型；
 - `generation_traces`：先保留进程内有界 Trace，等隐私和恢复需求明确后再持久化；
 - `event_session_members`：当前成员集合由 root binding 唯一决定，Runtime 使用 `UnionPart.membersByRoot` 缓存，不再持久化第二份成员事实；
-- successor/lineage 表：merge/split 不创建新 Session；root mapping 的变化作为带 `world_version` 的 `JoinEntry/LeaveEntry` 及 Entry graph 边保存；
+- successor/lineage 表：merge/split 不创建新 Session；root mapping 的变化作为带 `world_version` 的 `SessionTransitionEntry`、窄的 before/after part 明细及 Entry graph 边保存；
 - 独立的 runnable queue projection 表：MVP 可从 `root_session_id = session_id` 的 root 节点集合派生并确定性排序；
 - 仅以 `responder_id` 为键、无法指向发起 Entry 的 pending-response 表：不能回答“在回应哪件事”，明确不采用。
 
@@ -415,7 +415,7 @@ MVP 最小表集：
 entry_id
 world_id
 status                      // pending | committed | cancelled
-entry_kind                  // dialogue | action | environment | join | leave
+entry_kind                  // dialogue | action | behavior | session_transition | environment
 source_kind / source_id / source_index
 audience_mode               // world | session | location | explicit
 delivery_channel            // public | direct | whisper | environment
@@ -474,7 +474,7 @@ FK(entry_id) -> event_entries.entry_id
 FK(related_entry_id) -> event_entries.entry_id
 ```
 
-- `previous` 形成 StoryLine 的结构顺序：普通 Entry 通常一个前驱，merge 的首个 JoinEntry 可以有多个父 Line frontier，split 后多个子 Line 可以引用同一个 LeaveEntry；
+- `previous` 形成 StoryLine 的结构顺序：普通 Entry 通常一个前驱，merge/split/transfer 的 `SessionTransitionEntry` 可以连接多个父 Line frontier 和子 Line；
 - `reply` 表示这句回应针对哪条 Dialogue/Interaction Entry；MVP 限制最多一个；
 - `cause` 表示客观因果，可多值，不能拿 StoryLine 相邻关系冒充因果；
 - Validator 要求 link 两端存在且属于同一 World；`previous/reply` 只能连接 committed Entry，并拒绝指向更晚 `commit_position` 的 `previous`，因此 Entry graph 不会成环。pending EnvironmentEntry 可以先用 `cause` 指向触发它的 committed Entry，`previous` 和 Line 归属在 release 时补齐；跨 Line 的 `previous` 只能由已校验 merge/split 产生。
@@ -537,8 +537,9 @@ World.apply_change()
 DialogueEntry       speaker_id / text / in_reply_to_entry_id?
 ActionEntry         actor_id / operation_id / text
 EnvironmentEntry    subject_id? / text
-JoinEntry           joined_agent_ids
-LeaveEntry          left_agent_ids
+BehaviorEntry       behavior_operation_id
+SessionTransitionEntry
+                    reason + target_agent_id；完整 before/after part/member 使用关系行
 
 公共字段：entry_id / commit_position / occurred_at? / ended_at? / source_kind / source_id / source_index
 ```
@@ -546,7 +547,7 @@ LeaveEntry          left_agent_ids
 - 已校验 `utter/respond` 在提交时形成逐字保真的 `DialogueEntry`；
 - 已校验 `act/interact` 在提交时形成描述已经发生之结果的 `ActionEntry`，不能把 Proposal 意图当结果；
 - pending `EnvironmentEntry` release 后进入 committed 公共历史；
-- UnionPart merge/split 在提交时形成 `JoinEntry/LeaveEntry`，并用 `previous` link 连接 StoryLine 的父子 frontier；
+- UnionPart merge/split 在提交时形成一条 `SessionTransitionEntry`，并用 `previous` link 与 before/after part 明细连接 StoryLine 的父子 frontier；
 - Entry 的公共正文和结构字段必须与状态变化在同一事务中校验并落库，之后的 StoryLine/摘要过程不能补写角色台词、动作结果或世界事实。
 
 一条提供给模型的 StoryLine 不是全历史召回，而是：
@@ -791,7 +792,7 @@ Worker Agent 是已保留的未来架构角色，但 **MVP 不接入、不实现
 - 一次 `World.apply_change()` 在同一 SQLite transaction 内更新明确的当前状态行、Session root binding、`event_entries + event_entry_links` 和 `worlds.current_version`；任何一步失败必须全部回滚；
 - 使用 `expected_world_version` 对 `worlds.current_version` 做 CAS，拒绝 stale update；
 - committed `event_entries` 和既有 `event_entry_links` 禁止 update/delete；pending Entry 只允许受控生命周期转换，其他当前状态表只能经 `WorldUpdater` 更新；
-- Session root mapping、对应的 `JoinEntry/LeaveEntry` 和 world version 必须同一事务更新，失败时全部回滚；
+- Session root mapping、对应的 `SessionTransitionEntry` 和 world version 必须同一事务更新，失败时全部回滚；
 - 角色 Proposal 只能代表自己的意图，Director 不能替角色说话或接受互动；
 - Entry 必须能通过 source 幂等键追溯到 Proposal、source Entry、外部输入或已提交 evidence；
 - 复用 Seed 引用校验、故障注入、事务回滚、跨进程恢复和 schema migration 测试思路。
@@ -884,16 +885,16 @@ session-tomori  -> session-soyo
 
 1. root 是数据结构代表，不表示角色领导权、叙事主视角或关系地位；
 2. merge/split 只改变受影响节点的 root binding 和 topology version，不创建、关闭或删除 Session 节点；
-3. root binding、描述这次变化的 `JoinEntry/LeaveEntry` 和 `worlds.current_version` 必须在一个 `World.apply_change()` 事务中更新；
-4. 当前 `ActionProposal.eventSessionId` 使用决策时的 `rootSessionId`，并与已有 `basedOnWorldVersion` 一起标识互动上下文；root 已变化的 stale Proposal 必须被拒绝；
+3. root binding、描述这次变化的 `SessionTransitionEntry` 和 `worlds.current_version` 必须在一个 `World.apply_change()` 事务中更新；
+4. 当前 `ActionProposal.eventSessionId` 使用行动者自己的稳定 `sessionId`，不随 root 改变；决策时的 root/topology 属于受信 World snapshot，并与 `basedOnWorldVersion`、dispatch fence 和 Session CAS 一起拒绝 stale Proposal；
 5. 历史 Entry 的 root 引用必须同时带 `topology_version` 和自身 `commit_position`，因为同一个 root key 在不同时期可能代表不同成员集合；
 6. Agent 不能直接提交 root key、成员集合或调用 `UnionPart`；它只能表达加入、离开、回应、拒绝等角色行为，受信 Runtime 才能生成并应用 merge/split；
 7. 新 Agent 出现时才新增稳定节点；普通互动变化不会让 `event_sessions` 表增长。
 
-root 分区历史直接作为结构化 `JoinEntry/LeaveEntry` 保存，不再另写一份 `SessionPartitionChanged` Event：
+root 分区历史直接作为结构化 `SessionTransitionEntry` 保存，不再另写一份 `SessionPartitionChanged` Event：
 
 ```text
-JoinEntry / LeaveEntry details
+SessionTransitionEntry details
 - reason: merge | split | transfer
 - affected_session_ids
 - before_root_by_session
@@ -974,9 +975,9 @@ resume_world(project_id, world_id, additional_decisions?)
 | 已发生故事与未完事项 | Entry/link/recipients、`interaction_requests`、pending Entry 的 `next_check_at` | 保留原对白、接收者、未回应邀请和待发生客观事件 |
 | 每个角色的认知状态 | 新增 `agent_runtime_states`，保存 M1 的 `PersonaState` | 保留普通 Plan queue / active_plan_id、已知地点和反思累计；对话轮数随后续 Scheduler 保存，不再保存 daily / 旧时间 cooldown |
 | 每个角色的 Memory | `agent_memory_records` 完整记录及访问/novelty/过期信息 | 继续原 MemoryStream，不能只恢复一份剧情摘要 |
-| 下一决策与唤醒位置 | `worlds.scheduler_seq`；稳定 Session 节点上的 `last_scheduled_seq / next_wakeup_world_time / consecutive_no_op` | 根据未回应请求与保存的进度重新算出下一角色，不每次回到 Anon |
+| 下一决策与唤醒位置 | `worlds.decision_seq / dispatch_count`；稳定 Session 节点上的 `last_dispatch_count / wait_for_visible_entry_after_version / consecutive_dialogue_turns` | 根据未回应请求、自己可见的新 Entry 与保存进度重算下一角色，不每次回到 Anon，也不被隔离 Session 的不可见台词唤醒 |
 | 导演进度 | `worlds.director_entry_cursor / character_turn_seq / director_checked_turn_seq` 与 pending Entry 状态同事务保存 | 不重复处理已消费的 Entry，不重复登记咖啡完成事件，保留对话进展检查间隔 |
-| 暂停与调用额度 | `worlds.status / control_epoch / stop_reason / stopped_at_world_version / decision_count / decision_limit_at` | 拒绝旧调用，记录暂停原因；继续时可以获得新额度 |
+| 暂停与调用额度 | `worlds.status / control_epoch / stop_reason / stopped_at_world_version / dispatch_count / dispatch_limit_at` | 拒绝旧调用，记录暂停原因；模型前预扣 dispatch，继续时可以获得新额度 |
 
 此前只保存 Memory 会遗漏 [PersonaState](../../agent_runtime/agent/personact/state.py) 中的运行状态。新增表只保存当前私有状态，不保存逐版本副本：
 
@@ -1008,21 +1009,21 @@ agent_runtime_states
 事务内：检查 WorldRef、status=running、control_epoch、world/state revision
        WorldUpdater 写公共状态、Session、Entry、请求与世界版本
        Agent 自己的 Store 写预先算好的 PersonaState、Memory 与观察游标
-       保存决策完成 ID、scheduler_seq 和节点调度进度
+       保存决策完成 ID、decision_seq 和节点调度进度
        COMMIT
 提交后：才把工作副本发布为当前内存状态，才公开新 Entry
 ```
 
 Agent 私有状态的计算权仍属于 Agent；World 不解释 Attention 或 Memory，也不接收 Proposal 中的 `memory_changes`。协调器共享 transaction 是为了全部成功或全部回滚，事务内不调用模型。当前 [PersonActAgent.decide](../../agent_runtime/agent/personact/agent.py) 会在生成 Proposal 后立即替换 `_PrivateSnapshot`，实现时必须改为受信协调器可接管的暂存结果，或使用可丢弃的独立实例；只加一个 `paused` 判断无法解决提前发布问题。
 
-`no_op/wait` 即使不产生世界变化，也要提交私有状态、决策完成标记和调度进度；不能伪造 Entry 或推进故事时间。因此保存结果同时包含 `world_version` 和 `scheduler_seq`。已完成 Entry 通过 source 幂等键防重；调用 ID 由持久化递增的派发序号生成，恢复后不会复用。
+`no_op/wait` 即使不产生世界变化，也要提交私有状态、决策完成标记和调度进度；不能伪造 Entry 或推进故事时间。因此保存结果同时包含 `world_version`、`decision_seq` 和预扣的 `dispatch_count`。已完成 Entry 通过 source 幂等键防重；调用 ID 绑定持久化递增的 dispatch 序号，恢复后不会复用。
 
 这里区分两种未生效：合法角色尝试因客观条件不满足而没有产生目标效果，是普通 outcome，不是审批拒绝；先撤销依赖成功的状态/Memory 增量，再由 Agent 依据确定性 outcome 计算最小反馈，与观察游标、角色回合和调度进度一起提交，不写虚假的成功 Entry。角色下次可以调整或继续原计划。跨 World、过期版本/epoch、非法契约以及暂停取消则是执行边界失败，整份工作副本不发布；已消耗的调用额度保留。这两类不能混成“所有未生效都当角色被拒绝”，也不能无条件发布原工作副本。
 
 #### 点击“停止并保存”的精确顺序
 
 1. Runner 停止派发新任务，暂停操作进入与提交相同的写入通道。
-2. 在短 transaction 中设置 `status=paused / stop_reason=user_pause`，递增 `control_epoch`，记录当前世界版本；现有 `scheduler_seq` 标明同时保存到的调度位置。已经 paused 的重复请求直接返回当前保存结果。
+2. 在短 transaction 中设置 `status=paused / stop_reason=user_pause`，递增 `control_epoch`，记录当前世界版本；现有 `decision_seq / dispatch_count` 标明同时保存到的提交和派发位置。已经 paused 的重复请求直接返回当前保存结果。
 3. 若角色决策的完整事务先提交，就保存包含它的状态；若暂停先提交，旧决策的 epoch/status 校验失败，整份结果丢弃。不会出现台词已存而 Memory/下一角色没存的中间态。
 4. 暂停事务成功后返回保存结果，再 best effort 取消在途模型任务。取消失败不影响保存，迟到任务没有提交权限；关闭进程的耗时仍受模型传输取消/超时约束。
 
@@ -1215,7 +1216,7 @@ Runner 在每次世界提交后及下一轮调度前检查结局规则。自然�
 8. **关系型当前状态与 `EventEntry` 的边界。** 一次 Proposal 可以追加几个 Entry？Entry 的 typed fields/details 是否足以解释同事务应用的公共状态变化？持续状态和因果桥接如何表示？MVP 不为此新增同义 `WorldEventRecord`、`WorldChangeRecord` 或独立 Recognizer，先用 Golden Trace 冻结最小 Entry union。
 9. **重组后的调度优先级。** 第 6.5 节将调度进度绑定稳定 Session 节点，随角色保留；历史 Line 引用仍使用 `(root_session_id_at_commit, topology_version)`。还需用 Golden Trace 冻结 root 的成员进度聚合、邀请优先和退避规则。
 10. **串行运行验证。** 第 6.5 节已收敛为同 World 同时只派发一个 Character/Director 决策；首版不设计跨 root 并行模型计算或部分合并提交，验证版本门禁与恢复即可。
-11. **Director 回合检查与显式世界时间。** 主路径按第 4.2 节让角色继续聊天、Director 按回合检查待办，不要求咖啡实时倒计时。回合不等同世界分钟；显式 `next_check_at / wait.next_wakeup` 仍使用世界时间，离线冻结。只有首个 Scenario 确实需要精确定时约束时，才补充世界时间推进与跳时规则，不能用对话轮数绕过已声明的时间前提。
+11. **Director 回合检查与显式世界时间。** 主路径按第 4.2 节让角色继续聊天、Director 按回合检查待办，不要求咖啡实时倒计时。回合不等同世界分钟；Director 客观过程的显式 `next_check_at` 使用世界时间，离线冻结。Character 的 `wait/no_op` 在 M4 首版只等待自己 recipient 中的新 committed Entry，不因隔离 Session 的变化醒来；只有首个 Scenario 确实需要 Character 精确定时唤醒时，才补 typed world-time wakeup 与跳时规则，不能用对话轮数绕过已经声明的客观时间前提。
 12. **Entity/Location 的 MVP 边界。** 首条 Trace 必须结构化哪些角色、地点、对象和资源事实；既不能回退到任意 dict patch，也不应提前重建 Maze/物理模拟。
 13. **Generation Trace 的隐私与事务关联。** Prompt、模型输出和 repair 信息哪些允许持久化，如何去除 credential/私密 Memory；Trace 写入失败是否影响 world commit。
 14. **重命名迁移已在 M1 收口。** 已一次性采用 `AgentView / view` 并要求 WorldRef；无 PerceptionFrame/frame alias 或旧 Runtime 格式自动兜底。Manifest 配置版本不变。

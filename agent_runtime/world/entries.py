@@ -34,9 +34,16 @@ class EntryRelationKind(StrEnum):
     CAUSE = "cause"
 
 
+class SessionTransitionReason(StrEnum):
+    MERGE = "merge"
+    SPLIT = "split"
+    TRANSFER = "transfer"
+
+
 class InteractionRequestStatus(StrEnum):
     PENDING = "pending"
     RESOLVED = "resolved"
+    CANCELLED = "cancelled"
 
 
 class _CommittedEntry(StrictModel):
@@ -97,8 +104,41 @@ class ActionEntry(_CommittedEntry):
     delivery_channel: Literal["public"] = "public"
 
 
+class BehaviorEntry(_CommittedEntry):
+    """One trusted self behavior selected from a World-issued affordance."""
+
+    entry_kind: Literal["behavior"] = "behavior"
+    operation_id: Identifier
+    audience_mode: Literal["session"] = "session"
+    delivery_channel: Literal["public"] = "public"
+
+
+class SessionTransitionEntry(_CommittedEntry):
+    """One committed merge, split, or actor transfer between EventSessions."""
+
+    entry_kind: Literal["session_transition"] = "session_transition"
+    transition_reason: SessionTransitionReason
+    target_agent_id: Identifier | None = None
+    audience_mode: Literal["explicit"] = "explicit"
+    delivery_channel: Literal["public"] = "public"
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> Self:
+        if (
+            self.transition_reason is SessionTransitionReason.SPLIT
+            and self.target_agent_id is not None
+        ):
+            raise ValueError("split transition cannot carry a target Agent")
+        if (
+            self.transition_reason is not SessionTransitionReason.SPLIT
+            and self.target_agent_id is None
+        ):
+            raise ValueError("merge or transfer transition requires a target Agent")
+        return self
+
+
 EventEntry = Annotated[
-    DialogueEntry | ActionEntry,
+    DialogueEntry | ActionEntry | BehaviorEntry | SessionTransitionEntry,
     Field(discriminator="entry_kind"),
 ]
 
@@ -133,14 +173,22 @@ class InteractionRequest(StrictModel):
     recipient_agent_id: Identifier
     status: InteractionRequestStatus
     resolution_entry_id: Identifier | None = None
+    cancellation_entry_id: Identifier | None = None
+    priority_consumed_dispatch_count: Annotated[int, Field(ge=1)] | None = None
     updated_world_version: WorldVersion
 
     @model_validator(mode="after")
     def _validate_resolution(self) -> Self:
         if self.requester_agent_id == self.recipient_agent_id:
             raise ValueError("an interaction request requires a different recipient")
-        if self.status is InteractionRequestStatus.PENDING and self.resolution_entry_id is not None:
-            raise ValueError("pending interaction request cannot have a resolutionEntryId")
-        if self.status is InteractionRequestStatus.RESOLVED and self.resolution_entry_id is None:
-            raise ValueError("resolved interaction request requires a resolutionEntryId")
+        if self.status is InteractionRequestStatus.PENDING:
+            if self.resolution_entry_id is not None or self.cancellation_entry_id is not None:
+                raise ValueError(
+                    "pending interaction request cannot have a resolution or cancellation Entry"
+                )
+        elif self.status is InteractionRequestStatus.RESOLVED:
+            if self.resolution_entry_id is None or self.cancellation_entry_id is not None:
+                raise ValueError("resolved interaction request requires only a resolutionEntryId")
+        elif self.resolution_entry_id is not None or self.cancellation_entry_id is None:
+            raise ValueError("cancelled interaction request requires only a cancellationEntryId")
         return self

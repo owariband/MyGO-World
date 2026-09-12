@@ -149,6 +149,7 @@ def run_smoke(
                 affordance_id="smoke-interact-soyo",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
     )

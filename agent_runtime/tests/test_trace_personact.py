@@ -328,6 +328,7 @@ def _view(*, agent_id: str = "anon", world_ref: WorldRef = WORLD_REF) -> AgentVi
                 affordance_id=AFFORDANCE_ID,
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
         candidates=(

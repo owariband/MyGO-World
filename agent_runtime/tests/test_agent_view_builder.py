@@ -212,6 +212,50 @@ def test_same_location_is_ambient_but_does_not_grant_cross_root_dialogue(
     assert {"hall-noisy", "rana-public", "keyboard-ready"}.isdisjoint(view.visible_evidence_ids)
 
 
+def test_fiftieth_dialogue_requires_behavior_before_dialogue_returns(
+    runtime: PreparedRuntime,
+) -> None:
+    with runtime.database.session_factory.begin() as session:
+        session.execute(
+            text(
+                "UPDATE event_sessions SET consecutive_dialogue_turns = 50 "
+                "WHERE world_id = 'main' AND agent_id = 'soyo'"
+            )
+        )
+
+    with runtime.database.session_factory() as session:
+        blocked = runtime.builder.build(session, agent_id="soyo")
+
+    assert not any(
+        item.kind in {ProposalKind.UTTER, ProposalKind.RESPOND} for item in blocked.affordances
+    )
+    act_operations = {
+        item.operation_id for item in blocked.affordances if item.kind is ProposalKind.ACT
+    }
+    assert act_operations >= {
+        "adjust_posture",
+        "gather_thoughts",
+        "observe_surroundings",
+        "leave_current_session",
+    }
+
+    with runtime.database.session_factory.begin() as session:
+        WorldStore(WORLD_REF).finish_session_step(
+            session,
+            agent_id="soyo",
+            world_version=6,
+            entry_kind="behavior",
+            waiting=False,
+            dispatch_count=None,
+        )
+
+    with runtime.database.session_factory() as session:
+        resumed = runtime.builder.build(session, agent_id="soyo")
+
+    assert any(item.kind is ProposalKind.UTTER for item in resumed.affordances)
+    assert any(item.kind is ProposalKind.RESPOND for item in resumed.affordances)
+
+
 def test_visible_entry_link_never_leaks_hidden_related_entry(
     runtime: PreparedRuntime,
 ) -> None:

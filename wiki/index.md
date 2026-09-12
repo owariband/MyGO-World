@@ -56,7 +56,8 @@ perceive -> retrieve -> plan -> ActionProposal
 - **明确没有迁入：**MVP 的 same-snapshot lockstep、同 Event 多角色并发、`move`、Proposal 内 `memory_changes`、Wave/World DB Runtime 和一次整轮提交；本项目继续坚持同 Event 内“一个角色 Proposal -> commit -> 下一角色读取新版本”。
 - **自由互动 MVP 的持久化已收敛：**SQLite 只保存明确的关系型当前状态、稳定 EventSession root binding、轻量 InteractionRequest、append-only `event_entries` 与隔离 Agent Memory；不建立重复的 `world_events / world_changes / world_versions / entity_revisions / world_snapshots`。作品 `scenario.yaml` 初始化公共世界与初始分区，全员/指定角色知识由 bootstrap 按接收者展开到各自 Agent Memory。
 - **M2 Project World 已实现、验收并推送：**`5d2f496` 为每个 Project 提供独立 `.runtime/<project-id>/world.sqlite`，同库可容纳多个 `world_id`；严格 Scenario、九表首版 schema、公共/私有状态原子初始化、五稳定 EventSession 节点、跨进程 paused load 和配置钉住均已落地。M2 尚无 EventEntry、WorldUpdater、Runner、Director 或 Broadcast，不能表述为 Agent 已可自由互动；证据见 [M2 开发记录](design/M2_dev_log.md)。
-- **M3 单步链已实现并通过自动门禁：**唯一 `EventEntry` 历史、稳定 World operation/affordance、World/Agent 原子提交、`AgentViewBuilder` 与可重载 `CharacterStep` 已落地；完整 Python 442 项和 Node 14 项通过，当前为未提交 Review，证据见 [M3 开发记录](design/M3_dev_log.md#12-实现与验收记录)。
+- **M3 单步链已实现、验收并推送：**唯一 `EventEntry` 历史、稳定 World operation/affordance、World/Agent 原子提交、`AgentViewBuilder` 与可重载 `CharacterStep` 已落地；完整 Python 442 项和 Node 14 项通过，代码提交为 `ecc29c0`，证据见 [M3 开发记录](design/M3_dev_log.md#12-实现与验收记录)。
+- **M4 已进入设计与内容 Review：**首个可运行 Demo 将增加有界 Runner、自主 join/leave/transfer、StoryLine DAG、pause/load/resume，并以 MyGO × Hogwarts 十人真实 DeepSeek 群演作为硬交付；接受结果必须包含模型实际选择的 add/split、raw StoryLine JSON 和可离线审片 HTML。预计非 Wiki/非生成 artifact 总 diff 8.0–12.5k 行，详见 [M4 开发记录](design/M4_dev_log.md)与[真实群演场景/十人 Skill 草案](design/M4_hogwarts_demo.md)。
 - **互动记录与演出投影已经分权：**所有已提交的 Character 互动、Session merge/split 和 Director environment release 共用 `event_entries`；`interaction_requests` 只保存仍待 Character 处理的当前状态，待完成的客观过程使用同一 EventEntry 的 pending 状态，Agent Memory 通过 `source_entry_id` 保存主观认知。Broadcast 据此生成带来源的 Render Artifact，不能把 WebGAL 脚本回写为世界事实。
 - **Director 权限已经收紧：**Director 不做 Segment Completion、Narrative Thread 或剧情刺激。它只能读取一个 committed source Entry/待检查 pending Entry 的受限 DirectorView，并从 World 提供的 affordance 中选择 `emit / schedule / keep / release / cancel / no_op`。一句“我要煮咖啡”不足以 schedule，必须先有角色自己提交的 `coffee_brewing_started`。
 - **基础代码不等于完整 Runtime：**Project World、PersonaState/Memory 持久化、最小 commit feedback、EventEntry history、Validator/WorldUpdater 与 CharacterStep 已完成；持续 EventSessionRunner、merge/split、长期 Reflection、pending EnvironmentEntry Director、Broadcast、真实 Provider 剧情验收、Generation Trace 持久化与完整咖啡 Golden Trace 仍未实现。
@@ -70,10 +71,12 @@ perceive -> retrieve -> plan -> ActionProposal
 - [难点、卡点与代价账本](difficulty-ledger.md)：以问句维护设计问题，重点追踪 Runtime↔Galgame、无 Maze 外在事件和 `decide` 内部 perceive 的局部感知边界，并保留被否决答案、当前代价与未决部分。
 - [Agent Runtime 一期落地方案](agent-runtime-implementation.md)：**下一开发 Session 的首要入口**；包含 Python + LangChain Core 强类型边界、`PersonActAgent.decide`、ActionProposal union、`agent / event / world` 分层、Memory 边界、Fixture Vertical Slice、分阶段 Plan 与启动指令。
 - [MVP 完善开发计划](design/MVP_dev.md)：以直观命名整理 SQLite 世界事实底座、可选择复用的 `origin/mvp` 模型、EventSession 互动/重组闭环、分阶段交付与待重新设计问题。
-- [MVP 分阶段执行计划](design/dev_plan_MVP.md)：固定 dev_plan，维护 M1–M7 的范围、实现前文件级设计、验收和 Review 状态；当前重点是 M3 单步世界与认知提交。
+- [MVP 分阶段执行计划](design/dev_plan_MVP.md)：固定 dev_plan，维护 M1–M7 的范围、实现前文件级设计、验收和 Review 状态；当前重点是 M4 自由互动与可恢复运行。
 - [M1 开发记录](design/M1_dev_log.md)：固定阶段 dev_log，记录 Gateway、WorldRef / Plan queue、UnionPart 的实际文件与测试证据。
 - [M2 开发记录](design/M2_dev_log.md)：记录 Project SQLite、Scenario、初始 World/Agent 状态、跨进程加载的实际 schema、文件与测试证据。
-- [M3 开发记录](design/M3_dev_log.md)：维护 M3.1–M3.4 的设计基线、实际文件树、独立 Review 修复、自动门禁与 M4 交接边界；当前为未提交 Review。
+- [M3 开发记录](design/M3_dev_log.md)：维护 M3.1–M3.4 的设计基线、实际文件树、独立 Review 修复、自动门禁与 M4 交接边界；实现已随 `ecc29c0` 推送。
+- [M4 开发记录](design/M4_dev_log.md)：维护 M4.0–M4.7 的产品边界、事务/Schema、预计文件树与行数、测试合同，以及十人真实群演 JSON/HTML 的硬交付；当前为开工前 Review。
+- [M4 MyGO × Hogwarts 群演场景](design/M4_hogwarts_demo.md)：区分官方事实、Prompt 推断与 AU，记录十人 Character Skill、课程背景、初始分组和真实 add/split 验收场景。
 - [NPC DIY](npc-diy.md)：创作者配置、Pydantic 受信编译、`PersonActAgent.decide`、Proposal contract、当前实现证据与下一步。
 - [地点 World Model](location-world-model.md)：地点稳定事实、周期/时效 Info、Event 查询、确定性可见性与角色获知链。
 - [关键机制](mechanisms.md)：零侵入插件、动态编译、黑屏、切换和失败恢复。

@@ -518,6 +518,7 @@ def test_personact_loop_uses_model_strategy_without_moving_world(use_langchain: 
                 affordance_id="interact-soyo",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
     )
@@ -885,6 +886,7 @@ def _planning_input() -> ActionPlanningInput:
                 affordance_id="interact-soyo",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
     )

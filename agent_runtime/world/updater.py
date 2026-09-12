@@ -7,14 +7,24 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import AwareDatetime, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 from sqlalchemy.orm import Session
 
+from agent_runtime.event.session import (
+    SessionTransitionPlan,
+    plan_join,
+    plan_leave,
+)
 from agent_runtime.model import StrictModel
 from agent_runtime.scenario import ObjectOperationSeed, ObjectSeed
-from agent_runtime.world.affordances import WorldAffordanceResolver
+from agent_runtime.world.affordances import (
+    JOIN_TARGET_SESSION,
+    LEAVE_CURRENT_SESSION,
+    SELF_BEHAVIOR_TEXT,
+    WorldAffordanceResolver,
+)
 from agent_runtime.world.contracts import (
     ActAction,
     ActionProposal,
@@ -39,6 +49,7 @@ from agent_runtime.world.contracts import (
 from agent_runtime.world.entries import (
     ActionEntry,
     AudienceMode,
+    BehaviorEntry,
     DialogueEntry,
     EntryRelationKind,
     EventEntry,
@@ -46,6 +57,7 @@ from agent_runtime.world.entries import (
     EventEntryRecipient,
     InteractionRequest,
     InteractionRequestStatus,
+    SessionTransitionEntry,
 )
 from agent_runtime.world.entry_storage import EventEntryStore
 from agent_runtime.world.state import EventSessionNode, PublicWorldState, WorldStatus
@@ -91,6 +103,10 @@ class WorldUpdatePlan(StrictModel):
     create_request: InteractionRequest | None = None
     resolve_request_entry_id: Identifier | None = None
     object_change: ObjectStateChange | None = None
+    session_transition: SessionTransitionPlan | None = None
+    dispatch_count: Annotated[int, Field(ge=1)] | None = None
+    run_owner_id: Identifier | None = None
+    priority_request_entry_id: Identifier | None = None
 
     @model_validator(mode="after")
     def _validate_public_writes(self) -> Self:
@@ -100,6 +116,8 @@ class WorldUpdatePlan(StrictModel):
             raise ValueError("expectedControlEpoch must be positive")
         if self.expected_decision_seq < 0:
             raise ValueError("expectedDecisionSeq cannot be negative")
+        if (self.dispatch_count is None) != (self.run_owner_id is None):
+            raise ValueError("dispatch count and run owner must be present together")
 
         writes = (
             self.entry is not None,
@@ -108,6 +126,7 @@ class WorldUpdatePlan(StrictModel):
             self.create_request is not None,
             self.resolve_request_entry_id is not None,
             self.object_change is not None,
+            self.session_transition is not None,
         )
         if self.status is not WorldUpdateStatus.APPLIED:
             if any(writes):
@@ -154,6 +173,20 @@ class WorldUpdatePlan(StrictModel):
                 raise ValueError("Object change requires an ActionEntry")
             if self.object_change.object_id != entry.target_object_id:
                 raise ValueError("Object change target does not match its Entry")
+
+        if isinstance(entry, SessionTransitionEntry) != (self.session_transition is not None):
+            raise ValueError("only a SessionTransitionEntry may carry a Session transition")
+        if self.session_transition is not None:
+            transition = self.session_transition
+            if not isinstance(entry, SessionTransitionEntry):
+                raise ValueError("Session transition requires a SessionTransitionEntry")
+            if (
+                transition.world_ref != self.world_ref
+                or transition.actor_agent_id != self.agent_id
+                or transition.target_agent_id != entry.target_agent_id
+                or transition.reason != entry.transition_reason
+            ):
+                raise ValueError("Session transition does not match its Entry")
 
         if self.create_request is not None:
             request = self.create_request
@@ -232,8 +265,12 @@ class WorldChangeValidator:
         *,
         created_at: AwareDatetime,
         previous_entry: EventEntry | None = None,
+        previous_entries: tuple[EventEntry, ...] = (),
         response_request: InteractionRequest | None = None,
         response_source: DialogueEntry | None = None,
+        dispatch_count: int | None = None,
+        run_owner_id: str | None = None,
+        priority_request_entry_id: str | None = None,
     ) -> WorldUpdatePlan:
         """Validate authority and resolve trusted World effects for one Proposal."""
 
@@ -242,23 +279,87 @@ class WorldChangeValidator:
         public_state = PublicWorldState.model_validate(public_state, strict=True)
         _require_aware(created_at)
         self._require_envelopes(proposal, view, public_state)
+        frontiers = tuple(
+            dict.fromkeys(
+                (*previous_entries, *((previous_entry,) if previous_entry is not None else ()))
+            )
+        )
 
         action = proposal.action
         if isinstance(action, NoOpAction):
-            return self._empty_plan(proposal, WorldUpdateStatus.NO_OP)
+            return self._empty_plan(
+                proposal,
+                WorldUpdateStatus.NO_OP,
+                dispatch_count=dispatch_count,
+                run_owner_id=run_owner_id,
+                priority_request_entry_id=priority_request_entry_id,
+            )
         if isinstance(action, WaitAction):
             self._require_simple_affordance(view, proposal, ProposalKind.WAIT)
-            return self._empty_plan(proposal, WorldUpdateStatus.WAIT)
+            return self._empty_plan(
+                proposal,
+                WorldUpdateStatus.WAIT,
+                dispatch_count=dispatch_count,
+                run_owner_id=run_owner_id,
+                priority_request_entry_id=priority_request_entry_id,
+            )
         if isinstance(action, ActAction):
-            self._require_simple_affordance(view, proposal, ProposalKind.ACT)
-            return self._empty_plan(proposal, WorldUpdateStatus.NOT_APPLIED)
+            affordance = self._find_action_affordance(view, action.affordance_id)
+            if affordance.kind is not ProposalKind.ACT or affordance.target is not None:
+                raise WorldUpdateValidationError("selected affordance does not match the action")
+            if affordance.operation_id == LEAVE_CURRENT_SESSION:
+                transition = plan_leave(public_state, actor_agent_id=proposal.agent_id)
+                return self._transition_plan(
+                    proposal,
+                    public_state,
+                    transition,
+                    created_at=created_at,
+                    previous_entries=frontiers,
+                    dispatch_count=dispatch_count,
+                    run_owner_id=run_owner_id,
+                    priority_request_entry_id=priority_request_entry_id,
+                )
+            return self._behavior_plan(
+                proposal,
+                public_state,
+                action,
+                affordance,
+                created_at=created_at,
+                previous_entries=frontiers,
+                dispatch_count=dispatch_count,
+                run_owner_id=run_owner_id,
+                priority_request_entry_id=priority_request_entry_id,
+            )
 
         affordance = self._find_action_affordance(view, action.affordance_id)
         if affordance.kind.value != action.kind or affordance.target != action.target:
             raise WorldUpdateValidationError("selected affordance does not match the action")
         if isinstance(action, InteractAction):
             if isinstance(action.target, CharacterTarget):
-                return self._empty_plan(proposal, WorldUpdateStatus.NOT_APPLIED)
+                if affordance.operation_id != JOIN_TARGET_SESSION:
+                    raise WorldUpdateValidationError("unknown Character interaction operation")
+                expected = WorldAffordanceResolver(
+                    world_ref=self._world_ref,
+                    world_version=public_state.world.current_version,
+                    agent_id=proposal.agent_id,
+                ).join_session_affordance(target=action.target)
+                if affordance != expected:
+                    raise WorldUpdateValidationError("join affordance is forged or stale")
+                transition = plan_join(
+                    public_state,
+                    actor_agent_id=proposal.agent_id,
+                    target_agent_id=action.target.id,
+                )
+                return self._transition_plan(
+                    proposal,
+                    public_state,
+                    transition,
+                    created_at=created_at,
+                    previous_entries=frontiers,
+                    dispatch_count=dispatch_count,
+                    run_owner_id=run_owner_id,
+                    priority_request_entry_id=priority_request_entry_id,
+                )
             return self._object_plan(
                 proposal,
                 view,
@@ -266,7 +367,10 @@ class WorldChangeValidator:
                 action,
                 affordance,
                 created_at=created_at,
-                previous_entry=previous_entry,
+                previous_entry=_frontier_for_actor(public_state, proposal.agent_id, frontiers),
+                dispatch_count=dispatch_count,
+                run_owner_id=run_owner_id,
+                priority_request_entry_id=priority_request_entry_id,
             )
         if isinstance(action, UtterAction):
             return self._utter_plan(
@@ -275,7 +379,10 @@ class WorldChangeValidator:
                 action,
                 affordance,
                 created_at=created_at,
-                previous_entry=previous_entry,
+                previous_entry=_frontier_for_actor(public_state, proposal.agent_id, frontiers),
+                dispatch_count=dispatch_count,
+                run_owner_id=run_owner_id,
+                priority_request_entry_id=priority_request_entry_id,
             )
         return self._response_plan(
             proposal,
@@ -284,9 +391,12 @@ class WorldChangeValidator:
             action,
             affordance,
             created_at=created_at,
-            previous_entry=previous_entry,
+            previous_entry=_frontier_for_actor(public_state, proposal.agent_id, frontiers),
             response_request=response_request,
             response_source=response_source,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _require_envelopes(
@@ -329,6 +439,10 @@ class WorldChangeValidator:
         self,
         proposal: ActionProposal,
         status: WorldUpdateStatus,
+        *,
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
     ) -> WorldUpdatePlan:
         return WorldUpdatePlan(
             world_ref=self._world_ref,
@@ -339,6 +453,142 @@ class WorldChangeValidator:
             expected_control_epoch=proposal.based_on_control_epoch,
             expected_decision_seq=proposal.based_on_decision_seq,
             status=status,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
+        )
+
+    def _behavior_plan(
+        self,
+        proposal: ActionProposal,
+        state: PublicWorldState,
+        action: ActAction,
+        affordance: Affordance,
+        *,
+        created_at: datetime,
+        previous_entries: tuple[EventEntry, ...],
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
+    ) -> WorldUpdatePlan:
+        operation_id = affordance.operation_id
+        if operation_id not in SELF_BEHAVIOR_TEXT:
+            raise WorldUpdateValidationError("unknown or unavailable self behavior")
+        expected = WorldAffordanceResolver(
+            world_ref=self._world_ref,
+            world_version=state.world.current_version,
+            agent_id=proposal.agent_id,
+        ).behavior_affordances()
+        if affordance not in expected or action.affordance_id != affordance.affordance_id:
+            raise WorldUpdateValidationError("behavior affordance is forged or stale")
+        root = _session_for_agent(state, proposal.agent_id)
+        entry = BehaviorEntry(
+            world_ref=self._world_ref,
+            entry_id=_entry_id(self._world_ref, proposal.proposal_id),
+            source_id=proposal.proposal_id,
+            commit_position=CommitPosition(world_version=state.world.current_version + 1),
+            root_session_id_at_commit=root.root_session_id,
+            topology_version=root.topology_version,
+            actor_agent_id=proposal.agent_id,
+            occurred_at=state.world.world_time,
+            text=SELF_BEHAVIOR_TEXT[operation_id],
+            created_at=created_at,
+            operation_id=operation_id,
+        )
+        return self._applied_plan(
+            proposal,
+            state,
+            entry,
+            previous_entry=_frontier_for_actor(state, proposal.agent_id, previous_entries),
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
+        )
+
+    def _transition_plan(
+        self,
+        proposal: ActionProposal,
+        state: PublicWorldState,
+        transition: SessionTransitionPlan,
+        *,
+        created_at: datetime,
+        previous_entries: tuple[EventEntry, ...],
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
+    ) -> WorldUpdatePlan:
+        actor_node = _session_for_agent(state, proposal.agent_id)
+        actor_after = next(
+            part
+            for part in transition.after_parts
+            if actor_node.session_id in part.member_session_ids
+        )
+        text = (
+            f"{proposal.agent_id} 加入了 {transition.target_agent_id} 所在的互动。"
+            if transition.target_agent_id is not None
+            else f"{proposal.agent_id} 离开了当前互动。"
+        )
+        entry = SessionTransitionEntry(
+            world_ref=self._world_ref,
+            entry_id=_entry_id(self._world_ref, proposal.proposal_id),
+            source_id=proposal.proposal_id,
+            commit_position=CommitPosition(world_version=state.world.current_version + 1),
+            root_session_id_at_commit=actor_after.root_session_id,
+            topology_version=actor_after.topology_version,
+            actor_agent_id=proposal.agent_id,
+            occurred_at=state.world.world_time,
+            text=text,
+            created_at=created_at,
+            transition_reason=transition.reason,
+            target_agent_id=transition.target_agent_id,
+        )
+        frontier_by_line = {
+            (item.root_session_id_at_commit, item.topology_version): item
+            for item in previous_entries
+        }
+        linked_frontiers = tuple(
+            frontier
+            for part in transition.before_parts
+            if (frontier := frontier_by_line.get((part.root_session_id, part.topology_version)))
+            is not None
+        )
+        links = tuple(
+            EventEntryLink(
+                world_ref=self._world_ref,
+                entry_id=entry.entry_id,
+                relation_kind=EntryRelationKind.PREVIOUS,
+                related_entry_id=frontier.entry_id,
+                relation_order=order,
+            )
+            for order, frontier in enumerate(linked_frontiers)
+        )
+        session_to_agent = {node.session_id: node.agent_id for node in state.sessions}
+        recipient_ids = tuple(
+            sorted(session_to_agent[item] for item in transition.affected_session_ids)
+        )
+        return WorldUpdatePlan(
+            world_ref=self._world_ref,
+            decision_id=proposal.proposal_id,
+            agent_id=proposal.agent_id,
+            event_session_id=proposal.event_session_id,
+            expected_world_version=proposal.based_on_world_version,
+            expected_control_epoch=proposal.based_on_control_epoch,
+            expected_decision_seq=proposal.based_on_decision_seq,
+            status=WorldUpdateStatus.APPLIED,
+            entry=entry,
+            links=links,
+            recipients=tuple(
+                EventEntryRecipient(
+                    world_ref=self._world_ref,
+                    entry_id=entry.entry_id,
+                    agent_id=agent_id,
+                )
+                for agent_id in recipient_ids
+            ),
+            session_transition=transition,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _object_plan(
@@ -351,6 +601,9 @@ class WorldChangeValidator:
         *,
         created_at: datetime,
         previous_entry: EventEntry | None,
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
     ) -> WorldUpdatePlan:
         if not isinstance(action.target, ObjectTarget):
             raise WorldUpdateValidationError("Object operation requires an Object target")
@@ -405,6 +658,9 @@ class WorldChangeValidator:
                 expected_state=operation.from_state,
                 new_state=operation.to_state,
             ),
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _utter_plan(
@@ -416,6 +672,9 @@ class WorldChangeValidator:
         *,
         created_at: datetime,
         previous_entry: EventEntry | None,
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
     ) -> WorldUpdatePlan:
         self._require_character_target(state, proposal.agent_id, action.target)
         channel = affordance.delivery_channel
@@ -466,6 +725,9 @@ class WorldChangeValidator:
             entry,
             previous_entry=previous_entry,
             create_request=request,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _response_plan(
@@ -480,6 +742,9 @@ class WorldChangeValidator:
         previous_entry: EventEntry | None,
         response_request: InteractionRequest | None,
         response_source: DialogueEntry | None,
+        dispatch_count: int | None,
+        run_owner_id: str | None,
+        priority_request_entry_id: str | None,
     ) -> WorldUpdatePlan:
         self._require_character_target(state, proposal.agent_id, action.target)
         if response_request is None or response_source is None:
@@ -546,6 +811,9 @@ class WorldChangeValidator:
             previous_entry=previous_entry,
             reply_to=response_source.entry_id,
             resolve_request_entry_id=response_source.entry_id,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _applied_plan(
@@ -559,11 +827,18 @@ class WorldChangeValidator:
         create_request: InteractionRequest | None = None,
         resolve_request_entry_id: str | None = None,
         object_change: ObjectStateChange | None = None,
+        session_transition: SessionTransitionPlan | None = None,
+        dispatch_count: int | None = None,
+        run_owner_id: str | None = None,
+        priority_request_entry_id: str | None = None,
     ) -> WorldUpdatePlan:
         if previous_entry is not None:
             if previous_entry.world_ref != self._world_ref:
                 raise WorldUpdateValidationError("previous Entry belongs to another WorldRef")
-            if previous_entry.root_session_id_at_commit != entry.root_session_id_at_commit:
+            if (
+                previous_entry.root_session_id_at_commit != entry.root_session_id_at_commit
+                or previous_entry.topology_version != entry.topology_version
+            ):
                 raise WorldUpdateValidationError("previous Entry belongs to another story line")
             if previous_entry.commit_position.world_version > state.world.current_version:
                 raise WorldUpdateValidationError("previous Entry is newer than the current World")
@@ -612,6 +887,10 @@ class WorldChangeValidator:
             create_request=create_request,
             resolve_request_entry_id=resolve_request_entry_id,
             object_change=object_change,
+            session_transition=session_transition,
+            dispatch_count=dispatch_count,
+            run_owner_id=run_owner_id,
+            priority_request_entry_id=priority_request_entry_id,
         )
 
     def _find_action_affordance(self, view: AgentView, affordance_id: str) -> Affordance:
@@ -685,6 +964,9 @@ class WorldUpdater:
             expected_control_epoch=plan.expected_control_epoch,
             expected_decision_seq=plan.expected_decision_seq,
             advances_world=advances_world,
+            dispatch_count=plan.dispatch_count,
+            run_owner_id=plan.run_owner_id,
+            dispatch_agent_id=(plan.agent_id if plan.dispatch_count is not None else None),
         )
         _checkpoint(checkpoint, "world")
 
@@ -697,16 +979,30 @@ class WorldUpdater:
             )
         _checkpoint(checkpoint, "object")
 
+        if plan.session_transition is not None:
+            self._world_store.apply_session_transition(session, plan.session_transition)
+        _checkpoint(checkpoint, "session")
+
         if plan.entry is not None:
             self._entry_store.append(
                 session,
                 plan.entry,
                 links=plan.links,
                 recipients=plan.recipients,
+                transition=plan.session_transition,
             )
             session.flush()
         _checkpoint(checkpoint, "entry")
 
+        if plan.priority_request_entry_id is not None:
+            if plan.dispatch_count is None:
+                raise WorldUpdateValidationError("request priority requires a dispatch token")
+            self._entry_store.consume_request_priority(
+                session,
+                request_entry_id=plan.priority_request_entry_id,
+                recipient_agent_id=plan.agent_id,
+                dispatch_count=plan.dispatch_count,
+            )
         if plan.create_request is not None:
             self._entry_store.create_request(session, plan.create_request)
         if plan.resolve_request_entry_id is not None:
@@ -718,8 +1014,27 @@ class WorldUpdater:
                 resolution_entry_id=plan.entry.entry_id,
                 updated_world_version=version,
             )
+        if plan.session_transition is not None:
+            if plan.entry is None:
+                raise WorldUpdateValidationError("Session transition requires an Entry")
+            self._entry_store.cancel_unreachable_requests(
+                session,
+                transition=plan.session_transition,
+                cancellation_entry_id=plan.entry.entry_id,
+                updated_world_version=version,
+            )
         session.flush()
         _checkpoint(checkpoint, "request")
+        self._world_store.finish_session_step(
+            session,
+            agent_id=plan.agent_id,
+            world_version=version,
+            entry_kind=(plan.entry.entry_kind if plan.entry is not None else None),
+            waiting=plan.status is not WorldUpdateStatus.APPLIED,
+            dispatch_count=plan.dispatch_count,
+        )
+        session.flush()
+        _checkpoint(checkpoint, "scheduler")
         return WorldUpdateResult(
             world_ref=self._world_ref,
             decision_id=plan.decision_id,
@@ -770,6 +1085,23 @@ def _session_for_agent(state: PublicWorldState, agent_id: str) -> EventSessionNo
     if node is None:
         raise WorldUpdateValidationError(f'Agent "{agent_id}" does not exist in this World')
     return node
+
+
+def _frontier_for_actor(
+    state: PublicWorldState,
+    agent_id: str,
+    entries: tuple[EventEntry, ...],
+) -> EventEntry | None:
+    node = _session_for_agent(state, agent_id)
+    return next(
+        (
+            entry
+            for entry in entries
+            if entry.root_session_id_at_commit == node.root_session_id
+            and entry.topology_version == node.topology_version
+        ),
+        None,
+    )
 
 
 def _recipient_ids(state: PublicWorldState, entry: EventEntry) -> tuple[str, ...]:

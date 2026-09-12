@@ -17,7 +17,7 @@ generative_go_world/
 │   │   ├── director/       # Director 边界；实现待补
 │   │   └── broadcast/      # Broadcast 边界；实现待补
 │   ├── model_gateway.py     # typed LangChain ChatModel/Fixture seam
-│   ├── event/              # 已实现 CharacterStep；持续 Scheduler 留给 M4
+│   ├── event/              # CharacterStep、EventSession Runner 与 StoryLine DAG
 │   ├── world/              # 客观事实、AgentView、Entry 与原子更新权威
 │   └── rendergateway/      # RenderJob 出站边界
 ├── extensions/
@@ -58,7 +58,7 @@ npm test
 npm run dynamic -- --project rain-after
 ```
 
-Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice，以及 Project 隔离的 SQLite World、硬可见 `AgentView` 和一次角色决定的原子 `CharacterStep`。`agent_runtime/agent/personact/loop.py` 是显式认知循环，`event/character_step.py` 是读取、决策、校验和提交的唯一单步入口；LangChain Core 是内部编排依赖，不是 ADK 本身。持续 Scheduler、EventSession 重组、Director 与 Broadcast 仍待实现。Python 环境、依赖和工具统一使用 uv：
+Agent Runtime 当前已实现项目自研 NPC ADK 的 PersonAct 核心 Slice、Project 隔离的 SQLite World、有界 `WorldRunner`、EventSession 自主分合、暂停续跑和 committed StoryLine DAG。`agent_runtime/agent/personact/loop.py` 是显式认知循环，`event/character_step.py` 是读取、决策、校验和提交的唯一单步入口；LangChain Core 是内部编排依赖，不是 ADK 本身。Director、Broadcast、自然结局与正式 WebGAL 转译仍待后续阶段实现。Python 环境、依赖和工具统一使用 uv：
 
 ```bash
 uv sync --frozen
@@ -68,7 +68,51 @@ uv run pyright
 uv run pytest
 ```
 
-当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State、PersonAct 认知 Slice，以及 `ActionProposal → WorldUpdatePlan → EventEntry/Object/Persona/Memory` 的单事务发布。Character Skill 由版本和整文件 SHA-256 固定；模型型 `CognitionStrategy` 通过 typed LangChain ChatModel Gateway 产出 strict Pydantic 草稿，并把 schema/Proposal 语义 repair 限制为最多一次。`decide` 一次只返回 `spec.agent_id` 对应角色的一个 strict/frozen `ActionProposal`；只有 `WorldUpdater` 可以把受信 Object operation 或 Dialogue 变成公共事实。M3 已用离线 Fixture 证明 utter→respond、定向 whisper 可见性、对象操作、幂等重试、事务回滚和重启恢复；它仍不是持续多 Agent Runtime，Event Scheduler、Session merge/split、Director、Broadcast、完整 Reflection 与 Render ingress 留在后续阶段。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
+当前已落地受限 Manifest、`CompiledPersonActSpec`、Persona 私有 Memory/State、PersonAct 认知 Slice，以及 `ActionProposal → WorldUpdatePlan → EventEntry/Object/Session/Persona/Memory` 的单事务发布。Character Skill 由版本和整文件 SHA-256 固定；模型型 `CognitionStrategy` 通过 typed LangChain ChatModel Gateway 产出 strict Pydantic 草稿，并把 schema/Proposal 语义 repair 限制为最多一次。`decide` 一次只返回当前角色的一个 strict/frozen `ActionProposal`；只有 `WorldUpdater` 可以提交受信 Object operation、Dialogue 或 Session transition。M4 的 Runner 同一 World 串行派发、持久预扣额度，以稳定 Agent Session node 上的 root/topology 表达 merge/split/transfer，并能从 committed Entry 重建多线故事。LangChain `Runnable.with_types()` 不做运行时校验，实际结构边界由 strict/frozen Pydantic Model 保证；当前不使用 LangGraph。
+
+### Agent World Demo
+
+创建一个暂停存档，再用离线 Fixture 或 OpenAI-compatible Provider 追加一段有界运行。模型模式默认选择火山方舟；`.env` 由 uv 显式加载，Runtime 本身不会扫描密钥文件：
+
+```bash
+uv run python -m agent_runtime.world_cli create mygo-hogwarts review-world
+
+uv run python -m agent_runtime.world_cli run mygo-hogwarts review-world \
+  --additional-decisions 15 \
+  --fixture
+
+uv run --env-file .env python -m agent_runtime.world_cli run \
+  mygo-hogwarts review-world \
+  --additional-decisions 20 \
+  --provider ark \
+  --model \
+  --provider-call-limit 160 \
+  --output-directory artifacts/m4-hogwarts/review-world
+```
+
+`.env` 中需配置 `ARK_API_KEY=...` 与 `ARK_ENDPOINT_ID=...`；如需回退 DeepSeek，显式使用 `--provider deepseek --model deepseek-v4-flash` 和 `DEEPSEEK_API_KEY`。`--additional-decisions` 限制持久 dispatch 数；模型模式还必须给出所有角色共享的 `--provider-call-limit`，限制逻辑 Gateway 调用。每次运行保留唯一 attempt manifest，成功时同时原子更新 `run_manifest.json` 与 `storyline.json`；API key、Persona Memory 和私有 Prompt 不进入这些产物。十人 Project 的每个 Persona 还持有完整的有向 `familiarity + affinity` 初始关系矩阵，该私有关系只进入所属角色的认知输入，不进入公开 StoryLine。
+
+暂停、查看状态、重新导出故事线和生成离线审片页：
+
+```bash
+uv run python -m agent_runtime.world_cli pause mygo-hogwarts review-world
+uv run python -m agent_runtime.world_cli status mygo-hogwarts review-world
+uv run python -m agent_runtime.world_cli story mygo-hogwarts review-world \
+  --output-directory artifacts/m4-hogwarts/review-world
+
+node tools/storyline-to-html.mjs \
+  artifacts/m4-hogwarts/review-world/storyline.json \
+  --out artifacts/m4-hogwarts/review-world/storyline.html
+```
+
+日常审片可直接把产物目录交给 npm 脚本；它会读取目录内的 `storyline.json`，并原子更新
+同目录的 `storyline.html`：
+
+```bash
+npm run story:html -- artifacts/m4-hogwarts/review-world
+```
+
+HTML 是不依赖 CDN 的本地开发审片器：按时间从左向右绘制 worktree 式互动拓扑，每个 committed event 节点直接展示完整对话、动作或行为正文，join/merge 时汇线、leave/split 时分叉；它不是 M6 的导播成片或 WebGAL 脚本。
 
 默认项目是 `rain-after`。开发服务器优先提供本仓库的自研 Overlay，并在文件不存在时从 `WEBGAL_ROOT` 提供 WebGAL 页面、Bundle、素材和媒体文件。
 

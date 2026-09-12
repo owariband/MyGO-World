@@ -43,6 +43,16 @@ class ReflectionPolicy(StrEnum):
     COMMITTED_OUTCOME = "committed_outcome"
 
 
+class Familiarity(StrEnum):
+    """How much first-hand context this Persona has about another character."""
+
+    UNAWARE = "unaware"
+    RECOGNIZES = "recognizes"
+    ACQUAINTED = "acquainted"
+    FAMILIAR = "familiar"
+    CLOSE = "close"
+
+
 class Goal(StrictModel):
     id: AgentIdentifier
     description: NonEmptyText
@@ -51,6 +61,8 @@ class Goal(StrictModel):
 class Relationship(StrictModel):
     target_id: AgentIdentifier
     description: NonEmptyText
+    familiarity: Familiarity = Familiarity.FAMILIAR
+    affinity: Annotated[int, Field(ge=-100, le=100)] = 0
 
 
 class Voice(StrictModel):

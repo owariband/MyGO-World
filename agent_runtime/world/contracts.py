@@ -16,6 +16,7 @@ Identifier = Annotated[str, StringConstraints(min_length=1, strip_whitespace=Tru
 WorldVersion = Annotated[int, Field(ge=1)]
 ControlEpoch = Annotated[int, Field(ge=1)]
 DecisionSequence = Annotated[int, Field(ge=0)]
+DispatchCount = Annotated[int, Field(ge=0)]
 EntryIndex = Annotated[int, Field(ge=0)]
 Salience = Annotated[float, Field(ge=0.0, le=1.0)]
 
@@ -118,8 +119,8 @@ class Affordance(StrictModel):
         if self.kind is ProposalKind.INTERACT:
             if isinstance(self.target, ObjectTarget) and self.operation_id is None:
                 raise ValueError("object interact affordance requires an operationId")
-            if isinstance(self.target, CharacterTarget) and self.operation_id is not None:
-                raise ValueError("character interact affordance cannot carry an operationId")
+            if isinstance(self.target, CharacterTarget) and self.operation_id is None:
+                raise ValueError("character interact affordance requires an operationId")
             if self.delivery_channel is not None or self.request_entry_id is not None:
                 raise ValueError("interact affordance cannot carry dialogue routing")
         elif self.kind is ProposalKind.UTTER:
@@ -140,6 +141,11 @@ class Affordance(StrictModel):
                 raise ValueError("respond affordance requires a requestEntryId")
             if self.operation_id is not None:
                 raise ValueError("respond affordance cannot carry an operation")
+        elif self.kind is ProposalKind.ACT:
+            if self.operation_id is None:
+                raise ValueError("act affordance requires an operationId")
+            if self.delivery_channel is not None or self.request_entry_id is not None:
+                raise ValueError("act affordance cannot carry dialogue routing")
         elif any(
             value is not None
             for value in (self.operation_id, self.delivery_channel, self.request_entry_id)
@@ -200,6 +206,7 @@ ActionText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=Tru
 
 class ActAction(StrictModel):
     kind: Literal["act"] = "act"
+    affordance_id: Identifier
     description: ActionText
 
 

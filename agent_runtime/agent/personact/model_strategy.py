@@ -134,6 +134,9 @@ class ModelCognitionStrategy:
                 "Create a short ordered queue of private plans, each with a unique plan ID "
                 "and description. There is no daily schedule. Treat the compiled "
                 "Persona, current observations, and retrieved private Memory as authoritative. "
+                "Persona relationships are private and directional: familiarity describes how "
+                "well this character knows the target, while affinity ranges from -100 to 100; "
+                "never assume the target reciprocates either value. "
                 "Do not claim that planned actions already happened."
             ),
             input_json=planning_input.model_dump_json(by_alias=True, exclude_none=False),
@@ -162,7 +165,15 @@ class ModelCognitionStrategy:
                 "Choose exactly one Action draft for this character. Use only the supplied "
                 "observations, private Memory, and current affordances. Return action and "
                 "visible evidence IDs only; project, world, actor, proposal, session, and version "
-                "are injected later by trusted Runtime code."
+                "are injected later by trusted Runtime code. Copy the exact affordanceId and "
+                "target from one available affordance. A character interact affordance whose "
+                "operationId is join_target_session changes which conversation the actor joins; "
+                "an act affordance whose operationId is leave_current_session leaves the current "
+                "conversation; other act operations are self behavior. Dialogue text alone never "
+                "changes EventSession membership. Choose a transition only when it follows the "
+                "character's own goals and current context. Treat relationship familiarity and "
+                "affinity as this character's private, non-reciprocal stance rather than public "
+                "facts about the target."
             ),
             input_json=planning_input.model_dump_json(by_alias=True, exclude_none=False),
         )

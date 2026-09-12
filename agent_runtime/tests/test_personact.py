@@ -408,7 +408,11 @@ def test_agent_view_rejects_future_cursor_and_duplicate_affordance_ids() -> None
             strict=True,
         )
 
-    afforded = Affordance(affordance_id="same", kind=ProposalKind.ACT)
+    afforded = Affordance(
+        affordance_id="same",
+        kind=ProposalKind.ACT,
+        operation_id="observe_surroundings",
+    )
     with pytest.raises(ValidationError, match="unique"):
         _view(affordances=(afforded, afforded))
 
@@ -427,7 +431,7 @@ def test_build_action_proposal_accepts_character_and_object_interact(
         affordance_id="interact-shared-id",
         kind=ProposalKind.INTERACT,
         target=target,
-        operation_id="use" if isinstance(target, ObjectTarget) else None,
+        operation_id=("use" if isinstance(target, ObjectTarget) else "join_target_session"),
     )
     proposal = build_action_proposal(
         world_ref=WORLD_REF,
@@ -470,7 +474,9 @@ def test_build_action_proposal_does_not_confuse_target_kind_with_same_id(
         affordance_id="interact-shared-id",
         kind=ProposalKind.INTERACT,
         target=afforded_target,
-        operation_id="use" if isinstance(afforded_target, ObjectTarget) else None,
+        operation_id=(
+            "use" if isinstance(afforded_target, ObjectTarget) else "join_target_session"
+        ),
     )
     view = _view(affordances=(affordance,))
     draft = ProposalDraft(
@@ -553,6 +559,7 @@ def test_world_contract_rejects_object_target_for_speech(kind: ProposalKind) -> 
                 affordance_id="wrong-target",
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="tomori"),
+                operation_id="join_target_session",
             ),
             id="wrong-target",
         ),
@@ -641,9 +648,17 @@ def test_build_action_proposal_rejects_kind_not_granted_by_spec() -> None:
         build_action_proposal(
             world_ref=WORLD_REF,
             spec=_anon_spec(),
-            view=_view(affordances=(Affordance(affordance_id="act", kind=ProposalKind.ACT),)),
+            view=_view(
+                affordances=(
+                    Affordance(
+                        affordance_id="act",
+                        kind=ProposalKind.ACT,
+                        operation_id="observe_surroundings",
+                    ),
+                )
+            ),
             proposal_id="proposal-1",
-            draft=ProposalDraft(action=ActAction(description="look around")),
+            draft=ProposalDraft(action=ActAction(affordance_id="act", description="look around")),
         )
 
 

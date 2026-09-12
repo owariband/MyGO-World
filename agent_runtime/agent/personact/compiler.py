@@ -165,6 +165,14 @@ def _compile_agent(
     catalog: Catalog,
 ) -> CompiledPersonActSpec:
     _require_unique(tuple(goal.id for goal in definition.persona.goals), "goal ids")
+    relationship_targets = tuple(
+        relationship.target_id for relationship in definition.persona.relationships
+    )
+    _require_unique(relationship_targets, "relationship target ids")
+    if definition.id in relationship_targets:
+        raise ManifestCompileError(
+            f"agent {definition.id!r} cannot target itself as a relationship"
+        )
     _require_unique(tuple(seed.id for seed in definition.memory.seeds), "memory seed ids")
     _require_unique(
         tuple(kind.value for kind in definition.capabilities.proposal_kinds),

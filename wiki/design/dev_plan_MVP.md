@@ -1,8 +1,8 @@
 # MVP 分阶段执行计划
 
-> 状态：M1、M2 已完成并推送；M3.1–M3.4 已实现并通过自动门禁，处于未提交 Review；M4–M7 尚未执行。
+> 状态：M1–M3 已完成并推送；M4 离线实现已完成并进入 Review，真实 Provider 验收因当前 DeepSeek Key 返回 401 而阻塞；M5–M7 尚未执行。
 > 更新日期：2026-09-11
-> 开发基线：`master@5d2f496`（M2，已推送）。
+> 开发基线：`master@ecc29c0`（M3，已推送）。
 > 设计依据：[MVP_dev.md](MVP_dev.md)。该文档解释模型与规则，本文负责执行顺序、review 单元、验收与进度追踪。
 
 ## 1. 执行方式与完成边界
@@ -12,7 +12,7 @@
 - M1–M3：基础契约、存储、初始化、单步提交；主要 review 数据所有权和不变量。
 - M4–M6：自由互动、导演、导播；主要 review 可运行场景和功能边界。
 - M7：把已通过的闭环串起来做验收，不在最后首次补持久化、安全或恢复。
-- 先用 Fixture 验证确定性机制，再单独评估真实模型行为。Fixture 的固定动作只服务测试，不能写进真实角色策略。
+- 先用 Fixture 验证确定性机制，再单独评估真实模型行为。Fixture 的固定动作只服务测试，不能写进真实角色策略；M4 起真实群演结果也是阶段交付物，但不替代离线机制测试。
 - 以本文的 M 编号作为后续开发顺序；原设计第 7 节 Phase 编号作为设计分组参考，不另维护一套完成状态。
 
 工程 MVP 的完成边界：指定 Project 初始化独立 World → 角色互动与分合组 → 导演处理客观事项并定向通知 → 手动暂停、关闭进程、读档续跑 → 导播导出可读故事线 JSON。Worker 配装与 WebGAL 转译由进程外 Codex 承担。
@@ -35,7 +35,7 @@
 | M1 基础契约与现有接入修正 | 修正 Gateway，建立 WorldRef 与通用 UnionPart | 严格 JSON 模型边界和分区结构有独立测试 | 当前基线 |
 | M2 Project 世界创建与加载 | 独立数据库、Scenario、公开/私有初始状态 | 创建两个隔离作品，重启后加载同一初始存档 | M1 |
 | M3 单步世界与认知提交 | Entry、可见性、World/Agent 原子提交 | 一个角色行动生效或未生效后，可从 DB 重建一致结果 | M2 |
-| M4 自由互动与可恢复运行 | Runner、多组互动、StoryLine、暂停续跑 | 三人可对话、加入、离开，中途重启继续 | M3 |
+| M4 自由互动与可恢复运行 | Runner、多组互动、StoryLine、暂停续跑、审片 Viewer | MyGO × Hogwarts 十人真实互动，实际 add/split，提交 raw JSON 与离线 HTML | M3 |
 | M5 导演客观事件闭环 | pending Entry、按回合检查、定向通知 | 角色继续聊天，导演只通知 Anon 咖啡好了 | M4 |
 | M6 导播编排与 JSON 导出 | 多线选择、呈现对齐、Plan 持久化与导出 | 离开 DB 也能阅读并交给 Codex 制作的故事 JSON | M4；完整咖啡场景依赖 M5 |
 | M7 MVP 联合验收 | 整合场景、故障恢复、隔离与制作交接 | 可复现的工程 MVP 证据包；模型质量另行标记 | M1–M6 |
@@ -122,7 +122,7 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 ## M3. 单步世界与认知提交
 
-> 当前状态：**REVIEW · uncommitted worktree**。实际实现、文件树、行数、独立 Review 与自动门禁统一维护在 [M3_dev_log.md](M3_dev_log.md#12-实现与验收记录)。
+> 当前状态：**DONE · `ecc29c0` 已推送**。实际实现、文件树、行数、独立 Review 与自动门禁统一维护在 [M3_dev_log.md](M3_dev_log.md#12-实现与验收记录)。
 
 **开发目标：** 证明“一次角色决策”能够基于同一 committed World 构造受限 AgentView，经校验后把公共结果、角色私有认知和决策完成位置原子落库，并可从数据库重建一致结果。M4 的持续 Runner 只复用这条单步路径，不再实现第二套提交逻辑。
 
@@ -132,10 +132,10 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M3.1 | EventEntry/link/recipient/request、稳定 operation/affordance、Alembic 0002 与 Store | commit position/source 幂等、复合外键、append-only、reply/cause 无环；自然语言 description 不能直接修改 Object | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
-| M3.2 | WorldChangeValidator/WorldUpdater、单 Agent State/Memory 增量与同事务提交 | status/epoch/version/state revision CAS；applied/not_applied/wait/no_op 分权；事务内不调用模型；任一点失败全回滚 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
-| M3.3 | AgentViewBuilder 与 committed recipient/request 可见性 | actor/target/旁听/隔离 root/whisper 权限矩阵；隐藏 link 不泄漏；pending request 不因 observation cursor 前移而消失 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
-| M3.4 | 唯一 CharacterStep：view → decide → validate/outcome → transaction → reload | utter→respond 与 Object operation Fixture；重复 decision/source 不重复；paused、stale、错 World 的工作副本不发布 | REVIEW · [实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.1 | EventEntry/link/recipient/request、稳定 operation/affordance、Alembic 0002 与 Store | commit position/source 幂等、复合外键、append-only、reply/cause 无环；自然语言 description 不能直接修改 Object | DONE · `ecc29c0`，[实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.2 | WorldChangeValidator/WorldUpdater、单 Agent State/Memory 增量与同事务提交 | status/epoch/version/state revision CAS；applied/not_applied/wait/no_op 分权；事务内不调用模型；任一点失败全回滚 | DONE · `ecc29c0`，[实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.3 | AgentViewBuilder 与 committed recipient/request 可见性 | actor/target/旁听/隔离 root/whisper 权限矩阵；隐藏 link 不泄漏；pending request 不因 observation cursor 前移而消失 | DONE · `ecc29c0`，[实现与验收](M3_dev_log.md#12-实现与验收记录) |
+| M3.4 | 唯一 CharacterStep：view → decide → validate/outcome → transaction → reload | utter→respond 与 Object operation Fixture；重复 decision/source 不重复；paused、stale、错 World 的工作副本不发布 | DONE · `ecc29c0`，[实现与验收](M3_dev_log.md#12-实现与验收记录) |
 
 ### 必须保持的不变量
 
@@ -153,26 +153,32 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 严格按 **M3.1 → M3.2 → M3.3 → M3.4** 推进：先冻结可持久化事实与操作身份，再实现原子更新，然后补角色视图，最后串成唯一单步入口。详细 Schema、字段约束、可见性矩阵、带 `[NEW/UPDATE · M3.x]` 的文件树、预计代码量、`origin/mvp` 复用边界和六个开工冻结点均以 [M3_dev_log.md](M3_dev_log.md) 为唯一维护位置。
 
-**阶段门禁：** 单步 Fixture 能关闭连接后重建相同公共/私有结果；source 重试不重复 Entry；私语与隔离 root 不泄漏；stale/paused/错 epoch/错 World/错误 state revision 均无半提交；M3 专项测试、完整 Python 测试、Ruff、Pyright、Alembic upgrade/downgrade/metadata、wheel migration 资源和既有 Node 测试全部通过。上述自动门禁已通过，证据见阶段日志；当前等待用户 Review，尚未 commit/push。
+**阶段门禁：** 单步 Fixture 能关闭连接后重建相同公共/私有结果；source 重试不重复 Entry；私语与隔离 root 不泄漏；stale/paused/错 epoch/错 World/错误 state revision 均无半提交；M3 专项测试、完整 Python 测试、Ruff、Pyright、Alembic upgrade/downgrade/metadata、wheel migration 资源和既有 Node 测试全部通过。上述自动门禁已通过并随 `ecc29c0` 推送，证据见阶段日志。
 
 ## M4. 自由互动与可恢复运行
 
-**开发目标：** 首个可运行的演员闭环；能连续互动、改变组合，并在任意完整提交点暂停和续跑。
+> 当前状态：**ENGINEERING READY / REAL ARK RUN REVIEW**。M4.0–M4.5 已实现；真实 Ark 十人运行、暂停续跑和审片产物已取得，但 `0 split` 与真实 SIGINT/SIGKILL 子进程证据仍未关闭，因此 M4 不标 DONE。该债务不阻止 M5.1 开始，详见 [M4_dev_log.md](M4_dev_log.md)。
 
-**落点：** 新增 `event/runner.py`、`event/session.py`、`event/story_line.py`；扩展 bootstrap 控制入口、现有存储与必要契约。
+**开发目标：** 首个可运行且可人工审片的演员闭环；十个真实模型角色能连续互动、改变组合，在完整提交点暂停续跑，并交付 raw StoryLine JSON 与离线 HTML。
+
+**落点：** 新增 `event/runner.py`、`event/session.py`、`event/story_line.py`；扩展 bootstrap 控制入口、现有存储与必要契约；新增 `projects/mygo-hogwarts/`、Ave Mujica Skill、`tools/storyline-to-html.mjs` 和真实运行 artifact。完整文件树与规模见阶段日志。
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M4.1 | 同 World 串行 Runner；被点名优先、公平轮转；连续对话 50 轮后接行为 | 冻结轮数及重置语义，不用旧时间 cooldown；优先不强制回应；wait/no_op 有界，多 pending 不饥饿；决策额度在派发前持久扣减 | TODO |
-| M4.2 | 自主 join/leave/transfer；把自身行为映射到 UnionPart | 无需组员批准；不欢迎只形成言行，不自动踢人；从另一组加入只转移本人；root 与 Join/Leave Entry 原子更新，五人始终五节点 | TODO |
-| M4.3 | Entry → StoryLine/StageView；跨组与交汇历史 | line_key 使用提交时 root/topology；多线各自有序，merge/split 可回查父子关系，后来加入不扩大旧私语接收者 | TODO |
-| M4.4 | pause_and_save/load_world/resume_world、Ctrl+C、运行锁、额度追加与恢复演示 | 加载保持 paused；暂停与提交串行裁决；旧 epoch 迟到结果不能落库；同 World 并发 resume 排他；重启不返还额度、不覆盖 Seed | TODO |
+| M4.0 | MyGO × Hogwarts 十人 Skill/Manifest/Scenario | 官方角色事实与 Prompt 推断分离；Hogwarts canon 与 AU 分离；学院不决定 Session；私有关系不泄露；十 Agent/Session 节点严格编译 | DONE IN WORKTREE · [内容与当前状态](M4_hogwarts_demo.md) |
+| M4.1 | 同 World 串行 Runner；被点名优先、公平轮转；连续对话 50 轮后接行为 | 冻结轮数及重置语义，不用旧时间 cooldown；优先不强制回应；wait/no_op 有界，多 pending 不饥饿；决策额度在派发前持久扣减 | DONE IN WORKTREE · [实现证据](M4_dev_log.md#152-已验证的行为) |
+| M4.2 | 自主 join/leave/transfer；把自身行为映射到 UnionPart | 无需组员批准；不欢迎只形成言行，不自动踢人；从另一组加入只转移本人；root 与 transition Entry 原子更新，节点数恒等于 Agent 数 | DONE IN WORKTREE · [实现证据](M4_dev_log.md#152-已验证的行为) |
+| M4.3 | Entry → StoryLine/StageView；跨组与交汇历史 | line_key 使用提交时 root/topology；多线各自有序，merge/split 可回查父子关系，后来加入不扩大旧私语接收者 | DONE IN WORKTREE · [实现证据](M4_dev_log.md#152-已验证的行为) |
+| M4.4 | pause_and_save/load_world/resume_world、Ctrl+C、运行锁、额度追加与恢复演示 | 加载保持 paused；暂停与提交串行裁决；旧 epoch 迟到结果不能落库；同 World 并发 resume 排他；重启不返还额度、不覆盖 Seed | REVIEW · DB fence/锁/关闭连接续跑已通过；待真实 Ctrl+C/SIGKILL 子进程证据 |
+| M4.5 | raw StageView JSON 与 `storyline-to-html.mjs` | 单文件 HTML 展示多线、Entry、recipient、交汇和成员变化；无 CDN；模型文本 escape；坏 JSON/DAG 拒绝；相同输入字节稳定 | DONE IN WORKTREE · Node 31 passed；支持 `npm run story:html -- <artifact-dir>`，[实现证据](M4_dev_log.md#153-实际门禁结果) |
+| M4.6 | 真实 Provider 十人群演与 attempt manifest | 十人均真实派发；至少 12 条正文 Entry；模型实际选择并提交 add 与 split；pause/reload/resume；不改写台词或直接补 DB | REVIEW · Ark 79 个成功角色步骤、72 条正文 Entry、1 merge + 5 transfer；`0 split`，不可验收为 DONE |
+| M4.7 | 提交可 Review 的 accepted run | `run_manifest.json + storyline.json + storyline.html + review.md` 可离线检查、可复现、hash 对齐；失败尝试如实记录 | REVIEW · 审片四件套与三份 attempt 已保留；因 `0 split` 明确标为未接受证据 |
 
-**执行顺序：** 先 M4.1，再 M4.2/M4.3，最后 M4.4 的完整操作验收；控制字段与持久进度必须随前面的功能一起写入，不等最后补。
+**执行顺序：** M4.0 内容先通过 Review，再依次完成 M4.1 → M4.2/M4.3 → M4.4 → M4.5；全部离线门禁通过后才消费真实 Provider 额度执行 M4.6/M4.7。控制字段与持久进度必须随前面的功能一起写入，不等最后补。
 
-**阶段门禁：** Anon/Soyo 交谈，Tomori 自主加入，其他人可表达不欢迎，角色自主 split；暂停、关闭进程、加载同一 World，继续原请求/计划/分组。未完成模型调用可重算，已提交 Entry 不重复，离线时间冻结。至少补一个“不加入或不回应也能继续”的反例。
+**阶段门禁：** Fixture 证明交谈、自主加入/离开、暂停恢复与“不加入/不回应也能继续”；真实 `mygo-hogwarts` World 证明十人均由 DeepSeek flash 实际驱动，StoryLine 中有模型选择的 add 与 split，关闭进程后可续跑。最终提交脱敏 raw JSON、由脚本生成的 standalone HTML、manifest 与 review；未完成模型调用可重算，已提交 Entry 不重复，离线时间冻结。
 
-**到此可称为：** 可恢复的多角色互动骨架。还没有导演咖啡闭环与最终导播输出。
+**到此可称为：** 可恢复、可审片的真实多角色互动 Demo。还没有 Director 咖啡闭环、Broadcast 选材与正式发布输出。
 
 ## M5. 导演客观事件闭环
 
@@ -182,7 +188,7 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M5.1 | DirectorView/Decision、允许的环境操作和合法 audience；先 Fixture 后模型 Strategy | 全局可读 StoryLine，但不读 Character 私有状态/未提交提案；不输出角色台词、动作或 Session 改组；在本任务明确 release 时如何携带告知方式/对象 | TODO |
+| M5.1 | DirectorView/Decision、允许的环境操作和合法 audience；先 Fixture 后模型 Strategy | 一次只读一个 committed trigger/待检查 Staff、有限因果和直接对象/地点状态；不读 Character 私有状态/未提交提案，不输出角色台词、动作或 Session 改组；明确 release 的告知方式/对象 | TODO |
 | M5.2 | pending Entry 的 schedule/keep/release/cancel 与幂等消费 | 只读到“想煮咖啡”不能当成已开始；合法开始后才能登记相应完成事项；队列是同表查询，同一 ID 转 committed，source 与 cursor 同事务 | TODO |
 | M5.3 | 按 Character 决策步间隔检查、idle 检查与进度恢复 | pending 不阻塞聊天；Director 调用不增加角色步数；轮数只触发检查，不代表世界分钟或强制完成；keep/release 与检查位置原子保存，空转有上限 | TODO |
 | M5.4 | 定向通知、重组与跨进程恢复 | 只通知 Anon 时同组其他人不可见；Anon 转告形成新 Entry；Session 范围跟随稳定节点解析当前组，explicit 不扩大；重启不重复入队/发布 | TODO |
@@ -224,10 +230,10 @@ M1.1 与 M1.3 可独立推进；M5 与 M6 的局部 Fixture 开发可在 M4 完�
 
 - [x] 两个 Project 使用独立数据库；同 Project 多个 World 隔离；身份错配在任何写入前失败。（M2 · `5d2f496`）
 - [x] 初始化公开/私有知识准确分流；已有存档加载不重新初始化。（M2 · `5d2f496`）
-- [ ] 角色逐次决策与提交；加入无需审批，离开自主；节点数不随组合变化增长。
-- [ ] 私语、跨组消息和后续转述的知识边界正确；对方不回应不会卡死整个世界。
-- [ ] Entry 有稳定顺序、source 幂等与因果/交汇关系；合法未生效不产生假成功。
-- [ ] 暂停/崩溃后世界、当前计划、Memory、请求、调度与导演进度一致恢复；迟到调用无权发布。
+- [x] 角色逐次决策与提交；加入无需审批，离开自主；节点数不随组合变化增长。（M3/M4 worktree）
+- [x] 私语、跨组消息和后续转述的知识边界正确；对方不回应不会卡死整个世界。（M3/M4 worktree）
+- [x] Entry 有稳定顺序、source 幂等与因果/交汇关系；合法未生效不产生假成功。（M3/M4 worktree）
+- [ ] 关闭连接后 World、当前计划、Memory、请求与调度位置一致恢复，迟到调用无权发布；真实进程强杀证据和 M5 Director 进度恢复仍待后续完成。
 - [ ] 导演按对话进展处理 pending，只发布允许的客观事件，接收者由契约校验并固化。
 - [ ] 导播选材与时间编排不改世界；导出的故事 JSON 可读、可追溯、不会串 Project。
 - [ ] Codex 外置制作交接可执行；自动结局、实时渲染接线和真实模型品质的验收状态如实注明。
@@ -258,6 +264,10 @@ git diff --check
 
 2026-09-09：完成 M3 代码现状、`origin/mvp@fe8fd22` 可复用机制与现行需求审计，形成本文 M3.1–M3.4 的详细设计、预计文件树和验收门禁；尚未实现 M3 代码。
 
-2026-09-11：M3.1–M3.4 已实现并完成自动验收：M3 专项 63 项、完整 Python 442 项、Node 14 项通过，Ruff、Pyright、Alembic 往返/故障回滚、metadata、wheel 资源和 diff 检查均通过；独立 Review 修复记录与 M4 原子事务交接边界见 [M3 开发记录](M3_dev_log.md#12-实现与验收记录)。当前为未提交 worktree。
+2026-09-11：M3.1–M3.4 已实现并完成自动验收：M3 专项 63 项、完整 Python 442 项、Node 14 项通过，Ruff、Pyright、Alembic 往返/故障回滚、metadata、wheel 资源和 diff 检查均通过；独立 Review 修复记录与 M4 原子事务交接边界见 [M3 开发记录](M3_dev_log.md#12-实现与验收记录)。实现提交 `ecc29c0` 已推送。
 
-**下一工作单元：用户 Review M3 实现。** Review 通过后再按用户指示 commit/push，并进入 M4 Runner、EventSession merge/split 与 StoryLine 的文件级设计；不在 M3 收尾中提前实现。
+2026-09-11：M4.0–M4.5 在 worktree 实现；完整 Python **487 passed**、Node **30 passed**，Ruff、Pyright、diff、sdist/wheel 与 migration 资源门禁通过。十人 Fixture 与集成 Fixture 分别证明 Project 装配和 merge/transfer/split 机制；当日 DeepSeek 实网因 401 未形成真实证据。
+
+2026-09-12：Ark 真实链路在 World `ark-review-20260912-01` 完成三段运行，共 79 个成功角色步骤、176 次逻辑 Provider 调用和 78 条 committed Entry（58 dialogue / 5 action / 9 behavior / 6 transition）；十名角色均成功派发，产生 1 merge + 5 transfer，但没有 split。raw JSON、横向 worktree HTML、attempt manifest 与 review 已保留并明确标记“未接受”。Viewer 已改为中文主谓宾事件卡、完整页面高度，并增加一键目录命令。Scenario v2 / 爱音 Skill 3.1.0 强化暗恋爽世及魔咒课、魔药课情境，只能在新 World 生效。
+
+**下一工作单元：**可以开始 M5.1，先冻结 D-044 约束下的 `DirectorView / EventStaffDecision / audience` strict contract 与 Fixture；不得恢复旧“全局剧情导演”。并行债务仍是：用 Scenario v2 新建真实 World 补模型自主 split，以及补 M4.4 的真实 SIGINT/SIGKILL 子进程证据；两项未完成前 M4 不标 DONE。Broadcast 仍属于 M6。

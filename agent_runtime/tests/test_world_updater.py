@@ -14,13 +14,13 @@ from agent_runtime.scenario import ObjectOperationSeed, ObjectSeed
 from agent_runtime.sqlite import ProjectDatabase, open_project_database
 from agent_runtime.world.affordances import WorldAffordanceResolver
 from agent_runtime.world.contracts import (
-    ActAction,
     ActionProposal,
     Affordance,
     AgentAction,
     AgentView,
     AttentionTier,
     CharacterTarget,
+    CommitPosition,
     DeliveryChannel,
     InteractAction,
     NoOpAction,
@@ -35,9 +35,11 @@ from agent_runtime.world.contracts import (
 )
 from agent_runtime.world.entries import (
     ActionEntry,
+    BehaviorEntry,
     DialogueEntry,
     EntryRelationKind,
     InteractionRequestStatus,
+    SessionTransitionEntry,
 )
 from agent_runtime.world.entry_storage import EventEntryStore
 from agent_runtime.world.state import (
@@ -108,7 +110,6 @@ def runtime(tmp_path: Path) -> Iterator[_Runtime]:
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
-        pytest.param(ProposalKind.ACT, WorldUpdateStatus.NOT_APPLIED, id="not-applied"),
         pytest.param(ProposalKind.WAIT, WorldUpdateStatus.WAIT, id="wait"),
         pytest.param(ProposalKind.NO_OP, WorldUpdateStatus.NO_OP, id="no-op"),
     ],
@@ -120,12 +121,9 @@ def test_non_entry_outcomes_advance_only_decision_sequence(
 ) -> None:
     resolver = _resolver(runtime.initial, "anon")
     affordances: tuple[Affordance, ...] = ()
-    if kind is ProposalKind.ACT:
+    if kind is ProposalKind.WAIT:
         affordances = (resolver.simple_affordance(kind),)
-        action: AgentAction = ActAction(description="Look around the studio.")
-    elif kind is ProposalKind.WAIT:
-        affordances = (resolver.simple_affordance(kind),)
-        action = WaitAction(description="Wait a little.", next_wakeup="event_change")
+        action: AgentAction = WaitAction(description="Wait a little.", next_wakeup="event_change")
     else:
         action = NoOpAction(next_wakeup="event_change")
     view = _view(runtime.initial, "anon", affordances=affordances)
@@ -261,6 +259,72 @@ def test_response_commits_reply_and_resolves_original_request(runtime: _Runtime)
         EntryRelationKind.PREVIOUS,
         EntryRelationKind.REPLY,
     }
+
+
+def test_transition_previous_links_renumber_after_missing_line_frontiers() -> None:
+    base = _initial_world()
+    state = PublicWorldState(
+        world=base.world,
+        locations=base.locations,
+        agents=(
+            *base.agents,
+            AgentWorldState(
+                world_ref=WORLD_REF,
+                agent_id="tomori",
+                location_id="studio",
+            ),
+        ),
+        objects=base.objects,
+        sessions=(
+            *base.sessions,
+            EventSessionNode(
+                world_ref=WORLD_REF,
+                session_id="session-tomori",
+                agent_id="tomori",
+                root_session_id="session-tomori",
+                topology_version=1,
+                updated_world_version=1,
+            ),
+        ),
+    )
+    target = CharacterTarget(id="tomori")
+    affordance = _resolver(state, "anon").join_session_affordance(target=target)
+    view = _view(state, "anon", affordances=(affordance,))
+    proposal = _proposal(
+        view,
+        InteractAction(
+            affordance_id=affordance.affordance_id,
+            target=target,
+            description="Join Tomori's conversation.",
+        ),
+        decision_id="join-tomori",
+    )
+    target_frontier = BehaviorEntry(
+        world_ref=WORLD_REF,
+        entry_id="tomori-frontier",
+        source_id="tomori-prior-decision",
+        commit_position=CommitPosition(world_version=1),
+        root_session_id_at_commit="session-tomori",
+        topology_version=1,
+        actor_agent_id="tomori",
+        occurred_at=NOW,
+        text="Tomori gathers her thoughts.",
+        created_at=NOW,
+        operation_id="gather_thoughts",
+    )
+
+    plan = WorldChangeValidator(WORLD_REF, (OBJECT_SEED,)).plan(
+        proposal,
+        view,
+        state,
+        created_at=NOW,
+        previous_entries=(target_frontier,),
+    )
+
+    assert isinstance(plan.entry, SessionTransitionEntry)
+    assert len(plan.links) == 1
+    assert plan.links[0].related_entry_id == target_frontier.entry_id
+    assert plan.links[0].relation_order == 0
 
 
 def test_object_plan_uses_trusted_operation_result_and_changes_state(runtime: _Runtime) -> None:

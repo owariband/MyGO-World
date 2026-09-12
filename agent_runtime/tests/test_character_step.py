@@ -29,10 +29,10 @@ from agent_runtime.agent.personact.storage import PersonaStateStore, StoredPerso
 from agent_runtime.agent.skill import RuntimeSkillCatalog
 from agent_runtime.bootstrap import create_world, load_world
 from agent_runtime.event.character_step import CharacterStep, CharacterStepError
+from agent_runtime.event.runner import WorldRunner
 from agent_runtime.scenario import ObjectSeed
 from agent_runtime.sqlite import ProjectDatabase, open_project_database
 from agent_runtime.world.contracts import (
-    ActAction,
     ActionProposal,
     Affordance,
     CharacterTarget,
@@ -266,7 +266,6 @@ def test_object_operation_commits_trusted_entry_and_metronome_state(
 @pytest.mark.parametrize(
     ("kind", "status"),
     [
-        pytest.param(ProposalKind.ACT, WorldUpdateStatus.NOT_APPLIED, id="not-applied"),
         pytest.param(ProposalKind.WAIT, WorldUpdateStatus.WAIT, id="wait"),
         pytest.param(
             ProposalKind.NO_OP,
@@ -281,7 +280,6 @@ def test_entryless_outcomes_are_durable_and_immediate_retry_skips_strategy(
     status: WorldUpdateStatus,
 ) -> None:
     builders = {
-        ProposalKind.ACT: _act,
         ProposalKind.WAIT: _wait,
         ProposalKind.NO_OP: _no_op,
     }
@@ -454,6 +452,40 @@ def test_paused_world_rejects_step_before_strategy(runtime: _Runtime) -> None:
         runtime.step.run("anon", decision_id)
 
     assert tuple(runtime.harness.calls) == calls_before
+
+
+def test_unscheduled_step_cannot_bypass_a_runner_owned_or_active_dispatch(
+    runtime: _Runtime,
+) -> None:
+    bypass_id = runtime.step.next_decision_id("soyo")
+    calls_before = tuple(runtime.harness.calls)
+    runner = WorldRunner(
+        database=runtime.database,
+        world_ref=runtime.world_ref,
+        character_step=runtime.step,
+        owner_id="runner-owner",
+    )
+    try:
+        runner.resume(additional_decisions=1)
+        with pytest.raises(CharacterStepError, match="requires a CharacterDispatch"):
+            runtime.step.next_decision_id("soyo")
+
+        dispatch = runner.next_dispatch()
+        assert dispatch is not None
+        with pytest.raises(CharacterStepError, match="requires a CharacterDispatch"):
+            runtime.step.next_decision_id("soyo")
+        with pytest.raises(CharacterStepError, match="requires a CharacterDispatch"):
+            runtime.step.run("soyo", bypass_id)
+
+        with runtime.database.session_factory() as session:
+            world = WorldStore(runtime.world_ref).load(session).world
+        assert world.active_dispatch_count == dispatch.dispatch_count
+        assert world.active_dispatch_agent_id == dispatch.agent_id
+        assert world.current_version == 1
+        assert world.decision_seq == 0
+        assert tuple(runtime.harness.calls) == calls_before
+    finally:
+        runner.close()
 
 
 @pytest.mark.parametrize(
@@ -635,11 +667,6 @@ def _start_metronome(planning_input: ActionPlanningInput) -> ProposalDraft:
             description="Start the metronome.",
         )
     )
-
-
-def _act(planning_input: ActionPlanningInput) -> ProposalDraft:
-    _affordance(planning_input, ProposalKind.ACT)
-    return ProposalDraft(action=ActAction(description="Look around the rehearsal room."))
 
 
 def _wait(planning_input: ActionPlanningInput) -> ProposalDraft:

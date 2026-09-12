@@ -1,6 +1,6 @@
 # M3 开发记录：单步世界与认知提交
 
-> 状态：**REVIEW**；M3.1–M3.4 实现与自动验收已完成，当前为未提交 worktree，等待用户 Review。
+> 状态：**DONE**；M3.1–M3.4 实现与自动验收已完成，代码提交 `ecc29c0` 已推送。
 > 日期：2026-09-11
 > 开发基线：`master@5d2f496`（M2 已提交并推送）。
 > 总计划：[dev_plan_MVP.md](dev_plan_MVP.md#m3-单步世界与认知提交)
@@ -912,10 +912,10 @@ generative_go_world/
 
 | ID | 交付范围 | 独立验收 / Review 重点 | 状态 / 证据 |
 | --- | --- | --- | --- |
-| M3.1 | strict EventEntry/link/recipient/request；稳定 operation/affordance；Alembic 0002 与 Store | 两层 World 隔离；source/position 唯一；复合 FK；append-only；reply DAG；Scenario operation 不接受任意 patch | REVIEW · [实现与验收](#12-实现与验收记录) |
-| M3.2 | WorldChangeValidator/WorldUpdater；Agent private update；World/Agent/decision 同事务 | SQL CAS；applied/not_applied/wait/no_op；state revision；事务内不调用模型；逐 checkpoint 全回滚 | REVIEW · [实现与验收](#12-实现与验收记录) |
-| M3.3 | AgentViewBuilder 与历史 recipient/request 可见性 | actor/target/旁听/另一 root/whisper 参数化矩阵；隐藏 link 不泄漏；pending request 不因 cursor 丢失；调用顺序无关 | REVIEW · [实现与验收](#12-实现与验收记录) |
-| M3.4 | CharacterStep 与 utter→respond、Object operation 可重载 Fixture | 关闭连接重载一致；相同 decision/source 不重复；错 World、paused、stale 全丢弃；M4 可直接复用单步路径 | REVIEW · [实现与验收](#12-实现与验收记录) |
+| M3.1 | strict EventEntry/link/recipient/request；稳定 operation/affordance；Alembic 0002 与 Store | 两层 World 隔离；source/position 唯一；复合 FK；append-only；reply DAG；Scenario operation 不接受任意 patch | DONE · `ecc29c0`，[实现与验收](#12-实现与验收记录) |
+| M3.2 | WorldChangeValidator/WorldUpdater；Agent private update；World/Agent/decision 同事务 | SQL CAS；applied/not_applied/wait/no_op；state revision；事务内不调用模型；逐 checkpoint 全回滚 | DONE · `ecc29c0`，[实现与验收](#12-实现与验收记录) |
+| M3.3 | AgentViewBuilder 与历史 recipient/request 可见性 | actor/target/旁听/另一 root/whisper 参数化矩阵；隐藏 link 不泄漏；pending request 不因 cursor 丢失；调用顺序无关 | DONE · `ecc29c0`，[实现与验收](#12-实现与验收记录) |
+| M3.4 | CharacterStep 与 utter→respond、Object operation 可重载 Fixture | 关闭连接重载一致；相同 decision/source 不重复；错 World、paused、stale 全丢弃；M4 可直接复用单步路径 | DONE · `ecc29c0`，[实现与验收](#12-实现与验收记录) |
 
 ## 11. 阶段门禁
 
@@ -938,7 +938,7 @@ M3 只有在以下证据全部取得后才能进入实现 Review；用户确认�
 
 ### 12.1 交付结论
 
-M3.1–M3.4 已全部实现并通过自动门禁，当前状态为 `REVIEW · uncommitted worktree`。现在可以从 Project SQLite 的 committed snapshot 为一个角色构造 `AgentView`，在写事务外执行一次 disposable `PersonActAgent` 决策，再把公共 World、`EventEntry`、request、PersonaState 与 Memory 原子提交；进程关闭后可从数据库恢复一致结果。
+M3.1–M3.4 已全部实现、通过自动门禁并随 `ecc29c0` 推送。现在可以从 Project SQLite 的 committed snapshot 为一个角色构造 `AgentView`，在写事务外执行一次 disposable `PersonActAgent` 决策，再把公共 World、`EventEntry`、request、PersonaState 与 Memory 原子提交；进程关闭后可从数据库恢复一致结果。
 
 四个工作单元的实际结果：
 
@@ -1048,7 +1048,7 @@ Runtime 比预计上限多 163 行，主要来自独立 Review 后增加的 reci
 
 关键行为测试还包括六个 transaction checkpoint 全回滚、Object 移位与伪造 transition 拒绝、历史 applied replay、四种 outcome、旧无 Entry ID、跨 Agent ID、rollback 后同 ID 重试、Project/World 隔离以及关闭 Engine 后 paused reload。
 
-未执行真实 Provider 的自然对话品质测试；它不属于 M3 自动门禁。当前改动尚未 commit/push，待用户 Review 后再决定提交。
+未执行真实 Provider 的自然对话品质测试；它不属于 M3 自动门禁。M3 实现已以 `ecc29c0` 提交并推送，阶段计划与历史校准文档为 `d30d778`。
 
 ### 12.5 M4 交接约束
 

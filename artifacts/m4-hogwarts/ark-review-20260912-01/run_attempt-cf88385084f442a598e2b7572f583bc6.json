@@ -1,0 +1,113 @@
+{
+  "formatVersion": 1,
+  "attemptId": "cf88385084f442a598e2b7572f583bc6",
+  "worldRef": {
+    "projectId": "mygo-hogwarts",
+    "worldId": "ark-review-20260912-01"
+  },
+  "seedHash": "051f44481c211277d4203a8923f727eed601903895f828811c2dff32e468a302",
+  "mode": "model",
+  "provider": "ark",
+  "modelId": "ep-20260911234324-7ws4c",
+  "agents": [
+    {
+      "agentId": "anon",
+      "specDigest": "7d96a330661cac97a1de6131daa74e03b80e5a157e84f872f756d819b076c80f",
+      "skillId": "mygo.character.anon",
+      "skillVersion": "3.0.0",
+      "skillContentHash": "37613c45a063538a5710df1ee100f9afcf5d6ad8fec171bc7ba0ed00802eff11"
+    },
+    {
+      "agentId": "mutsumi",
+      "specDigest": "11ca4fcde2d3c829dcb7c868bf4d07c8a510bbb51242b58bf402a97e7ba1ee95",
+      "skillId": "mygo.character.mutsumi",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "ecae61a96d4485554573018651a57bae7b83ee8a40723e9e2a8e295b5c7baa7b"
+    },
+    {
+      "agentId": "nyamu",
+      "specDigest": "ca20e68ab5e1b58cdd08252306cf0744799c18c31ae56025b82f7208676043af",
+      "skillId": "mygo.character.nyamu",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "e1a2c997993c14adb35a811813b02b72b03c11b471b9a0ea33491fec33a8af09"
+    },
+    {
+      "agentId": "rana",
+      "specDigest": "ccfc3c08f441b9cf874ae97b5faef4368e1e40bdd6e0e6c1e5f709bac148951a",
+      "skillId": "mygo.character.rana",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "65d7e6b90a6720f2dcd87140e7fc19534aee0bf8b3b83820e4605459ec45b947"
+    },
+    {
+      "agentId": "sakiko",
+      "specDigest": "fe806782ffb7991198003f0077a6fd7f07411fe9294cf080f42f5f1c2e77189e",
+      "skillId": "mygo.character.sakiko",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "8f38c8f4b590459397a6df80b4a85ffee6bf6b0777d43580d6cb1adede9e424f"
+    },
+    {
+      "agentId": "soyo",
+      "specDigest": "83ff182121ef1bdf417c9c394de4493301b414a68283669a88676e0bd5d4ccf8",
+      "skillId": "mygo.character.soyo",
+      "skillVersion": "2.0.0",
+      "skillContentHash": "5de4a7137164a0d115d76d6aa3d581996ed11411929e665e8bd008b10470e7ef"
+    },
+    {
+      "agentId": "taki",
+      "specDigest": "62e03971ea49bf37b83f014cbddf0afbae097cdc29e5037f43471f21533fd05d",
+      "skillId": "mygo.character.taki",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "d9b55f13d7ed588f22d9f4a6a51e3066a8b7ecec81fa090de0f5f9097fdf3513"
+    },
+    {
+      "agentId": "tomori",
+      "specDigest": "8b6764a1c167f88d936f2b3d1a05e42d4abca44146ff3a5cea8fb169240470c8",
+      "skillId": "mygo.character.tomori",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "af7afcd7080cc8c63edeac24ab008abbb861b71fa89d8d8bea26581d534464c6"
+    },
+    {
+      "agentId": "uika",
+      "specDigest": "ccc87ef3ee4d63b4cb08887a31fd37a29bb7e9d983e35a16389d33a44df66b18",
+      "skillId": "mygo.character.uika",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "5b96262b23d16d635e14393c6c77a446cefb442bac18a9e3b2f92c077fd2789f"
+    },
+    {
+      "agentId": "umiri",
+      "specDigest": "d1e84dd4ea9bed555c1cd0e5717ff6051b3588dc0ec3a575eb0e8d6d1d76f414",
+      "skillId": "mygo.character.umiri",
+      "skillVersion": "1.0.0",
+      "skillContentHash": "b9bc6268f99593c628cf6c2acf4331bbf720f013be541f148a7227b7644900d9"
+    }
+  ],
+  "createdWorld": false,
+  "dispatchCountBefore": 40,
+  "dispatchLimitBefore": 40,
+  "additionalDecisions": 20,
+  "providerCallLimit": 120,
+  "providerGenerateCount": 42,
+  "outcome": "completed",
+  "dispatchCountAfter": 60,
+  "dispatchLimitAfter": 60,
+  "successfulStepCount": 20,
+  "successfulAgentIds": [
+    "anon",
+    "mutsumi",
+    "nyamu",
+    "rana",
+    "sakiko",
+    "soyo",
+    "taki",
+    "tomori",
+    "uika",
+    "umiri"
+  ],
+  "failedDispatches": [],
+  "finalWorldVersion": 60,
+  "finalDecisionSeq": 59,
+  "finalStatus": "paused",
+  "stopReason": "budget_exhausted",
+  "tracePath": "projects/mygo-hogwarts/.runtime/traces/ark-review-20260912-01/747ef18bd7054125abe484d9641faa12.jsonl",
+  "storylinePath": "artifacts/m4-hogwarts/ark-review-20260912-01/storyline.json"
+}

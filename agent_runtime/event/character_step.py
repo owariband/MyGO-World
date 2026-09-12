@@ -7,8 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
+from typing import Annotated
 
 from langchain_core.runnables import RunnableConfig
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from agent_runtime.agent.memory import EmbeddingProvider, MemoryStream
@@ -22,7 +24,16 @@ from agent_runtime.model import StrictModel
 from agent_runtime.scenario import ObjectSeed
 from agent_runtime.sqlite import ProjectDatabase
 from agent_runtime.trace import LocalTrace
-from agent_runtime.world.contracts import ActionProposal, AgentView, RespondAction, WorldRef
+from agent_runtime.world.contracts import (
+    ActionProposal,
+    AgentView,
+    ControlEpoch,
+    DecisionSequence,
+    Identifier,
+    RespondAction,
+    WorldRef,
+    WorldVersion,
+)
 from agent_runtime.world.entries import DialogueEntry, EventEntry, InteractionRequest
 from agent_runtime.world.entry_storage import EventEntryStore
 from agent_runtime.world.state import PublicWorldState, WorldStatus
@@ -51,12 +62,26 @@ class CharacterStepResult(StrictModel):
     persona_state_revision: int
 
 
+class CharacterDispatch(StrictModel):
+    """One pre-charged model attempt issued only by the World Runner."""
+
+    world_ref: WorldRef
+    owner_id: Identifier
+    agent_id: Identifier
+    dispatch_count: Annotated[int, Field(ge=1)]
+    decision_id: Identifier
+    control_epoch: ControlEpoch
+    based_on_world_version: WorldVersion
+    based_on_decision_seq: DecisionSequence
+    priority_request_entry_id: Identifier | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class _ReadSnapshot:
     public_state: PublicWorldState
     persona: StoredPersonaState
     memory: MemoryStream
-    previous_entry: EventEntry | None
+    previous_entries: tuple[EventEntry, ...]
     pending_requests: tuple[InteractionRequest, ...]
     pending_sources: tuple[DialogueEntry, ...]
 
@@ -116,14 +141,17 @@ class CharacterStep:
             raise CharacterStepError(f'Agent "{agent_id}" has no compiled PersonAct spec')
         with self._database.session_factory() as session:
             public_state = self._world_store.load(session)
-        if public_state.world.status is not WorldStatus.RUNNING:
+        world = public_state.world
+        if world.status is not WorldStatus.RUNNING:
             raise CharacterStepError("World must be running before issuing a decision")
+        if world.run_owner_id is not None or world.active_dispatch_count is not None:
+            raise CharacterStepError("a Runner-owned World requires a CharacterDispatch")
         return _decision_id(
             self._world_ref,
             agent_id=agent_id,
-            world_version=public_state.world.current_version,
-            control_epoch=public_state.world.control_epoch,
-            decision_seq=public_state.world.decision_seq,
+            world_version=world.current_version,
+            control_epoch=world.control_epoch,
+            decision_seq=world.decision_seq,
         )
 
     def run(
@@ -142,7 +170,50 @@ class CharacterStep:
         if spec is None:
             raise CharacterStepError(f'Agent "{agent_id}" has no compiled PersonAct spec')
 
-        snapshot, view, replay = self._read(agent_id, decision_id, spec)
+        return self._run(
+            agent_id,
+            decision_id,
+            spec,
+            dispatch=None,
+            config=config,
+            checkpoint=checkpoint,
+        )
+
+    def run_dispatch(
+        self,
+        dispatch: CharacterDispatch,
+        *,
+        config: RunnableConfig | None = None,
+        checkpoint: Callable[[str], None] | None = None,
+    ) -> CharacterStepResult:
+        """Run exactly one pre-charged dispatch from the durable Runner."""
+
+        dispatch = CharacterDispatch.model_validate(dispatch, strict=True)
+        if dispatch.world_ref != self._world_ref:
+            raise CharacterStepError("CharacterDispatch belongs to another WorldRef")
+        spec = self._specs.get(dispatch.agent_id)
+        if spec is None:
+            raise CharacterStepError(f'Agent "{dispatch.agent_id}" has no compiled PersonAct spec')
+        return self._run(
+            dispatch.agent_id,
+            dispatch.decision_id,
+            spec,
+            dispatch=dispatch,
+            config=config,
+            checkpoint=checkpoint,
+        )
+
+    def _run(
+        self,
+        agent_id: str,
+        decision_id: str,
+        spec: CompiledPersonActSpec,
+        *,
+        dispatch: CharacterDispatch | None,
+        config: RunnableConfig | None,
+        checkpoint: Callable[[str], None] | None,
+    ) -> CharacterStepResult:
+        snapshot, view, replay = self._read(agent_id, decision_id, spec, dispatch=dispatch)
         if replay is not None:
             return replay
         if snapshot is None or view is None:
@@ -168,9 +239,14 @@ class CharacterStep:
             view,
             snapshot.public_state,
             created_at=self._clock(),
-            previous_entry=snapshot.previous_entry,
+            previous_entries=snapshot.previous_entries,
             response_request=response_request,
             response_source=response_source,
+            dispatch_count=(dispatch.dispatch_count if dispatch is not None else None),
+            run_owner_id=(dispatch.owner_id if dispatch is not None else None),
+            priority_request_entry_id=(
+                dispatch.priority_request_entry_id if dispatch is not None else None
+            ),
         )
         committed_version = plan.expected_world_version + (
             1 if plan.status is WorldUpdateStatus.APPLIED else 0
@@ -217,6 +293,8 @@ class CharacterStep:
         agent_id: str,
         decision_id: str,
         spec: CompiledPersonActSpec,
+        *,
+        dispatch: CharacterDispatch | None,
     ) -> tuple[_ReadSnapshot | None, AgentView | None, CharacterStepResult | None]:
         with self._database.session_factory() as session, session.begin():
             public_state = self._world_store.load(session)
@@ -234,13 +312,27 @@ class CharacterStep:
                 return None, None, replay
             if public_state.world.status is not WorldStatus.RUNNING:
                 raise CharacterStepError("World must be running before a Character step")
-            expected_decision_id = _decision_id(
-                self._world_ref,
-                agent_id=agent_id,
-                world_version=public_state.world.current_version,
-                control_epoch=public_state.world.control_epoch,
-                decision_seq=public_state.world.decision_seq,
-            )
+            if dispatch is None:
+                if (
+                    public_state.world.run_owner_id is not None
+                    or public_state.world.active_dispatch_count is not None
+                ):
+                    raise CharacterStepError("a Runner-owned World requires a CharacterDispatch")
+                expected_decision_id = _decision_id(
+                    self._world_ref,
+                    agent_id=agent_id,
+                    world_version=public_state.world.current_version,
+                    control_epoch=public_state.world.control_epoch,
+                    decision_seq=public_state.world.decision_seq,
+                )
+            else:
+                self._require_dispatch(public_state, dispatch)
+                expected_decision_id = dispatch_decision_id(
+                    self._world_ref,
+                    agent_id=agent_id,
+                    control_epoch=dispatch.control_epoch,
+                    dispatch_count=dispatch.dispatch_count,
+                )
             if decision_id != expected_decision_id:
                 raise CharacterStepError(
                     "decision_id does not match the current World decision fence"
@@ -250,13 +342,25 @@ class CharacterStep:
                 session,
                 agent_id=agent_id,
                 observed_through=persona.observation_cursor,
+                priority_request_entry_id=(
+                    dispatch.priority_request_entry_id if dispatch is not None else None
+                ),
+                restrict_pending_priority=dispatch is not None,
             )
-            actor_session = next(
-                item for item in public_state.sessions if item.agent_id == agent_id
+            line_keys = sorted(
+                {(item.root_session_id, item.topology_version) for item in public_state.sessions}
             )
-            previous_entry = self._entry_store.latest_for_root(
-                session,
-                actor_session.root_session_id,
+            previous_entries = tuple(
+                entry
+                for root_session_id, topology_version in line_keys
+                if (
+                    entry := self._entry_store.latest_for_line(
+                        session,
+                        root_session_id,
+                        topology_version,
+                    )
+                )
+                is not None
             )
             pending_requests = self._entry_store.pending_requests_for(session, agent_id)
             pending_sources: list[DialogueEntry] = []
@@ -270,13 +374,40 @@ class CharacterStep:
                 public_state=public_state,
                 persona=persona,
                 memory=memory,
-                previous_entry=previous_entry,
+                previous_entries=previous_entries,
                 pending_requests=pending_requests,
                 pending_sources=tuple(pending_sources),
             ),
             view,
             None,
         )
+
+    def _require_dispatch(
+        self,
+        public_state: PublicWorldState,
+        dispatch: CharacterDispatch,
+    ) -> None:
+        world = public_state.world
+        expected = (
+            self._world_ref,
+            world.run_owner_id,
+            world.active_dispatch_agent_id,
+            world.active_dispatch_count,
+            world.control_epoch,
+            world.current_version,
+            world.decision_seq,
+        )
+        actual = (
+            dispatch.world_ref,
+            dispatch.owner_id,
+            dispatch.agent_id,
+            dispatch.dispatch_count,
+            dispatch.control_epoch,
+            dispatch.based_on_world_version,
+            dispatch.based_on_decision_seq,
+        )
+        if actual != expected:
+            raise CharacterStepError("CharacterDispatch does not match the active World token")
 
     def _replay_result(
         self,
@@ -359,6 +490,32 @@ def _decision_id(
         world_version,
         control_epoch,
         decision_seq,
+    )
+    canonical = json.dumps(
+        identity,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    return f"decision-{sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
+def dispatch_decision_id(
+    world_ref: WorldRef,
+    *,
+    agent_id: str,
+    control_epoch: int,
+    dispatch_count: int,
+) -> str:
+    """Derive the non-reusable source identity for one charged model attempt."""
+
+    identity = (
+        "character-dispatch/v1",
+        world_ref.project_id,
+        world_ref.world_id,
+        control_epoch,
+        dispatch_count,
+        agent_id,
     )
     canonical = json.dumps(
         identity,

@@ -136,4 +136,15 @@
 
 - 实现 M3.1–M3.4 单步世界与认知提交：Scenario operation、append-only EventEntry/request、精确 recipient snapshot、AgentViewBuilder、World/Persona/Memory 原子提交和可重载 CharacterStep 已落地；Scheduler、Session merge/split、Director 与 Broadcast 仍留在后续阶段。
 - 独立 Review 后补齐 Object/recipient 写边界、fence-bound decision ID、历史 replay 位置语义、六 checkpoint 回滚和 `0002` 中途故障回滚；M3 专项 63 项、完整 Python 442 项与 Node 14 项通过，Ruff、Pyright、Alembic、wheel 和 diff 门禁全绿。
-- M3 当前为 `REVIEW · uncommitted worktree`。M4 必须把调度 cursor、wakeup、额度和公平轮转进度接入 CharacterStep 的同一写事务，不能在角色决定提交后另开事务保存调度状态。
+- M3 实现已以 `ecc29c0` 提交并推送；计划与历史校准文档提交为 `d30d778`。M4 必须把模型前预扣与模型后 outcome 事务清晰分开，Session/Entry/Persona/Memory/调度完成不能出现半提交。
+- 新增 [M4 开发记录](design/M4_dev_log.md)：冻结首个可运行 Demo 的边界，按 M4.1–M4.4 规划有界 Runner、自主 join/leave/transfer、StoryLine DAG 和 pause/load/resume；预计生产 3.2–4.8k 行、测试 3.0–4.8k 行，并以约 96 个新增确定性用例和跨进程恢复作为完成合同。
+- 用户提高 M4 完成合同：Fixture 仍证明确定性机制，但 M4 DONE 还必须交付 MyGO × Hogwarts 十人真实 DeepSeek flash 群演；接受 World 中由模型 Proposal 实际提交 add 与 split，并提交脱敏 `run_manifest.json`、raw `storyline.json`、standalone `storyline.html` 与 review，Provider 失败不能再降格为可选 smoke。
+- 新增 [M4 MyGO × Hogwarts 群演场景](design/M4_hogwarts_demo.md)：依据 BanG Dream! 与 Harry Potter 官方资料，分离角色事实、Prompt 推断和 AU；按用户九人名单补八幡海铃为第十人，其 Hufflepuff 分院仍待确认。总计划与 M4 文件树、规模、测试和 M4.0/M4.5–M4.7 交付顺序同步更新。
+
+## 2026-09-12
+
+- 完成 M4 Runner、EventSession merge/split/transfer、StoryLine DAG、pause/load/resume、Ark Provider 装配、十人 Hogwarts 项目与离线审片 Viewer；当前 checkpoint 准备提交并推送到 `master`。
+- World `ark-review-20260912-01` 完成三段真实 Ark 运行：79 个成功角色步骤、176 次逻辑 Provider 调用、78 条 committed Entry，产生 1 merge + 5 transfer、0 split。真实链路通过，但按既定硬门禁不接受为 M4 最终证据；失败也真实的 manifest、StoryLine、HTML 与 review 保留。
+- Viewer 收敛为横向 worktree A 款：每个点直接展示中文“谁对谁说了什么 / 谁做了什么”，拓扑按 join/merge 汇线、leave/split 分线；移除固定高度限制框，并增加 `npm run story:html -- <artifact-dir>` 自动生成入口。
+- Scenario 升级到 v2，爱音 Skill 固定为 3.1.0，并以项目目标、关系和私有记忆强调暗恋爽世；增加弗立维教授的魔咒实践、漂浮咒羽毛和魔药课共鸣药剂坩埚。旧真实 World 保持 v1 历史，新内容只用于新 World。
+- M5 工程依赖已经具备，可以从 D-044 约束下的 DirectorView/EventStaffDecision strict contract 开始；M4 仍保留真实 split 与 SIGINT/SIGKILL 子进程证据两项债务，未完成前不标 DONE。Broadcast 继续属于 M6。

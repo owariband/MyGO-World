@@ -12,6 +12,7 @@ from agent_runtime.agent.personact.errors import ProposalValidationError
 from agent_runtime.agent.personact.state import PlanDisposition
 from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import (
+    ActAction,
     ActionProposal,
     Affordance,
     AgentAction,
@@ -104,7 +105,7 @@ def _matches_affordance(action: AgentAction, affordance: Affordance) -> bool:
     if affordance.kind is not ProposalKind(action.kind) or affordance.target != _target(action):
         return False
     if (
-        isinstance(action, (InteractAction, UtterAction, RespondAction))
+        isinstance(action, (ActAction, InteractAction, UtterAction, RespondAction))
         and action.affordance_id != affordance.affordance_id
     ):
         return False

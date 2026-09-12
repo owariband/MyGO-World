@@ -12,6 +12,7 @@ from agent_runtime.world.entry_storage import (
     EventEntryLinkRow,
     EventEntryRecipientRow,
     EventEntryRow,
+    EventSessionTransitionPartRow,
     InteractionRequestRow,
 )
 from agent_runtime.world.storage import (
@@ -41,6 +42,7 @@ _MAPPED_ROWS = (
     EventEntryLinkRow,
     EventEntryRecipientRow,
     InteractionRequestRow,
+    EventSessionTransitionPartRow,
     AgentRuntimeStateRow,
     MemoryRow,
 )

@@ -67,7 +67,7 @@ class WorldConfigurationMismatchError(WorldBootstrapError):
 
 
 class WorldStatusError(WorldBootstrapError):
-    """M2 cannot safely load a World that is not paused."""
+    """A World lifecycle read was attempted from an unsupported status."""
 
 
 # These values are persisted inside every PersonaState. Changing the default only
@@ -86,7 +86,7 @@ MVP_COGNITIVE_CONFIG_V1 = CognitiveConfig(
 
 @dataclass(frozen=True, slots=True)
 class LoadedWorld:
-    """Trusted all-role assembly of a paused save, never an Agent/Director view."""
+    """Trusted all-role assembly of a save, never an Agent/Director view."""
 
     public_state: PublicWorldState
     specs: tuple[CompiledPersonActSpec, ...]
@@ -181,7 +181,51 @@ def load_world(
             f'World "{world_ref.world_id}" does not exist in Project "{world_ref.project_id}"'
         ) from error
     try:
-        return _load_prepared_world(database, source, specs, world_ref=world_ref)
+        return _load_prepared_world(
+            database,
+            source,
+            specs,
+            world_ref=world_ref,
+            allowed_statuses=frozenset((WorldStatus.PAUSED,)),
+        )
+    finally:
+        database.dispose()
+
+
+def load_world_for_resume(
+    repository_root: Path,
+    project_id: str,
+    world_id: str,
+    *,
+    catalog: Catalog,
+) -> LoadedWorld:
+    """Load Runtime inputs before a fenced resume, including a stale-running save.
+
+    This function is read-only and does not grant ownership.  A caller must still
+    acquire the WorldRunner file lock and call ``resume`` before invoking an Agent.
+    """
+
+    source = load_project_scenario(repository_root / "projects", project_id)
+    specs = _compile_specs(source, catalog)
+    world_ref = WorldRef(project_id=project_id, world_id=world_id)
+    try:
+        database = open_project_database(
+            repository_root / ".runtime",
+            project_id,
+            create=False,
+        )
+    except ProjectDatabaseNotFoundError as error:
+        raise WorldNotFoundError(
+            f'World "{world_ref.world_id}" does not exist in Project "{world_ref.project_id}"'
+        ) from error
+    try:
+        return _load_prepared_world(
+            database,
+            source,
+            specs,
+            world_ref=world_ref,
+            allowed_statuses=frozenset((WorldStatus.PAUSED, WorldStatus.RUNNING)),
+        )
     finally:
         database.dispose()
 
@@ -435,6 +479,7 @@ def _load_prepared_world(
     source: LoadedScenario,
     specs: tuple[CompiledPersonActSpec, ...],
     world_ref: WorldRef,
+    allowed_statuses: frozenset[WorldStatus],
 ) -> LoadedWorld:
     store = WorldStore(world_ref)
     with database.session_factory() as session, session.begin():
@@ -446,7 +491,13 @@ def _load_prepared_world(
         persona_states = PersonaStateStore(world_ref).load_all_for_bootstrap(session)
         stored_streams = MemoryStore(world_ref).load_all_for_bootstrap(session)
 
-    _require_configuration_match(public_state, persona_states, source, specs)
+    _require_configuration_match(
+        public_state,
+        persona_states,
+        source,
+        specs,
+        allowed_statuses=allowed_statuses,
+    )
     streams = _complete_memory_streams(world_ref, specs, stored_streams)
     _require_initial_memories_present(world_ref, source, specs, streams)
     return LoadedWorld(
@@ -483,16 +534,24 @@ def _require_configuration_match(
     persona_states: tuple[StoredPersonaState, ...],
     source: LoadedScenario,
     specs: tuple[CompiledPersonActSpec, ...],
+    *,
+    allowed_statuses: frozenset[WorldStatus],
 ) -> None:
     world = public_state.world
     expected_seed = (source.seed.seed_id, source.seed.version, source.seed_hash)
     actual_seed = (world.seed_id, world.seed_version, world.seed_hash)
     if actual_seed != expected_seed:
         raise WorldConfigurationMismatchError("saved Scenario identity does not match sources")
-    if world.status is not WorldStatus.PAUSED:
+    if world.status not in allowed_statuses:
+        if allowed_statuses == frozenset((WorldStatus.PAUSED,)):
+            raise WorldStatusError(
+                f'World loader can only load paused Worlds; "{world.world_ref.world_id}" is '
+                f'"{world.status.value}"'
+            )
+        expected = ", ".join(sorted(status.value for status in allowed_statuses))
         raise WorldStatusError(
-            f'M2 can only load paused Worlds; "{world.world_ref.world_id}" is '
-            f'"{world.status.value}"'
+            f'World "{world.world_ref.world_id}" is "{world.status.value}"; '
+            f"expected one of: {expected}"
         )
 
     expected_digests = {spec.agent_id: spec.digest for spec in specs}

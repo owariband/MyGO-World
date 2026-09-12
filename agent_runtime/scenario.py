@@ -343,6 +343,18 @@ def _validate_manifest_and_seed(manifest: Manifest, seed: ScenarioSeed) -> None:
 
     known_agents = frozenset(manifest_agent_ids)
     for agent in manifest.agents:
+        relationship_targets = tuple(
+            relationship.target_id for relationship in agent.persona.relationships
+        )
+        _require_unique(
+            relationship_targets,
+            f'relationship targets for agent "{agent.id}"',
+            ScenarioReferenceError,
+        )
+        if agent.id in relationship_targets:
+            raise ScenarioReferenceError(
+                f'agent "{agent.id}" cannot target itself as a relationship'
+            )
         for relationship in agent.persona.relationships:
             if relationship.target_id not in known_agents:
                 raise ScenarioReferenceError(

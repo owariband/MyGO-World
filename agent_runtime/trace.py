@@ -23,7 +23,7 @@ from agent_runtime.model import StrictModel
 from agent_runtime.world.contracts import WorldRef
 
 logger = logging.getLogger(__name__)
-AgentKind = Literal["character", "director", "broadcast"]
+AgentKind = Literal["character", "director", "broadcast", "runtime"]
 
 
 class TraceRecord(StrictModel):

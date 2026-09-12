@@ -1,0 +1,393 @@
+formatVersion: 1
+projectId: mygo-hogwarts
+seedId: room-of-requirement-opening
+version: 2
+worldTime: "2026-09-11T17:10:00+01:00"
+
+locations:
+  - id: room-of-requirement
+    name: 有求必应屋
+    description: >-
+      Hogwarts 城堡里的隐藏房间，因十名四年级学生需要完成魔咒课与魔药课联合实践而出现。
+      房间仿照魔咒学教室布置了四组课桌、漂浮咒练习区与一口黄铜坩埚；四组相隔交谈，
+      但所有人仍能看见同一批公开教具。
+
+objects:
+  - id: resonance-calibrator
+    name: 共鸣校准器
+    kind: magical-instrument
+    description: 一枚悬在中央工作台上的黄铜音叉，会把不稳定的魔法共鸣显示为不同颜色。
+    locationId: room-of-requirement
+    state: uncalibrated
+    operations:
+      - operationId: calibrate
+        fromState: uncalibrated
+        toState: calibrated
+        resultText: 共鸣校准器发出清澈的基准音，原本游移的颜色稳定下来。
+  - id: constellation-score
+    name: 星图谱页
+    kind: magical-score
+    description: 一张折叠的深蓝谱页，表面有会随音高移动的银色星点。
+    locationId: room-of-requirement
+    state: folded
+    operations:
+      - operationId: unfold
+        fromState: folded
+        toState: open
+        resultText: 星图谱页在桌面展开，银色星点排列成等待演奏的旋律轨迹。
+  - id: enchanted-keyboard
+    name: 魔法键盘
+    kind: magical-instrument
+    description: 一架会让和弦化作可见光纹的键盘，目前琴键没有发光。
+    locationId: room-of-requirement
+    state: muted
+    operations:
+      - operationId: awaken
+        fromState: muted
+        toState: resonating
+        resultText: 魔法键盘被唤醒，按键上方浮现出等待接续的微弱光纹。
+  - id: floating-metronome
+    name: 浮空节拍器
+    kind: magical-instrument
+    description: 一台悬在鼓架旁的木制节拍器，可以为分散的演奏者提供同一个拍点。
+    locationId: room-of-requirement
+    state: stopped
+    operations:
+      - operationId: start
+        fromState: stopped
+        toState: ticking
+        resultText: 浮空节拍器开始摆动，清楚的拍点传遍房间。
+  - id: self-writing-score
+    name: 自动记谱羊皮纸
+    kind: magical-score
+    description: 一卷配有羽毛笔的羊皮纸，只会记录房间里已经实际奏出的声音。
+    locationId: room-of-requirement
+    state: idle
+    operations:
+      - operationId: begin-recording
+        fromState: idle
+        toState: recording
+        resultText: 羽毛笔浮到羊皮纸上方，开始等待下一段真实奏出的旋律。
+  - id: levitation-feathers
+    name: 漂浮咒练习羽毛
+    kind: charms-practice
+    description: 弗立维教授留下的一排白色羽毛，需要用标准咒语和清晰的魔杖动作稳定悬浮。
+    locationId: room-of-requirement
+    state: resting
+    operations:
+      - operationId: cast-wingardium-leviosa
+        fromState: resting
+        toState: levitating
+        resultText: “Wingardium Leviosa”咒音落下，白色羽毛依次升起，在课桌上方稳定悬浮。
+  - id: resonance-cauldron
+    name: 共鸣药剂坩埚
+    kind: potion-cauldron
+    description: >-
+      一口装着魔药课半成品的黄铜坩埚，艾草浸液与月长石粉已经称量好，必须按正确方向
+      搅拌并控制火候，才能成为承载声音魔咒的共鸣药剂。
+    locationId: room-of-requirement
+    state: ingredients-measured
+    operations:
+      - operationId: brew-resonance-draught
+        fromState: ingredients-measured
+        toState: simmering
+        resultText: 坩埚被顺时针搅拌三圈，银蓝色药液开始小火翻涌，散出可供声音魔咒附着的薄雾。
+
+publicFacts:
+  - id: cross-house-assignment
+    subject:
+      kind: location
+      id: room-of-requirement
+    predicate: current_assignment
+    object: charms_and_potions_practicum
+    content: >-
+      弗立维教授布置了四年级跨院联合实践：在晚餐前，以至少两个学院的声音完成一次
+      稳定的声音魔咒；必须实际挥杖施咒，并使用上午魔药课留下的共鸣药剂作为魔力媒介，
+      不能只靠讨论宣称完成。谱页、校准器、乐器、羽毛与坩埚需要由学生自行组合与调整。
+  - id: charms-practicum-rules
+    subject:
+      kind: location
+      id: room-of-requirement
+    predicate: current_lesson
+    object: fourth_year_charms_practicum
+    content: >-
+      当前是弗立维教授安排的四年级魔咒学实践时段。每组至少要完成一次有明确咒音、
+      魔杖动作和可观察结果的施咒；漂浮咒练习羽毛可用于校验“Wingardium Leviosa”的稳定性。
+  - id: potions-carryover
+    subject:
+      kind: object
+      id: resonance-cauldron
+    predicate: prepared_during
+    object: fourth_year_potions
+    content: >-
+      共鸣药剂的配料来自当天上午的四年级魔药课。艾草浸液、月长石粉、顺时针三圈和
+      持续小火都是板书上的必要步骤；顺序错误会让药液失去承载声音魔咒的能力。
+  - id: dinner-deadline
+    subject:
+      kind: world
+    predicate: deadline
+    object: "18:30"
+    content: 晚餐在十八点三十分开始，共鸣实践需要在那之前完成或提交当前结果。
+  - id: fourth-year-course-context
+    subject:
+      kind: world
+    predicate: school_year
+    object: fourth_year
+    content: >-
+      十人都是 Hogwarts 四年级学生。当天上午刚上完魔药课，现在正在完成魔咒课联合实践；
+      本周还要继续变形术、草药学、天文学、魔法史与黑魔法防御术，以及各自选择的选修课。
+  - id: room-appeared-for-shared-need
+    subject:
+      kind: location
+      id: room-of-requirement
+    predicate: appeared_for
+    object: shared_practice_need
+    content: 有求必应屋因十人共同需要跨院魔法合奏空间而出现，离开后未必仍以相同布置开放。
+  - id: tomori-house
+    subject:
+      kind: agent
+      id: tomori
+    predicate: house_membership
+    object: gryffindor
+    content: 高松灯是 Gryffindor 狮院学生。
+  - id: taki-house
+    subject:
+      kind: agent
+      id: taki
+    predicate: house_membership
+    object: gryffindor
+    content: 椎名立希是 Gryffindor 狮院学生。
+  - id: soyo-house
+    subject:
+      kind: agent
+      id: soyo
+    predicate: house_membership
+    object: hufflepuff
+    content: 长崎爽世是 Hufflepuff 獾院学生。
+  - id: uika-house
+    subject:
+      kind: agent
+      id: uika
+    predicate: house_membership
+    object: hufflepuff
+    content: 三角初华是 Hufflepuff 獾院学生。
+  - id: umiri-house
+    subject:
+      kind: agent
+      id: umiri
+    predicate: house_membership
+    object: hufflepuff
+    content: 八幡海铃是 Hufflepuff 獾院学生。
+  - id: sakiko-house
+    subject:
+      kind: agent
+      id: sakiko
+    predicate: house_membership
+    object: slytherin
+    content: 丰川祥子是 Slytherin 蛇院学生。
+  - id: nyamu-house
+    subject:
+      kind: agent
+      id: nyamu
+    predicate: house_membership
+    object: slytherin
+    content: 祐天寺若麦是 Slytherin 蛇院学生。
+  - id: mutsumi-house
+    subject:
+      kind: agent
+      id: mutsumi
+    predicate: house_membership
+    object: ravenclaw
+    content: 若叶睦是 Ravenclaw 鹰院学生。
+  - id: anon-house
+    subject:
+      kind: agent
+      id: anon
+    predicate: house_membership
+    object: ravenclaw
+    content: 千早爱音是 Ravenclaw 鹰院学生。
+  - id: rana-house
+    subject:
+      kind: agent
+      id: rana
+    predicate: house_membership
+    object: ravenclaw
+    content: 要乐奈是 Ravenclaw 鹰院学生。
+
+agents:
+  - agentId: tomori
+    locationId: room-of-requirement
+    sessionId: session-tomori
+    publicStatus: 正和立希在靠窗工作台听一段尚未稳定的旋律
+  - agentId: taki
+    locationId: room-of-requirement
+    sessionId: session-taki
+    publicStatus: 正检查靠窗工作台的节奏记录和实践要求
+  - agentId: soyo
+    locationId: room-of-requirement
+    sessionId: session-soyo
+    publicStatus: 正与初华、海铃清点分配到的谱页和材料
+  - agentId: uika
+    locationId: room-of-requirement
+    sessionId: session-uika
+    publicStatus: 正观察深蓝谱页上的银色星点
+  - agentId: umiri
+    locationId: room-of-requirement
+    sessionId: session-umiri
+    publicStatus: 正核对器材状态、截止时间和缺少的分工
+  - agentId: sakiko
+    locationId: room-of-requirement
+    sessionId: session-sakiko
+    publicStatus: 正与若麦讨论一份尚未完成的整体编排
+  - agentId: nyamu
+    locationId: room-of-requirement
+    sessionId: session-nyamu
+    publicStatus: 正寻找最适合成为全场焦点的魔法效果
+  - agentId: mutsumi
+    locationId: room-of-requirement
+    sessionId: session-mutsumi
+    publicStatus: 正安静地调试吉他并留意房间里的声音
+  - agentId: anon
+    locationId: room-of-requirement
+    sessionId: session-anon
+    publicStatus: 正和睦、乐奈讨论怎样让其他小组也参与进来
+  - agentId: rana
+    locationId: room-of-requirement
+    sessionId: session-rana
+    publicStatus: 正凭直觉寻找房间里最有趣的共鸣
+
+initialPartitions:
+  - rootSessionId: session-tomori
+    memberSessionIds: [session-tomori, session-taki]
+  - rootSessionId: session-soyo
+    memberSessionIds: [session-soyo, session-uika, session-umiri]
+  - rootSessionId: session-sakiko
+    memberSessionIds: [session-sakiko, session-nyamu]
+  - rootSessionId: session-mutsumi
+    memberSessionIds: [session-mutsumi, session-anon, session-rana]
+
+knowledge:
+  - id: shared-assignment-briefing
+    kind: event
+    subject: the ten students
+    predicate: received
+    object: cross-house resonance assignment
+    content: >-
+      十个人都读过弗立维教授的公开作业：晚餐前需要让至少两个学院的声音形成稳定魔咒，
+      实际挥杖、漂浮咒练习与上午魔药课留下的共鸣药剂都要留下可观察结果；作业没有指定
+      谁必须和谁合作，也没有指定唯一组合方法。
+    poignancy: 3.0
+    tags: [assignment, shared, deadline]
+    recipients:
+      kind: all
+  - id: shared-session-context
+    kind: thought
+    subject: the ten students
+    predicate: recognizes
+    object: separate conversations in one room
+    content: 十个人都能看见房间里的公开物件，但此刻四组人正在各自交谈，同处一室不等于已经加入对方的交流。
+    poignancy: 2.0
+    tags: [shared, conversation, room]
+    recipients:
+      kind: all
+  - id: uika-recognizes-sakiko-motif
+    kind: thought
+    subject: uika
+    predicate: recognizes
+    object: sakiko arrangement motif
+    content: 初华听出祥子远处试奏的和弦里有一段像她们小时候写过的旋律，但其他人还没有注意到。
+    poignancy: 5.0
+    tags: [private, sakiko, music]
+    recipients:
+      kind: explicit
+      agentIds: [uika]
+  - id: mutsumi-notices-soyo-strain
+    kind: thought
+    subject: mutsumi
+    predicate: notices
+    object: soyo hidden strain
+    content: 睦从爽世整理谱页的动作看出她比表面更紧张，但爽世没有公开说起原因。
+    poignancy: 5.0
+    tags: [private, soyo, relationship]
+    recipients:
+      kind: explicit
+      agentIds: [mutsumi]
+  - id: umiri-spots-taki-calibration-gap
+    kind: thought
+    subject: umiri
+    predicate: identifies
+    object: calibration gap
+    content: 海铃判断立希一组的节奏记录很完整，但缺少能把不同工作台音高对齐的校准步骤。
+    poignancy: 4.0
+    tags: [private, taki, calibration]
+    recipients:
+      kind: explicit
+      agentIds: [umiri]
+  - id: nyamu-sees-stage-potential
+    kind: thought
+    subject: nyamu
+    predicate: imagines
+    object: visible magical performance
+    content: 若麦认为键盘光纹与自动记谱羊皮纸组合起来可能形成全场最醒目的效果，但还没有向祥子提出。
+    poignancy: 4.0
+    tags: [private, performance, opportunity]
+    recipients:
+      kind: explicit
+      agentIds: [nyamu]
+  - id: rana-hears-unstable-resonance
+    kind: thought
+    subject: rana
+    predicate: hears
+    object: tomori group resonance
+    content: 乐奈听见灯和立希那一侧有一段不稳定却很有趣的共鸣，比当前讨论更吸引她。
+    poignancy: 5.0
+    tags: [private, tomori, music]
+    recipients:
+      kind: explicit
+      agentIds: [rana]
+  - id: anon-wants-broader-group
+    kind: plan
+    subject: anon
+    predicate: considers
+    object: inviting another group
+    content: 爱音在考虑先问清睦和乐奈的想法，再主动邀请另一组一起试验，避免有人被直接替她决定。
+    poignancy: 4.0
+    tags: [private, initiative, collaboration]
+    recipients:
+      kind: explicit
+      agentIds: [anon]
+  - id: anon-wants-soyo-partnership
+    kind: thought
+    subject: anon
+    predicate: hopes_for
+    object: a charms and potions partnership with soyo
+    content: >-
+      爱音清楚自己正在暗恋爽世。她想借这次魔咒课与魔药课联合实践自然地和爽世搭档、
+      帮上她并听见她真正的想法；她也提醒自己不能把爽世礼貌的配合擅自当成感情回应。
+    poignancy: 8.0
+    tags: [private, soyo, romance, charms, potions]
+    recipients:
+      kind: explicit
+      agentIds: [anon]
+  - id: sakiko-estimates-cross-house-gap
+    kind: plan
+    subject: sakiko
+    predicate: identifies
+    object: missing cross-house contribution
+    content: 祥子知道仅靠自己与若麦无法满足跨院要求，正在评估哪一组能力最适合纳入完整编排。
+    poignancy: 5.0
+    tags: [private, organization, collaboration]
+    recipients:
+      kind: explicit
+      agentIds: [sakiko]
+  - id: tomori-connects-stars-and-voices
+    kind: thought
+    subject: tomori
+    predicate: associates
+    object: constellation score
+    content: 灯觉得星图谱页移动的光点很像彼此分开却可能连成形状的声音，但还没有把这个想法说出来。
+    poignancy: 4.0
+    tags: [private, stars, music]
+    recipients:
+      kind: explicit
+      agentIds: [tomori]

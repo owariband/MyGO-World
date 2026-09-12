@@ -501,6 +501,47 @@ def test_manifest_relationship_targets_must_resolve_in_same_project(tmp_path: Pa
         load_project_scenario(projects, "test-project")
 
 
+@pytest.mark.parametrize("invalid", ["self", "duplicate"])
+def test_manifest_relationships_are_directed_unique_non_self_edges(
+    tmp_path: Path,
+    invalid: str,
+) -> None:
+    projects = tmp_path / "projects"
+    project_dir = _write_project(projects, "test-project")
+    manifest = json.loads(_manifest_text("test-project"))
+    agents = cast(list[dict[str, object]], manifest["agents"])
+    owner = agents[0]
+    persona = cast(dict[str, object], owner["persona"])
+    relationships = cast(list[dict[str, object]], persona["relationships"])
+    if invalid == "self":
+        relationships[0]["targetId"] = owner["id"]
+    else:
+        relationships.append(deepcopy(relationships[0]))
+    _write_json(project_dir / "agents.json", cast(dict[str, object], manifest))
+
+    expected = "cannot target itself" if invalid == "self" else "must be unique"
+    with pytest.raises(ScenarioReferenceError, match=expected):
+        load_project_scenario(projects, "test-project")
+
+
+@pytest.mark.parametrize("affinity", [-101, 101, "80", True])
+def test_manifest_affinity_is_a_strict_bounded_integer(
+    tmp_path: Path,
+    affinity: object,
+) -> None:
+    projects = tmp_path / "projects"
+    project_dir = _write_project(projects, "test-project")
+    manifest = json.loads(_manifest_text("test-project"))
+    agents = cast(list[dict[str, object]], manifest["agents"])
+    persona = cast(dict[str, object], agents[0]["persona"])
+    relationships = cast(list[dict[str, object]], persona["relationships"])
+    relationships[0]["affinity"] = affinity
+    _write_json(project_dir / "agents.json", cast(dict[str, object], manifest))
+
+    with pytest.raises(ScenarioDecodeError):
+        load_project_scenario(projects, "test-project")
+
+
 def test_expanded_scenario_knowledge_cannot_collide_with_agent_memory(
     tmp_path: Path,
 ) -> None:

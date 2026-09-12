@@ -47,6 +47,11 @@ def test_smoke_uses_gold_skill_and_three_calls_for_exactly_one_proposal() -> Non
     planning_input = json.loads(gateway.requests[1].input_json)
     action_input = json.loads(gateway.requests[2].input_json)
     assert planning_input["state"]["planQueue"] == []
+    relationship = planning_input["spec"]["persona"]["relationships"][0]
+    assert relationship["familiarity"] == "familiar"
+    assert relationship["affinity"] == 0
+    assert "private and directional" in gateway.requests[1].system_prompt
+    assert "private, non-reciprocal" in gateway.requests[2].system_prompt
     assert len(planning_input["observations"]) == 1
     assert planning_input["memory"]["records"][0]["embedding"] == []
     assert action_input["state"]["activePlanId"] == "coffee"

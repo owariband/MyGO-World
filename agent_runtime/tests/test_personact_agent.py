@@ -1049,6 +1049,7 @@ def _view(
                 affordance_id=AFFORDANCE_ID,
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
     )
@@ -1087,6 +1088,7 @@ def _single_candidate_view(
                 affordance_id=AFFORDANCE_ID,
                 kind=ProposalKind.INTERACT,
                 target=CharacterTarget(id="soyo"),
+                operation_id="join_target_session",
             ),
         ),
     )
